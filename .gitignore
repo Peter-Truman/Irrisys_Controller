@@ -1,0 +1,20 @@
+# Build outputs
+*.hex
+*.elf
+*.map
+*.lst
+*.obj
+*.o
+
+# XC8 compiler
+*.cmf
+*.hxl
+*.sdb
+*.pre
+*.sym
+*.d
+*.p1
+
+# Temp files
+*.bak
+*.tmp
