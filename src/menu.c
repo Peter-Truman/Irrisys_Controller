@@ -1,6 +1,6 @@
 /**
- * IRRISYS - Menu System (Stable Version)
- * Simplified for 32MHz operation
+ * IRRISYS - Menu System with Stable Edit Mode
+ * Optimized for 32MHz operation - WORKING VERSION
  */
 
 #include "../include/config.h"
@@ -11,6 +11,8 @@
 
 // Menu state - make it accessible
 menu_state_t menu;
+static char original_value[10];      // Store original value for cancellation
+static uint8_t enable_edit_flag = 1; // 1=Enabled, 0=Disabled
 
 // Test menu items for OPTIONS menu
 const char *options_menu[] = {
@@ -131,17 +133,36 @@ void menu_draw_input(void)
                 // Edit mode - parentheses stay solid, only value blinks
                 if (menu.blink_state)
                 {
-                    sprintf(value_buf, "(%s)", input_menu[item_idx].value);
+                    // Show text with solid parentheses
+                    if (item_idx == 0) // Enable item
+                    {
+                        sprintf(value_buf, "(%s)", enable_edit_flag ? "Enabled" : "Disabled");
+                    }
+                    else
+                    {
+                        sprintf(value_buf, "(%s)", input_menu[item_idx].value);
+                    }
                 }
                 else
                 {
-                    // Keep parentheses visible, blank the value inside
-                    uint8_t val_len = strlen(input_menu[item_idx].value);
-                    char blank[10] = "(";
-                    for (uint8_t j = 0; j < val_len; j++)
-                        strcat(blank, " ");
-                    strcat(blank, ")");
-                    strcpy(value_buf, blank);
+                    // Show just parentheses with spaces inside (text disappears)
+                    if (item_idx == 0) // Enable item
+                    {
+                        uint8_t val_len = strlen(enable_edit_flag ? "Enabled" : "Disabled");
+                        sprintf(value_buf, "(");
+                        for (uint8_t j = 0; j < val_len; j++)
+                            strcat(value_buf, " ");
+                        strcat(value_buf, ")");
+                    }
+                    else
+                    {
+                        uint8_t val_len = strlen(input_menu[item_idx].value);
+                        char blank[10] = "(";
+                        for (uint8_t j = 0; j < val_len; j++)
+                            strcat(blank, " ");
+                        strcat(blank, ")");
+                        strcpy(value_buf, blank);
+                    }
                 }
             }
             else
@@ -165,13 +186,18 @@ void menu_draw_input(void)
     }
 }
 
-// Handle encoder rotation - SIMPLIFIED VERSION
+// Handle encoder rotation - STABLE VERSION WITH GLOBAL FLAG
 void menu_handle_encoder(int16_t delta)
 {
-    // Skip edit mode entirely for now - just do navigation
+    // Edit mode - only handle Enable item
     if (menu.in_edit_mode)
     {
-        return; // Do nothing in edit mode until we debug
+        if (delta != 0 && menu.current_line == 0) // Only Enable item
+        {
+            // Toggle the global flag - NO string operations during editing
+            enable_edit_flag = !enable_edit_flag;
+        }
+        return;
     }
 
     // Normal navigation when not in edit mode
@@ -205,25 +231,64 @@ void menu_handle_encoder(int16_t delta)
     }
 }
 
-// Handle button press - SIMPLIFIED VERSION
+// Handle button press - UPDATE VALUE ON EXIT
 void menu_handle_button(uint8_t press_type)
 {
-    // Temporarily disable edit mode
     if (menu.in_edit_mode)
     {
-        // Just exit edit mode
-        menu.in_edit_mode = 0;
-        menu.blink_state = 1;
-        beep(50);
-        return;
+        if (press_type == 1)
+        {
+            // Short press - save and exit edit mode
+            // Update the actual value buffer when exiting edit mode
+            if (menu.current_line == 0) // Enable item
+            {
+                if (enable_edit_flag)
+                {
+                    strcpy(value_enable, "Enabled");
+                }
+                else
+                {
+                    strcpy(value_enable, "Disabled");
+                }
+            }
+
+            menu.in_edit_mode = 0;
+            menu.blink_state = 1;
+            beep(50);
+        }
+        else if (press_type == 2)
+        {
+            // Long press - cancel edit mode and restore original
+            if (menu.current_line == 0)
+            {
+                // Restore flag to match original value
+                enable_edit_flag = (original_value[0] == 'E') ? 1 : 0;
+            }
+            menu.in_edit_mode = 0;
+            menu.blink_state = 1;
+            beep(100);
+        }
     }
     else
     {
         if (press_type == 1)
         {
-            // Don't enter edit mode yet - just beep for confirmation
-            beep(50);
-            // TODO: Re-enable edit mode once navigation is stable
+            // Short press - enter edit mode (only for Enable item for now)
+            if (input_menu[menu.current_line].editable && menu.current_line == 0)
+            {
+                // Save original value and sync flag
+                strcpy(original_value, input_menu[menu.current_line].value);
+                enable_edit_flag = (value_enable[0] == 'E') ? 1 : 0;
+
+                menu.in_edit_mode = 1;
+                menu.blink_timer = 0;
+                menu.blink_state = 1;
+                beep(50);
+            }
+            else
+            {
+                beep(50); // Just beep for non-editable items
+            }
         }
         else if (press_type == 3)
         {

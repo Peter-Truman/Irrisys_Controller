@@ -273,14 +273,14 @@ void main(void)
 
     while (1)
     {
-        // Debug counter to help identify correct COM port
+        /*// Debug counter to help identify correct COM port
         static uint16_t loop_counter = 0;
         loop_counter++;
         if (loop_counter >= 10000) // Print every 10000 loops
         {
             loop_counter = 0;
             uart_println("Main loop running...");
-        }
+        }*/
 
         // Check encoder rotation
         if (encoder_count != last_encoder)
@@ -382,7 +382,7 @@ void main(void)
         if (menu.in_edit_mode)
         {
             blink_timer++;
-            if (blink_timer >= 8000) // Fast blinking
+            if (blink_timer >= 30000) // Fast blinking
             {
                 blink_timer = 0;
                 menu.blink_state = !menu.blink_state;
