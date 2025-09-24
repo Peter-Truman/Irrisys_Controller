@@ -11,6 +11,13 @@
 
 // Menu state - make it accessible
 menu_state_t menu;
+static char original_value[10]; // Store original value for cancellation
+
+// Options for each editable field
+const char *enable_options[] = {"Enabled", "Disabled"};
+const char *sensor_options[] = {"Pressure", "Float", "External"};
+const char *relay_options[] = {"Latch", "Pulse", "Auto"};
+const char *display_options[] = {"Show", "Hide"};
 
 // Test menu items for OPTIONS menu
 const char *options_menu[] = {
@@ -168,13 +175,79 @@ void menu_draw_input(void)
 // Handle encoder rotation
 void menu_handle_encoder(int16_t delta)
 {
-    // If in edit mode, just beep for now (value changing crashes LCD)
+    // If in edit mode, cycle through available options
     if (menu.in_edit_mode)
     {
         if (delta != 0)
         {
-            beep(5); // Just beep to show we're in edit mode
-            // TODO: Fix value editing without crashing
+            uint8_t item_idx = menu.current_line;
+
+            // Only handle items that have options defined
+            if (item_idx == 0) // Enable item
+            {
+                // Simple toggle for Enable/Disable
+                if (input_menu[0].value[0] == 'E') // Currently "Enabled"
+                {
+                    strcpy(input_menu[0].value, "Disabled");
+                }
+                else // Currently "Disabled" or anything else
+                {
+                    strcpy(input_menu[0].value, "Enabled");
+                }
+                beep(5);
+            }
+            else if (item_idx == 1) // Sensor item
+            {
+                // Cycle through Pressure -> Float -> External
+                if (input_menu[1].value[0] == 'P') // "Pressure"
+                {
+                    strcpy(input_menu[1].value, delta > 0 ? "Float" : "External");
+                }
+                else if (input_menu[1].value[0] == 'F') // "Float"
+                {
+                    strcpy(input_menu[1].value, delta > 0 ? "External" : "Pressure");
+                }
+                else // "External" or anything else
+                {
+                    strcpy(input_menu[1].value, delta > 0 ? "Pressure" : "Float");
+                }
+                beep(5);
+            }
+            else if (item_idx >= 7 && item_idx <= 9) // Relay items
+            {
+                // Cycle through Latch -> Pulse -> Auto
+                if (input_menu[item_idx].value[0] == 'L') // "Latch"
+                {
+                    strcpy(input_menu[item_idx].value, delta > 0 ? "Pulse" : "Auto");
+                }
+                else if (input_menu[item_idx].value[0] == 'P') // "Pulse"
+                {
+                    strcpy(input_menu[item_idx].value, delta > 0 ? "Auto" : "Latch");
+                }
+                else // "Auto" or anything else
+                {
+                    strcpy(input_menu[item_idx].value, delta > 0 ? "Latch" : "Pulse");
+                }
+                beep(5);
+            }
+            else if (item_idx == 10) // Display item
+            {
+                // Simple toggle for Show/Hide
+                if (input_menu[10].value[0] == 'S') // Currently "Show"
+                {
+                    strcpy(input_menu[10].value, "Hide");
+                }
+                else // Currently "Hide" or anything else
+                {
+                    strcpy(input_menu[10].value, "Show");
+                }
+                beep(5);
+            }
+            else
+            {
+                // For other items, just beep
+                beep(5);
+            }
         }
         return;
     }
@@ -223,10 +296,12 @@ void menu_handle_button(uint8_t press_type)
             menu.in_edit_mode = 0;
             menu.blink_state = 1; // Reset blink state
             beep(50);
+            // TODO: Save to EEPROM here
         }
         else if (press_type == 2)
         {
-            // Long press - cancel edit mode (should restore original value)
+            // Long press - cancel edit mode and restore original value
+            strcpy(input_menu[menu.current_line].value, original_value);
             menu.in_edit_mode = 0;
             menu.blink_state = 1; // Reset blink state
             beep(100);
@@ -239,6 +314,8 @@ void menu_handle_button(uint8_t press_type)
             // Short press - enter edit mode or select item
             if (input_menu[menu.current_line].editable)
             {
+                // Save original value before entering edit mode
+                strcpy(original_value, input_menu[menu.current_line].value);
                 menu.in_edit_mode = 1;
                 menu.blink_timer = 0;
                 menu.blink_state = 1;
