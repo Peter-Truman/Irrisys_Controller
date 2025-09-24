@@ -11,7 +11,9 @@
 #include <stdio.h>
 #include <string.h>
 
-// Configuration bits
+#define _XTAL_FREQ 32000000 // 32MHz with PLL
+
+// Configuration bits for PIC18F2525
 #pragma config OSC = INTIO67  // Internal oscillator, port function on RA6 and RA7
 #pragma config FCMEN = OFF    // Fail-Safe Clock Monitor disabled
 #pragma config IESO = OFF     // Oscillator Switchover mode disabled
@@ -44,19 +46,18 @@
 #pragma config EBTR2 = OFF
 #pragma config EBTRB = OFF // Boot block table read protection off
 
-// UART functions
 void uart_init(void)
 {
-    // Configure TX (RC6) as output
+    // Configure TX (RC6) as output, RX (RC7) as input
     TRISCbits.TRISC6 = 0;
-    TRISCbits.TRISC7 = 1; // RX as input
+    TRISCbits.TRISC7 = 1;
 
     // 115200 baud at 32MHz
-    TXSTA = 0x24;   // TX enabled, BRGH=1
+    TXSTA = 0x24;   // TX enabled, BRGH=1 (high speed)
     RCSTA = 0x90;   // Serial port enabled, continuous receive
-    BAUDCON = 0x08; // BRG16=1
+    BAUDCON = 0x08; // BRG16=1 (16-bit baud rate generator)
     SPBRGH = 0;
-    SPBRG = 68; // 115200 baud at 32MHz
+    SPBRG = 68; // For 115200 baud at 32MHz
 }
 
 void uart_write(char c)
@@ -84,24 +85,25 @@ void uart_println(const char *str)
 // System initialization
 void system_init(void)
 {
-    // Configure internal oscillator for 8MHz with PLL = 32MHz
-    OSCCON = 0x72;  // 8MHz internal osc with PLL enabled
-    OSCTUNE = 0x40; // PLL enabled
+    // Use the EXACT sequence that worked before
+    OSCCON = 0x70;  // 8MHz internal oscillator FIRST
+    OSCTUNE = 0x40; // THEN enable 4x PLL
 
     // Wait for oscillator to stabilize
     while (!OSCCONbits.IOFS)
         ;
 
-    // Configure all ports as digital
-    ADCON1 = 0x0F; // All pins digital
+    // Configure all pins as digital
+    ADCON1 = 0x0F;
 
     // Initialize port directions
-    TRISA = 0x00; // PORTA all outputs (LCD)
-    TRISB = 0xFF; // PORTB all inputs (encoder, buttons)
-    TRISC = 0x00; // PORTC all outputs (buzzer, UART TX)
+    TRISA = 0x00;
+    TRISB = 0xFF;
+    TRISC = 0x00;
+    TRISCbits.TRISC7 = 1;
 
     // Enable weak pull-ups on PORTB
-    INTCON2bits.RBPU = 0; // Enable PORTB pull-ups
+    INTCON2bits.RBPU = 0;
 
     // Clear all outputs
     LATA = 0x00;
@@ -264,20 +266,29 @@ void main(void)
     menu_draw_options();
 
     int16_t last_encoder = encoder_count;
-    uint32_t blink_timer = 0;
+    uint16_t blink_timer = 0;
     uint8_t was_editing = 0;
 
     uart_println("Entering main loop");
 
     while (1)
     {
+        // Debug counter to help identify correct COM port
+        static uint16_t loop_counter = 0;
+        loop_counter++;
+        if (loop_counter >= 10000) // Print every 10000 loops
+        {
+            loop_counter = 0;
+            uart_println("Main loop running...");
+        }
+
         // Check encoder rotation
         if (encoder_count != last_encoder)
         {
             int16_t delta = encoder_count - last_encoder;
 
-            // Add encoder tick sound
-            beep(10);
+            // Add encoder tick sound - commented out for better performance
+            // beep(1);
 
             char buf[40];
             sprintf(buf, "Encoder: %d, Delta: %d", encoder_count, delta);
@@ -371,7 +382,7 @@ void main(void)
         if (menu.in_edit_mode)
         {
             blink_timer++;
-            if (blink_timer >= 10000) // Reduced from 50000 for better responsiveness
+            if (blink_timer >= 8000) // Fast blinking
             {
                 blink_timer = 0;
                 menu.blink_state = !menu.blink_state;
@@ -385,8 +396,6 @@ void main(void)
         {
             blink_timer = 0; // Reset when not in edit mode
         }
-
-        // Small delay to prevent CPU hogging and improve responsiveness
-        __delay_us(100);
     }
+    __delay_us(200);
 }
