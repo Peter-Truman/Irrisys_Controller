@@ -1,6 +1,6 @@
 /**
  * IRRISYS - Menu System with Stable Edit Mode
- * Optimized for 32MHz operation - WORKING VERSION
+ * Optimized for 32MHz operation - Enable + Sensor
  */
 
 #include "../include/config.h"
@@ -13,6 +13,7 @@
 menu_state_t menu;
 static char original_value[10];      // Store original value for cancellation
 static uint8_t enable_edit_flag = 1; // 1=Enabled, 0=Disabled
+static uint8_t sensor_edit_flag = 0; // 0=Pressure, 1=Temperature, 2=Flow
 
 // Test menu items for OPTIONS menu
 const char *options_menu[] = {
@@ -24,7 +25,7 @@ const char *options_menu[] = {
 
 // Buffers for editable values - must be modifiable
 static char value_enable[10] = "Enabled";
-static char value_sensor[10] = "Pressure";
+static char value_sensor[12] = "Pressure";
 static char value_scale4[10] = "000";
 static char value_scale20[10] = "100";
 static char value_highbp[10] = "05:00";
@@ -124,7 +125,8 @@ void menu_draw_input(void)
         lcd_print_at(i + 1, 0, input_menu[item_idx].label);
 
         // Right side - value with brackets if this line is selected
-        char value_buf[12];
+        char value_buf[20];                      // Larger buffer
+        memset(value_buf, 0, sizeof(value_buf)); // Clear it completely
 
         if (item_idx == menu.current_line)
         {
@@ -138,6 +140,11 @@ void menu_draw_input(void)
                     {
                         sprintf(value_buf, "(%s)", enable_edit_flag ? "Enabled" : "Disabled");
                     }
+                    else if (item_idx == 1) // Sensor item
+                    {
+                        const char *sensor_options[] = {"Pressure", "Temp", "Flow"};
+                        sprintf(value_buf, "(%s)", sensor_options[sensor_edit_flag]);
+                    }
                     else
                     {
                         sprintf(value_buf, "(%s)", input_menu[item_idx].value);
@@ -149,6 +156,15 @@ void menu_draw_input(void)
                     if (item_idx == 0) // Enable item
                     {
                         uint8_t val_len = strlen(enable_edit_flag ? "Enabled" : "Disabled");
+                        sprintf(value_buf, "(");
+                        for (uint8_t j = 0; j < val_len; j++)
+                            strcat(value_buf, " ");
+                        strcat(value_buf, ")");
+                    }
+                    else if (item_idx == 1) // Sensor item
+                    {
+                        const char *sensor_options[] = {"Pressure", "Temp", "Flow"};
+                        uint8_t val_len = strlen(sensor_options[sensor_edit_flag]);
                         sprintf(value_buf, "(");
                         for (uint8_t j = 0; j < val_len; j++)
                             strcat(value_buf, " ");
@@ -177,25 +193,50 @@ void menu_draw_input(void)
             strcpy(value_buf, input_menu[item_idx].value);
         }
 
-        // Right justify at column 19
+        // Right justify at column 19 - clear line first
         uint8_t val_len = strlen(value_buf);
         if (val_len > 0 && strcmp(input_menu[item_idx].value, "") != 0)
         {
+            // Clear the right side of the line first (columns 8-19)
+            lcd_set_cursor(i + 1, 8);
+            lcd_print("            "); // 12 spaces to clear columns 8-19
+
+            // Now print the value at the correct position
             lcd_print_at(i + 1, 20 - val_len, value_buf);
         }
     }
 }
 
-// Handle encoder rotation - STABLE VERSION WITH GLOBAL FLAG
+// Handle encoder rotation - ENABLE AND SENSOR SUPPORT
 void menu_handle_encoder(int16_t delta)
 {
-    // Edit mode - only handle Enable item
+    // Edit mode - handle Enable and Sensor items
     if (menu.in_edit_mode)
     {
-        if (delta != 0 && menu.current_line == 0) // Only Enable item
+        if (delta != 0)
         {
-            // Toggle the global flag - NO string operations during editing
-            enable_edit_flag = !enable_edit_flag;
+            if (menu.current_line == 0) // Enable item
+            {
+                // Toggle between Enabled/Disabled
+                enable_edit_flag = !enable_edit_flag;
+            }
+            else if (menu.current_line == 1) // Sensor item
+            {
+                // Cycle through 3 options: 0=Pressure, 1=Temperature, 2=Flow
+                if (delta > 0)
+                {
+                    sensor_edit_flag++;
+                    if (sensor_edit_flag > 2)
+                        sensor_edit_flag = 0; // Wrap around
+                }
+                else
+                {
+                    if (sensor_edit_flag == 0)
+                        sensor_edit_flag = 2; // Wrap around
+                    else
+                        sensor_edit_flag--;
+                }
+            }
         }
         return;
     }
@@ -231,7 +272,7 @@ void menu_handle_encoder(int16_t delta)
     }
 }
 
-// Handle button press - UPDATE VALUE ON EXIT
+// Handle button press - ENABLE AND SENSOR SUPPORT
 void menu_handle_button(uint8_t press_type)
 {
     if (menu.in_edit_mode)
@@ -239,17 +280,14 @@ void menu_handle_button(uint8_t press_type)
         if (press_type == 1)
         {
             // Short press - save and exit edit mode
-            // Update the actual value buffer when exiting edit mode
             if (menu.current_line == 0) // Enable item
             {
-                if (enable_edit_flag)
-                {
-                    strcpy(value_enable, "Enabled");
-                }
-                else
-                {
-                    strcpy(value_enable, "Disabled");
-                }
+                strcpy(value_enable, enable_edit_flag ? "Enabled" : "Disabled");
+            }
+            else if (menu.current_line == 1) // Sensor item
+            {
+                const char *sensor_options[] = {"Pressure", "Temperature", "Flow"};
+                strcpy(value_sensor, sensor_options[sensor_edit_flag]);
             }
 
             menu.in_edit_mode = 0;
@@ -259,10 +297,20 @@ void menu_handle_button(uint8_t press_type)
         else if (press_type == 2)
         {
             // Long press - cancel edit mode and restore original
-            if (menu.current_line == 0)
+            if (menu.current_line == 0) // Enable item
             {
                 // Restore flag to match original value
                 enable_edit_flag = (original_value[0] == 'E') ? 1 : 0;
+            }
+            else if (menu.current_line == 1) // Sensor item
+            {
+                // Restore sensor flag to match original value
+                if (strcmp(original_value, "Pressure") == 0)
+                    sensor_edit_flag = 0;
+                else if (strcmp(original_value, "Temperature") == 0)
+                    sensor_edit_flag = 1;
+                else
+                    sensor_edit_flag = 2; // Flow
             }
             menu.in_edit_mode = 0;
             menu.blink_state = 1;
@@ -273,12 +321,26 @@ void menu_handle_button(uint8_t press_type)
     {
         if (press_type == 1)
         {
-            // Short press - enter edit mode (only for Enable item for now)
-            if (input_menu[menu.current_line].editable && menu.current_line == 0)
+            // Short press - enter edit mode (Enable and Sensor items)
+            if (input_menu[menu.current_line].editable && (menu.current_line == 0 || menu.current_line == 1))
             {
-                // Save original value and sync flag
+                // Save original value and sync flags
                 strcpy(original_value, input_menu[menu.current_line].value);
-                enable_edit_flag = (value_enable[0] == 'E') ? 1 : 0;
+
+                if (menu.current_line == 0) // Enable item
+                {
+                    enable_edit_flag = (value_enable[0] == 'E') ? 1 : 0;
+                }
+                else if (menu.current_line == 1) // Sensor item
+                {
+                    // Sync sensor flag with current value
+                    if (strcmp(value_sensor, "Pressure") == 0)
+                        sensor_edit_flag = 0;
+                    else if (strcmp(value_sensor, "Temperature") == 0)
+                        sensor_edit_flag = 1;
+                    else
+                        sensor_edit_flag = 2; // Flow
+                }
 
                 menu.in_edit_mode = 1;
                 menu.blink_timer = 0;

@@ -927,12 +927,16 @@ TOSU equ 0FFFh ;#
 	FNCALL	_uart_println,_uart_write
 	FNCALL	_uart_print,_uart_write
 	FNCALL	_menu_handle_button,_beep
+	FNCALL	_menu_handle_button,_strcmp
 	FNCALL	_menu_handle_button,_strcpy
 	FNCALL	_menu_draw_options,_lcd_clear_line
 	FNCALL	_menu_draw_options,_lcd_print
 	FNCALL	_menu_draw_options,_lcd_print_at
 	FNCALL	_menu_draw_input,_lcd_clear_line
+	FNCALL	_menu_draw_input,_lcd_print
 	FNCALL	_menu_draw_input,_lcd_print_at
+	FNCALL	_menu_draw_input,_lcd_set_cursor
+	FNCALL	_menu_draw_input,_memset
 	FNCALL	_menu_draw_input,_sprintf
 	FNCALL	_menu_draw_input,_strcat
 	FNCALL	_menu_draw_input,_strcmp
@@ -956,14 +960,15 @@ TOSU equ 0FFFh ;#
 	FNCALL	intlevel2,_isr
 	global	intlevel2
 	FNROOT	intlevel2
-	global	menu_draw_input@F2299
-	global	_options_menu
+	global	menu_draw_input@F2301
+	global	menu_draw_input@F2297
 	global	_enable_edit_flag
 	global	_last_btn
-	global	_value_enable
-	global	_value_scale4
-	global	_value_sensor
+	global	_options_menu
+	global	menu_handle_button@F2312
 	global	_input_menu
+	global	menu_draw_input@F2306
+	global	_value_sensor
 	global	_value_display
 	global	_value_rlyslp
 	global	_value_rlyplp
@@ -972,24 +977,50 @@ TOSU equ 0FFFh ;#
 	global	_value_plpbp
 	global	_value_highbp
 	global	_value_scale20
+	global	_value_scale4
+	global	_value_enable
 psect	idataCOMRAM,class=CODE,space=0,delta=1,noexec
 global __pidataCOMRAM
 __pidataCOMRAM:
 	file	"src\menu.c"
-	line	159
+	line	165
 
-;initializer for menu_draw_input@F2299
-	db	low(028h)
-	db	low(0)
-	db   0
-	db   0
-	db   0
-	db   0
-	db   0
-	db   0
-	db   0
-	db   0
+;initializer for menu_draw_input@F2301
+		db	low(STR_52)
+	db	high(STR_52)
+
+		db	low(STR_53)
+	db	high(STR_53)
+
+		db	low(STR_54)
+	db	high(STR_54)
+
+	line	144
+
+;initializer for menu_draw_input@F2297
+		db	low(STR_42)
+	db	high(STR_42)
+
+		db	low(STR_43)
+	db	high(STR_43)
+
+		db	low(STR_44)
+	db	high(STR_44)
+
+	line	15
+
+;initializer for _enable_edit_flag
+	db	low(01h)
+	file	"src\encoder.c"
 	line	18
+
+;initializer for _last_btn
+	db	low(01h)
+psect	idataBANK0,class=CODE,space=0,delta=1,noexec
+global __pidataBANK0
+__pidataBANK0:
+	file	"src\menu.c"
+	line	19
 
 ;initializer for _options_menu
 		db	low(STR_17)
@@ -1007,83 +1038,43 @@ __pidataCOMRAM:
 		db	low(STR_21)
 	db	high(STR_21)
 
-	line	15
+	line	288
 
-;initializer for _enable_edit_flag
-	db	low(01h)
-	file	"src\encoder.c"
-	line	18
+;initializer for menu_handle_button@F2312
+		db	low(STR_65)
+	db	high(STR_65)
 
-;initializer for _last_btn
-	db	low(01h)
-	file	"src\menu.c"
-	line	26
+		db	low(STR_66)
+	db	high(STR_66)
 
-;initializer for _value_enable
-	db	low(045h)
-	db	low(06Eh)
-	db	low(061h)
-	db	low(062h)
-	db	low(06Ch)
-	db	low(065h)
-	db	low(064h)
-	db	low(0)
-	db   0
-	db   0
-psect	idataBANK0,class=CODE,space=0,delta=1,noexec
-global __pidataBANK0
-__pidataBANK0:
-	line	28
+		db	low(STR_67)
+	db	high(STR_67)
 
-;initializer for _value_scale4
-	db	low(030h)
-	db	low(030h)
-	db	low(030h)
-	db	low(0)
-	db   0
-	db   0
-	db   0
-	db   0
-	db   0
-	db   0
-	line	27
-
-;initializer for _value_sensor
-	db	low(050h)
-	db	low(072h)
-	db	low(065h)
-	db	low(073h)
-	db	low(073h)
-	db	low(075h)
-	db	low(072h)
-	db	low(065h)
-	db	low(0)
-	db   0
 psect	idataBANK1,class=CODE,space=0,delta=1,noexec
 global __pidataBANK1
 __pidataBANK1:
-	line	40
+	line	41
 
 ;initializer for _input_menu
 		db	low(STR_22)
 	db	high(STR_22)
 
 		db	low(_value_enable)
-	db	0
+	db	high(_value_enable)
 
 	db	low(01h)
 		db	low(STR_23)
 	db	high(STR_23)
 
 		db	low(_value_sensor)
-	db	0
+	db	high(_value_sensor)
 
 	db	low(01h)
 		db	low(STR_24)
 	db	high(STR_24)
 
 		db	low(_value_scale4)
-	db	0
+	db	high(_value_scale4)
 
 	db	low(01h)
 		db	low(STR_25)
@@ -1149,7 +1140,35 @@ __pidataBANK1:
 	db	0
 
 	db	low(0)
-	line	36
+	line	175
+
+;initializer for menu_draw_input@F2306
+	db	low(028h)
+	db	low(0)
+	db   0
+	db   0
+	db   0
+	db   0
+	db   0
+	db   0
+	db   0
+	db   0
+	line	28
+
+;initializer for _value_sensor
+	db	low(050h)
+	db	low(072h)
+	db	low(065h)
+	db	low(073h)
+	db	low(073h)
+	db	low(075h)
+	db	low(072h)
+	db	low(065h)
+	db	low(0)
+	db   0
+	db   0
+	db   0
+	line	37
 
 ;initializer for _value_display
 	db	low(053h)
@@ -1162,7 +1181,7 @@ __pidataBANK1:
 	db   0
 	db   0
 	db   0
-	line	35
+	line	36
 
 ;initializer for _value_rlyslp
 	db	low(050h)
@@ -1175,7 +1194,7 @@ __pidataBANK1:
 	db   0
 	db   0
 	db   0
-	line	34
+	line	35
 
 ;initializer for _value_rlyplp
 	db	low(04Ch)
@@ -1188,7 +1207,7 @@ __pidataBANK1:
 	db   0
 	db   0
 	db   0
-	line	33
+	line	34
 
 ;initializer for _value_rlyhigh
 	db	low(04Ch)
@@ -1201,7 +1220,7 @@ __pidataBANK1:
 	db   0
 	db   0
 	db   0
-	line	32
+	line	33
 
 ;initializer for _value_slpbp
 	db	low(030h)
@@ -1214,7 +1233,7 @@ __pidataBANK1:
 	db   0
 	db   0
 	db   0
-	line	31
+	line	32
 
 ;initializer for _value_plpbp
 	db	low(030h)
@@ -1227,7 +1246,7 @@ __pidataBANK1:
 	db   0
 	db   0
 	db   0
-	line	30
+	line	31
 
 ;initializer for _value_highbp
 	db	low(030h)
@@ -1240,7 +1259,7 @@ __pidataBANK1:
 	db   0
 	db   0
 	db   0
-	line	29
+	line	30
 
 ;initializer for _value_scale20
 	db	low(031h)
@@ -1251,6 +1270,32 @@ __pidataBANK1:
 	db   0
 	db   0
 	db   0
+	db   0
+	db   0
+	line	29
+
+;initializer for _value_scale4
+	db	low(030h)
+	db	low(030h)
+	db	low(030h)
+	db	low(0)
+	db   0
+	db   0
+	db   0
+	db   0
+	db   0
+	db   0
+	line	27
+
+;initializer for _value_enable
+	db	low(045h)
+	db	low(06Eh)
+	db	low(061h)
+	db	low(062h)
+	db	low(06Ch)
+	db	low(065h)
+	db	low(064h)
+	db	low(0)
 	db   0
 	db   0
 	global	_enc_table
@@ -1294,15 +1339,16 @@ __end_of_dpowers:
 	global	_enc_table
 	global	_dpowers
 	global	_button_hold_ms
+	global	_sensor_edit_flag
 	global	_btn_debounce
 	global	_enc_accumulator
 	global	_enc_state
-	global	_original_value
 	global	_value_back
 	global	_menu
 	global	_encoder_count
 	global	_button_event
 	global	_button_pressed
+	global	_original_value
 	global	_TRISB
 _TRISB	set	0xF93
 	global	_LATCbits
@@ -1771,6 +1817,20 @@ STR_7:
 	db	48	;'0'
 	db	0
 	
+STR_66:
+	db	84	;'T'
+	db	101	;'e'
+	db	109	;'m'
+	db	112	;'p'
+	db	101	;'e'
+	db	114	;'r'
+	db	97	;'a'
+	db	116	;'t'
+	db	117	;'u'
+	db	114	;'r'
+	db	101	;'e'
+	db	0
+	
 STR_25:
 	db	83	;'S'
 	db	99	;'c'
@@ -1830,6 +1890,17 @@ STR_41:
 	db	108	;'l'
 	db	101	;'e'
 	db	100	;'d'
+	db	0
+	
+STR_42:
+	db	80	;'P'
+	db	114	;'r'
+	db	101	;'e'
+	db	115	;'s'
+	db	115	;'s'
+	db	117	;'u'
+	db	114	;'r'
+	db	101	;'e'
 	db	0
 	
 STR_29:
@@ -1913,7 +1984,7 @@ STR_32:
 	db	121	;'y'
 	db	0
 	
-STR_54:
+STR_72:
 	db	40
 	db	110	;'n'
 	db	117	;'u'
@@ -1971,7 +2042,7 @@ STR_39:
 	db	41
 	db	0
 	
-STR_50:
+STR_60:
 	db	91	;'['
 	db	37
 	db	115	;'s'
@@ -1985,6 +2056,13 @@ STR_33:
 	db	107	;'k'
 	db	0
 	
+STR_43:
+	db	84	;'T'
+	db	101	;'e'
+	db	109	;'m'
+	db	112	;'p'
+	db	0
+	
 STR_21:
 	db	69	;'E'
 	db	120	;'x'
@@ -1992,24 +2070,45 @@ STR_21:
 	db	116	;'t'
 	db	0
 	
-STR_45:
+STR_44:
+	db	70	;'F'
+	db	108	;'l'
+	db	111	;'o'
+	db	119	;'w'
+	db	0
+	
+STR_49:
 	db	40
 	db	0
 	
 STR_36:
 	db	91	;'['
 	db	0
-STR_44	equ	STR_41+0
-STR_53	equ	STR_41+0
-STR_43	equ	STR_40+0
-STR_52	equ	STR_40+0
-STR_37	equ	STR_50+3
-STR_42	equ	STR_39+0
-STR_47	equ	STR_54+5
-STR_49	equ	STR_54+5
-STR_46	equ	STR_34+19
-STR_48	equ	STR_34+19
-STR_51	equ	STR_34+20
+STR_54	equ	STR_44+0
+STR_67	equ	STR_44+0
+STR_53	equ	STR_43+0
+STR_69	equ	STR_66+0
+STR_71	equ	STR_66+0
+STR_52	equ	STR_42+0
+STR_65	equ	STR_42+0
+STR_68	equ	STR_42+0
+STR_70	equ	STR_42+0
+STR_48	equ	STR_41+0
+STR_64	equ	STR_41+0
+STR_47	equ	STR_40+0
+STR_63	equ	STR_40+0
+STR_37	equ	STR_60+3
+STR_45	equ	STR_39+0
+STR_46	equ	STR_39+0
+STR_51	equ	STR_72+5
+STR_57	equ	STR_72+5
+STR_59	equ	STR_72+5
+STR_55	equ	STR_49+0
+STR_62	equ	STR_34+8
+STR_50	equ	STR_34+19
+STR_56	equ	STR_34+19
+STR_58	equ	STR_34+19
+STR_61	equ	STR_34+20
 ; #config settings
 	config pad_punits      = on
 	config apply_mask      = off
@@ -2063,29 +2162,28 @@ __pbssCOMRAM:
 	global	_button_hold_ms
 _button_hold_ms:
        ds      2
+_sensor_edit_flag:
+       ds      1
 _btn_debounce:
        ds      1
 _enc_accumulator:
        ds      1
 _enc_state:
        ds      1
-_original_value:
-       ds      10
 _value_back:
        ds      1
 psect	dataCOMRAM,class=COMRAM,space=1,noexec,lowdata
 global __pdataCOMRAM
 __pdataCOMRAM:
 	file	"src\menu.c"
-	line	159
-menu_draw_input@F2299:
-       ds      10
+	line	165
+menu_draw_input@F2301:
+       ds      6
 psect	dataCOMRAM
 	file	"src\menu.c"
-	line	18
-	global	_options_menu
-_options_menu:
-       ds      10
+	line	144
+menu_draw_input@F2297:
+       ds      6
 psect	dataCOMRAM
 	file	"src\menu.c"
 	line	15
@@ -2096,11 +2194,6 @@ psect	dataCOMRAM
 	line	18
 _last_btn:
        ds      1
-psect	dataCOMRAM
-	file	"src\menu.c"
-	line	26
-_value_enable:
-       ds      10
 psect	bssBANK0,class=BANK0,space=1,noexec,lowdata
 global __pbssBANK0
 __pbssBANK0:
@@ -2116,70 +2209,93 @@ _button_event:
 	global	_button_pressed
 _button_pressed:
        ds      1
+_original_value:
+       ds      10
 psect	dataBANK0,class=BANK0,space=1,noexec,lowdata
 global __pdataBANK0
 __pdataBANK0:
 	file	"src\menu.c"
-	line	28
-_value_scale4:
+	line	19
+	global	_options_menu
+_options_menu:
        ds      10
 psect	dataBANK0
 	file	"src\menu.c"
-	line	27
-_value_sensor:
-       ds      10
+	line	288
+menu_handle_button@F2312:
+       ds      6
 psect	dataBANK1,class=BANK1,space=1,noexec,lowdata
 global __pdataBANK1
 __pdataBANK1:
 	file	"src\menu.c"
-	line	40
+	line	41
 	global	_input_menu
 _input_menu:
        ds      60
 psect	dataBANK1
 	file	"src\menu.c"
-	line	36
+	line	175
+menu_draw_input@F2306:
+       ds      10
+psect	dataBANK1
+	file	"src\menu.c"
+	line	28
+_value_sensor:
+       ds      12
+psect	dataBANK1
+	file	"src\menu.c"
+	line	37
 _value_display:
        ds      10
 psect	dataBANK1
 	file	"src\menu.c"
-	line	35
+	line	36
 _value_rlyslp:
        ds      10
 psect	dataBANK1
 	file	"src\menu.c"
-	line	34
+	line	35
 _value_rlyplp:
        ds      10
 psect	dataBANK1
 	file	"src\menu.c"
-	line	33
+	line	34
 _value_rlyhigh:
        ds      10
 psect	dataBANK1
 	file	"src\menu.c"
-	line	32
+	line	33
 _value_slpbp:
        ds      10
 psect	dataBANK1
 	file	"src\menu.c"
-	line	31
+	line	32
 _value_plpbp:
        ds      10
 psect	dataBANK1
 	file	"src\menu.c"
-	line	30
+	line	31
 _value_highbp:
        ds      10
 psect	dataBANK1
 	file	"src\menu.c"
-	line	29
+	line	30
 _value_scale20:
+       ds      10
+psect	dataBANK1
+	file	"src\menu.c"
+	line	29
+_value_scale4:
+       ds      10
+psect	dataBANK1
+	file	"src\menu.c"
+	line	27
+_value_enable:
        ds      10
 	file	"src\main.as"
 	line	#
 psect	cinit
-; Initialize objects allocated to BANK1 (140 bytes)
+; Initialize objects allocated to BANK1 (182 bytes)
 	global __pidataBANK1
 	; load TBLPTR registers with __pidataBANK1
 	movlw	low (__pidataBANK1)
@@ -2189,14 +2305,14 @@ psect	cinit
 	movlw	low highword(__pidataBANK1)
 	movwf	tblptru
 	lfsr	0,__pdataBANK1
-	lfsr	1,140
+	lfsr	1,182
 	copy_data0:
 	tblrd	*+
 	movff	tablat, postinc0
 	movf	postdec1,w
 	movf	fsr1l,w
 	bnz	copy_data0
-; Initialize objects allocated to BANK0 (20 bytes)
+; Initialize objects allocated to BANK0 (16 bytes)
 	global __pidataBANK0
 	; load TBLPTR registers with __pidataBANK0
 	movlw	low (__pidataBANK0)
@@ -2206,14 +2322,14 @@ psect	cinit
 	movlw	low highword(__pidataBANK0)
 	movwf	tblptru
 	lfsr	0,__pdataBANK0
-	lfsr	1,20
+	lfsr	1,16
 	copy_data1:
 	tblrd	*+
 	movff	tablat, postinc0
 	movf	postdec1,w
 	movf	fsr1l,w
 	bnz	copy_data1
-; Initialize objects allocated to COMRAM (32 bytes)
+; Initialize objects allocated to COMRAM (14 bytes)
 	global __pidataCOMRAM
 	; load TBLPTR registers with __pidataCOMRAM
 	movlw	low (__pidataCOMRAM)
@@ -2223,7 +2339,7 @@ psect	cinit
 	movlw	low highword(__pidataCOMRAM)
 	movwf	tblptru
 	lfsr	0,__pdataCOMRAM
-	lfsr	1,32
+	lfsr	1,14
 	copy_data2:
 	tblrd	*+
 	movff	tablat, postinc0
@@ -2231,18 +2347,18 @@ psect	cinit
 	movf	fsr1l,w
 	bnz	copy_data2
 	line	#
-; Clear objects allocated to BANK0 (12 bytes)
+; Clear objects allocated to BANK0 (22 bytes)
 	global __pbssBANK0
 lfsr	0,__pbssBANK0
-movlw	12
+movlw	22
 clear_0:
 clrf	postinc0,c
 decf	wreg
 bnz	clear_0
-; Clear objects allocated to COMRAM (16 bytes)
+; Clear objects allocated to COMRAM (7 bytes)
 	global __pbssCOMRAM
 lfsr	0,__pbssCOMRAM
-movlw	16
+movlw	7
 clear_1:
 clrf	postinc0,c
 decf	wreg
@@ -2261,9 +2377,9 @@ __end_of__initialization:
 	movwf	tblptru
 movlb 0
 goto _main	;jump to C main() function
-psect	cstackBANK1,class=BANK1,space=1,noexec,lowdata
-global __pcstackBANK1
-__pcstackBANK1:
+psect	cstackBANK0,class=BANK0,space=1,noexec,lowdata
+global __pcstackBANK0
+__pcstackBANK0:
 	global	main@buf_421
 main@buf_421:	; 40 bytes @ 0x0
 	ds   40
@@ -2284,42 +2400,6 @@ main@last_encoder:	; 2 bytes @ 0x55
 	ds   2
 	global	main@current_menu
 main@current_menu:	; 1 bytes @ 0x57
-	ds   1
-psect	cstackBANK0,class=BANK0,space=1,noexec,lowdata
-global __pcstackBANK0
-__pcstackBANK0:
-	global	menu_draw_input@blank
-menu_draw_input@blank:	; 10 bytes @ 0x0
-	ds   10
-	global	menu_draw_input@value_buf
-menu_draw_input@value_buf:	; 12 bytes @ 0xA
-	ds   12
-	global	menu_draw_input@val_len
-menu_draw_input@val_len:	; 1 bytes @ 0x16
-	ds   1
-	global	menu_draw_input@val_len_692
-menu_draw_input@val_len_692:	; 1 bytes @ 0x17
-	ds   1
-	global	_menu_draw_input$681
-_menu_draw_input$681:	; 2 bytes @ 0x18
-	ds   2
-	global	_menu_draw_input$687
-_menu_draw_input$687:	; 2 bytes @ 0x1A
-	ds   2
-	global	menu_draw_input@j
-menu_draw_input@j:	; 1 bytes @ 0x1C
-	ds   1
-	global	menu_draw_input@j_695
-menu_draw_input@j_695:	; 1 bytes @ 0x1D
-	ds   1
-	global	menu_draw_input@val_len_699
-menu_draw_input@val_len_699:	; 1 bytes @ 0x1E
-	ds   1
-	global	menu_draw_input@i
-menu_draw_input@i:	; 1 bytes @ 0x1F
-	ds   1
-	global	menu_draw_input@item_idx
-menu_draw_input@item_idx:	; 1 bytes @ 0x20
 	ds   1
 psect	cstackCOMRAM,class=COMRAM,space=1,noexec,lowdata
 global __pcstackCOMRAM
@@ -2355,8 +2435,8 @@ isr@btn:	; 1 bytes @ 0x8
 ??_encoder_init:	; 1 bytes @ 0x9
 ??_menu_init:	; 1 bytes @ 0x9
 ?_menu_handle_encoder:	; 1 bytes @ 0x9
+?_memset:	; 1 bytes @ 0x9
 ?_strcat:	; 1 bytes @ 0x9
-?_strcpy:	; 1 bytes @ 0x9
 ??_uart_init:	; 1 bytes @ 0x9
 ??_uart_write:	; 1 bytes @ 0x9
 ??_system_init:	; 1 bytes @ 0x9
@@ -2365,6 +2445,7 @@ isr@btn:	; 1 bytes @ 0x8
 ?_beep:	; 1 bytes @ 0x9
 	global	?_strlen
 ?_strlen:	; 2 bytes @ 0x9
+?_strcpy:	; 2 bytes @ 0x9
 	global	?_strcmp
 ?_strcmp:	; 2 bytes @ 0x9
 	global	?___lwdiv
@@ -2373,10 +2454,10 @@ isr@btn:	; 1 bytes @ 0x8
 uart_write@c:	; 1 bytes @ 0x9
 	global	lcd_write_nibble@nibble
 lcd_write_nibble@nibble:	; 1 bytes @ 0x9
+	global	memset@p1
+memset@p1:	; 1 bytes @ 0x9
 	global	strcat@to
 strcat@to:	; 1 bytes @ 0x9
-	global	strcpy@to
-strcpy@to:	; 1 bytes @ 0x9
 	global	beep@duration_ms
 beep@duration_ms:	; 2 bytes @ 0x9
 	global	menu_handle_encoder@delta
@@ -2385,6 +2466,8 @@ menu_handle_encoder@delta:	; 2 bytes @ 0x9
 ___lwdiv@dividend:	; 2 bytes @ 0x9
 	global	strcmp@s1
 strcmp@s1:	; 2 bytes @ 0x9
+	global	strcpy@to
+strcpy@to:	; 2 bytes @ 0x9
 	global	strlen@s
 strlen@s:	; 2 bytes @ 0x9
 	ds   1
@@ -2395,10 +2478,10 @@ strlen@s:	; 2 bytes @ 0x9
 lcd_data@data:	; 1 bytes @ 0xA
 	global	uart_print@str
 uart_print@str:	; 2 bytes @ 0xA
+	global	memset@c
+memset@c:	; 2 bytes @ 0xA
 	global	strcat@from
 strcat@from:	; 2 bytes @ 0xA
-	global	strcpy@from
-strcpy@from:	; 2 bytes @ 0xA
 	ds   1
 ??_menu_handle_encoder:	; 1 bytes @ 0xB
 ??_strlen:	; 1 bytes @ 0xB
@@ -2412,11 +2495,12 @@ lcd_print@str:	; 2 bytes @ 0xB
 ___lwdiv@divisor:	; 2 bytes @ 0xB
 	global	strcmp@s2
 strcmp@s2:	; 2 bytes @ 0xB
+	global	strcpy@from
+strcpy@from:	; 2 bytes @ 0xB
 	global	strlen@cp
 strlen@cp:	; 2 bytes @ 0xB
 	ds   1
 ??_strcat:	; 1 bytes @ 0xC
-??_strcpy:	; 1 bytes @ 0xC
 ??_uart_print:	; 1 bytes @ 0xC
 ?_uart_println:	; 1 bytes @ 0xC
 ??_lcd_init:	; 1 bytes @ 0xC
@@ -2426,30 +2510,31 @@ strlen@cp:	; 2 bytes @ 0xB
 lcd_set_cursor@col:	; 1 bytes @ 0xC
 	global	strcat@cp
 strcat@cp:	; 1 bytes @ 0xC
-	global	strcpy@cp
-strcpy@cp:	; 1 bytes @ 0xC
 	global	uart_println@str
 uart_println@str:	; 2 bytes @ 0xC
 	global	beep@i
 beep@i:	; 2 bytes @ 0xC
+	global	memset@n
+memset@n:	; 2 bytes @ 0xC
 	ds   1
+??_strcpy:	; 1 bytes @ 0xD
 ??_strcmp:	; 1 bytes @ 0xD
 ??_lcd_set_cursor:	; 1 bytes @ 0xD
 ??_lcd_print:	; 1 bytes @ 0xD
 ??___lwdiv:	; 1 bytes @ 0xD
 	global	lcd_set_cursor@pos
 lcd_set_cursor@pos:	; 1 bytes @ 0xD
-	global	___lwdiv@counter
-___lwdiv@counter:	; 1 bytes @ 0xD
+	global	___lwdiv@quotient
+___lwdiv@quotient:	; 2 bytes @ 0xD
+	global	strcpy@cp
+strcpy@cp:	; 2 bytes @ 0xD
 	ds   1
-??_menu_handle_button:	; 1 bytes @ 0xE
+??_memset:	; 1 bytes @ 0xE
 ??_uart_println:	; 1 bytes @ 0xE
 	global	lcd_set_cursor@row
 lcd_set_cursor@row:	; 1 bytes @ 0xE
-	global	menu_handle_button@press_type
-menu_handle_button@press_type:	; 1 bytes @ 0xE
-	global	___lwdiv@quotient
-___lwdiv@quotient:	; 2 bytes @ 0xE
+	global	memset@p
+memset@p:	; 1 bytes @ 0xE
 	ds   1
 ?_lcd_print_at:	; 1 bytes @ 0xF
 ??_lcd_clear_line:	; 1 bytes @ 0xF
@@ -2457,15 +2542,20 @@ ___lwdiv@quotient:	; 2 bytes @ 0xE
 lcd_print_at@col:	; 1 bytes @ 0xF
 	global	lcd_clear_line@row
 lcd_clear_line@row:	; 1 bytes @ 0xF
+	global	___lwdiv@counter
+___lwdiv@counter:	; 1 bytes @ 0xF
 	global	strcmp@r
 strcmp@r:	; 1 bytes @ 0xF
 	ds   1
+??_menu_handle_button:	; 1 bytes @ 0x10
 	global	?___lwmod
 ?___lwmod:	; 2 bytes @ 0x10
 	global	lcd_print_at@str
 lcd_print_at@str:	; 2 bytes @ 0x10
 	global	___lwmod@dividend
 ___lwmod@dividend:	; 2 bytes @ 0x10
+	global	menu_handle_button@sensor_options
+menu_handle_button@sensor_options:	; 6 bytes @ 0x10
 	ds   2
 ??_lcd_print_at:	; 1 bytes @ 0x12
 	global	lcd_print_at@row
@@ -2482,52 +2572,101 @@ ___lwmod@counter:	; 1 bytes @ 0x14
 	global	?_sprintf
 ?_sprintf:	; 2 bytes @ 0x15
 	global	sprintf@sp
-sprintf@sp:	; 2 bytes @ 0x15
-	ds   2
-	global	sprintf@f
-sprintf@f:	; 2 bytes @ 0x17
+sprintf@sp:	; 1 bytes @ 0x15
 	ds   1
+	global	_menu_handle_button$733
+_menu_handle_button$733:	; 2 bytes @ 0x16
+	global	sprintf@f
+sprintf@f:	; 2 bytes @ 0x16
+	ds   2
 	global	menu_draw_options@i
 menu_draw_options@i:	; 1 bytes @ 0x18
-	ds   5
-??_sprintf:	; 1 bytes @ 0x1D
+	global	menu_handle_button@press_type
+menu_handle_button@press_type:	; 1 bytes @ 0x18
+	ds   4
+??_sprintf:	; 1 bytes @ 0x1C
 	ds   1
 	global	sprintf@flag
-sprintf@flag:	; 1 bytes @ 0x1E
+sprintf@flag:	; 1 bytes @ 0x1D
 	ds   1
 	global	sprintf@prec
-sprintf@prec:	; 1 bytes @ 0x1F
+sprintf@prec:	; 1 bytes @ 0x1E
 	ds   1
 	global	sprintf@ap
-sprintf@ap:	; 1 bytes @ 0x20
+sprintf@ap:	; 1 bytes @ 0x1F
 	ds   1
 	global	sprintf@cp
-sprintf@cp:	; 2 bytes @ 0x21
+sprintf@cp:	; 2 bytes @ 0x20
 	ds   2
 	global	sprintf@val
-sprintf@val:	; 2 bytes @ 0x23
+sprintf@val:	; 2 bytes @ 0x22
 	ds   2
 	global	sprintf@c
-sprintf@c:	; 1 bytes @ 0x25
+sprintf@c:	; 1 bytes @ 0x24
 	ds   1
-??_menu_draw_input:	; 1 bytes @ 0x26
+??_menu_draw_input:	; 1 bytes @ 0x25
 	ds   2
-??_main:	; 1 bytes @ 0x28
+	global	menu_draw_input@blank
+menu_draw_input@blank:	; 10 bytes @ 0x27
+	ds   10
+	global	menu_draw_input@sensor_options
+menu_draw_input@sensor_options:	; 6 bytes @ 0x31
+	ds   6
+	global	menu_draw_input@sensor_options_710
+menu_draw_input@sensor_options_710:	; 6 bytes @ 0x37
+	ds   6
+	global	menu_draw_input@value_buf
+menu_draw_input@value_buf:	; 20 bytes @ 0x3D
+	ds   20
+	global	menu_draw_input@val_len
+menu_draw_input@val_len:	; 1 bytes @ 0x51
+	ds   1
+	global	menu_draw_input@val_len_711
+menu_draw_input@val_len_711:	; 1 bytes @ 0x52
+	ds   1
+	global	menu_draw_input@val_len_716
+menu_draw_input@val_len_716:	; 1 bytes @ 0x53
+	ds   1
+	global	_menu_draw_input$689
+_menu_draw_input$689:	; 2 bytes @ 0x54
+	ds   2
+	global	_menu_draw_input$701
+_menu_draw_input$701:	; 2 bytes @ 0x56
+	ds   2
+	global	menu_draw_input@j
+menu_draw_input@j:	; 1 bytes @ 0x58
+	ds   1
+	global	menu_draw_input@j_713
+menu_draw_input@j_713:	; 1 bytes @ 0x59
+	ds   1
+	global	menu_draw_input@j_719
+menu_draw_input@j_719:	; 1 bytes @ 0x5A
+	ds   1
+	global	menu_draw_input@val_len_723
+menu_draw_input@val_len_723:	; 1 bytes @ 0x5B
+	ds   1
+	global	menu_draw_input@i
+menu_draw_input@i:	; 1 bytes @ 0x5C
+	ds   1
+	global	menu_draw_input@item_idx
+menu_draw_input@item_idx:	; 1 bytes @ 0x5D
+	ds   1
+??_main:	; 1 bytes @ 0x5E
 	ds   2
 ;!
 ;!Data Sizes:
-;!    Strings     560
+;!    Strings     591
 ;!    Constant    26
-;!    Data        192
-;!    BSS         28
+;!    Data        212
+;!    BSS         29
 ;!    Persistent  0
 ;!    Stack       0
 ;!
 ;!Auto Spaces:
 ;!    Space          Size  Autos    Used
-;!    COMRAM          126     42      90
-;!    BANK0           128     33      65
-;!    BANK1           256     88     228
+;!    COMRAM          126     96     117
+;!    BANK0           128     88     126
+;!    BANK1           256      0     182
 ;!    BANK2           256      0       0
 ;!    BANK3           256      0       0
 ;!    BANK4           256      0       0
@@ -2551,33 +2690,60 @@ sprintf@c:	; 1 bytes @ 0x25
 ;!		 -> STR_26(CODE[8]), STR_27(CODE[6]), STR_28(CODE[6]), STR_29(CODE[9]), 
 ;!		 -> STR_30(CODE[8]), STR_31(CODE[8]), STR_32(CODE[8]), STR_33(CODE[5]), 
 ;!
-;!    input_menu$value	PTR unsigned char  size(2) Largest target is 10
-;!		 -> value_back(COMRAM[1]), value_display(BANK1[10]), value_enable(COMRAM[10]), value_highbp(BANK1[10]), 
+;!    input_menu$value	PTR unsigned char  size(2) Largest target is 12
+;!		 -> value_back(COMRAM[1]), value_display(BANK1[10]), value_enable(BANK1[10]), value_highbp(BANK1[10]), 
 ;!		 -> value_plpbp(BANK1[10]), value_rlyhigh(BANK1[10]), value_rlyplp(BANK1[10]), value_rlyslp(BANK1[10]), 
-;!		 -> value_scale20(BANK1[10]), value_scale4(BANK0[10]), value_sensor(BANK0[10]), value_slpbp(BANK1[10]), 
+;!		 -> value_scale20(BANK1[10]), value_scale4(BANK1[10]), value_sensor(BANK1[12]), value_slpbp(BANK1[10]), 
 ;!
 ;!    lcd_print@str	PTR const unsigned char  size(2) Largest target is 21
-;!		 -> menu_draw_input@value_buf(BANK0[12]), STR_17(CODE[10]), STR_18(CODE[11]), STR_19(CODE[13]), 
+;!		 -> menu_draw_input@value_buf(COMRAM[20]), STR_17(CODE[10]), STR_18(CODE[11]), STR_19(CODE[13]), 
 ;!		 -> STR_20(CODE[6]), STR_21(CODE[5]), STR_22(CODE[7]), STR_23(CODE[7]), 
 ;!		 -> STR_24(CODE[10]), STR_25(CODE[11]), STR_26(CODE[8]), STR_27(CODE[6]), 
 ;!		 -> STR_28(CODE[6]), STR_29(CODE[9]), STR_30(CODE[8]), STR_31(CODE[8]), 
 ;!		 -> STR_32(CODE[8]), STR_33(CODE[5]), STR_34(CODE[21]), STR_35(CODE[8]), 
-;!		 -> STR_36(CODE[2]), STR_37(CODE[2]), STR_38(CODE[8]), STR_7(CODE[13]), 
-;!		 -> STR_8(CODE[15]), 
+;!		 -> STR_36(CODE[2]), STR_37(CODE[2]), STR_38(CODE[8]), STR_62(CODE[13]), 
+;!		 -> STR_7(CODE[13]), STR_8(CODE[15]), 
 ;!
-;!    lcd_print_at@str	PTR const unsigned char  size(2) Largest target is 13
-;!		 -> menu_draw_input@value_buf(BANK0[12]), STR_17(CODE[10]), STR_18(CODE[11]), STR_19(CODE[13]), 
+;!    lcd_print_at@str	PTR const unsigned char  size(2) Largest target is 20
+;!		 -> menu_draw_input@value_buf(COMRAM[20]), STR_17(CODE[10]), STR_18(CODE[11]), STR_19(CODE[13]), 
 ;!		 -> STR_20(CODE[6]), STR_21(CODE[5]), STR_22(CODE[7]), STR_23(CODE[7]), 
 ;!		 -> STR_24(CODE[10]), STR_25(CODE[11]), STR_26(CODE[8]), STR_27(CODE[6]), 
 ;!		 -> STR_28(CODE[6]), STR_29(CODE[9]), STR_30(CODE[8]), STR_31(CODE[8]), 
 ;!		 -> STR_32(CODE[8]), STR_33(CODE[5]), STR_35(CODE[8]), STR_36(CODE[2]), 
 ;!		 -> STR_38(CODE[8]), 
 ;!
-;!    menu_draw_input$681	PTR const unsigned char  size(2) Largest target is 9
+;!    memset@p	PTR unsigned char  size(1) Largest target is 20
+;!		 -> menu_draw_input@value_buf(COMRAM[20]), 
+;!
+;!    memset@p1	PTR void  size(1) Largest target is 20
+;!		 -> menu_draw_input@value_buf(COMRAM[20]), 
+;!
+;!    menu_draw_input$689	PTR const unsigned char  size(2) Largest target is 9
 ;!		 -> STR_40(CODE[8]), STR_41(CODE[9]), 
 ;!
-;!    menu_draw_input$687	PTR const unsigned char  size(2) Largest target is 9
-;!		 -> STR_43(CODE[8]), STR_44(CODE[9]), 
+;!    menu_draw_input$701	PTR const unsigned char  size(2) Largest target is 9
+;!		 -> STR_47(CODE[8]), STR_48(CODE[9]), 
+;!
+;!    menu_draw_input@F2297	PTR const unsigned char [3] size(2) Largest target is 9
+;!		 -> STR_42(CODE[9]), STR_43(CODE[5]), STR_44(CODE[5]), 
+;!
+;!    menu_draw_input@F2301	PTR const unsigned char [3] size(2) Largest target is 9
+;!		 -> STR_52(CODE[9]), STR_53(CODE[5]), STR_54(CODE[5]), 
+;!
+;!    menu_draw_input@sensor_options	PTR const unsigned char [3] size(2) Largest target is 9
+;!		 -> STR_42(CODE[9]), STR_43(CODE[5]), STR_44(CODE[5]), 
+;!
+;!    menu_draw_input@sensor_options_710	PTR const unsigned char [3] size(2) Largest target is 9
+;!		 -> STR_52(CODE[9]), STR_53(CODE[5]), STR_54(CODE[5]), 
+;!
+;!    menu_handle_button$733	PTR const unsigned char  size(2) Largest target is 9
+;!		 -> STR_63(CODE[8]), STR_64(CODE[9]), 
+;!
+;!    menu_handle_button@F2312	PTR const unsigned char [3] size(2) Largest target is 12
+;!		 -> STR_65(CODE[9]), STR_66(CODE[12]), STR_67(CODE[5]), 
+;!
+;!    menu_handle_button@sensor_options	PTR const unsigned char [3] size(2) Largest target is 12
+;!		 -> STR_65(CODE[9]), STR_66(CODE[12]), STR_67(CODE[5]), 
 ;!
 ;!    options_menu	PTR const unsigned char [5] size(2) Largest target is 13
 ;!		 -> STR_17(CODE[10]), STR_18(CODE[11]), STR_19(CODE[13]), STR_20(CODE[6]), 
@@ -2588,82 +2754,93 @@ sprintf@c:	; 1 bytes @ 0x25
 ;!		 -> STR_26(CODE[8]), STR_27(CODE[6]), STR_28(CODE[6]), STR_29(CODE[9]), 
 ;!		 -> STR_30(CODE[8]), STR_31(CODE[8]), STR_32(CODE[8]), STR_33(CODE[5]), 
 ;!
-;!    S295$value	PTR unsigned char  size(2) Largest target is 10
-;!		 -> value_back(COMRAM[1]), value_display(BANK1[10]), value_enable(COMRAM[10]), value_highbp(BANK1[10]), 
+;!    S295$value	PTR unsigned char  size(2) Largest target is 12
+;!		 -> value_back(COMRAM[1]), value_display(BANK1[10]), value_enable(BANK1[10]), value_highbp(BANK1[10]), 
 ;!		 -> value_plpbp(BANK1[10]), value_rlyhigh(BANK1[10]), value_rlyplp(BANK1[10]), value_rlyslp(BANK1[10]), 
-;!		 -> value_scale20(BANK1[10]), value_scale4(BANK0[10]), value_sensor(BANK0[10]), value_slpbp(BANK1[10]), 
+;!		 -> value_scale20(BANK1[10]), value_scale4(BANK1[10]), value_sensor(BANK1[12]), value_slpbp(BANK1[10]), 
 ;!
-;!    sp__strcat	PTR unsigned char  size(1) Largest target is 12
-;!		 -> menu_draw_input@blank(BANK0[10]), menu_draw_input@value_buf(BANK0[12]), 
+;!    sp__memset	PTR void  size(1) Largest target is 20
+;!		 -> menu_draw_input@value_buf(COMRAM[20]), 
 ;!
-;!    sp__strcpy	PTR unsigned char  size(1) Largest target is 12
-;!		 -> menu_draw_input@value_buf(BANK0[12]), original_value(COMRAM[10]), value_enable(COMRAM[10]), 
+;!    sp__strcat	PTR unsigned char  size(1) Largest target is 20
+;!		 -> menu_draw_input@blank(COMRAM[10]), menu_draw_input@value_buf(COMRAM[20]), 
+;!
+;!    sp__strcpy	PTR unsigned char  size(2) Largest target is 20
+;!		 -> menu_draw_input@value_buf(COMRAM[20]), original_value(BANK0[10]), value_enable(BANK1[10]), value_sensor(BANK1[12]), 
 ;!
 ;!    sprintf@ap	PTR void [1] size(1) Largest target is 2
 ;!		 -> ?_sprintf(COMRAM[2]), 
 ;!
-;!    sprintf@cp	PTR const unsigned char  size(2) Largest target is 10
-;!		 -> ?_sprintf(COMRAM[2]), STR_40(CODE[8]), STR_41(CODE[9]), STR_54(CODE[7]), 
-;!		 -> value_back(COMRAM[1]), value_display(BANK1[10]), value_enable(COMRAM[10]), value_highbp(BANK1[10]), 
-;!		 -> value_plpbp(BANK1[10]), value_rlyhigh(BANK1[10]), value_rlyplp(BANK1[10]), value_rlyslp(BANK1[10]), 
-;!		 -> value_scale20(BANK1[10]), value_scale4(BANK0[10]), value_sensor(BANK0[10]), value_slpbp(BANK1[10]), 
+;!    sprintf@cp	PTR const unsigned char  size(2) Largest target is 12
+;!		 -> ?_sprintf(COMRAM[2]), STR_40(CODE[8]), STR_41(CODE[9]), STR_42(CODE[9]), 
+;!		 -> STR_43(CODE[5]), STR_44(CODE[5]), STR_72(CODE[7]), value_back(COMRAM[1]), 
+;!		 -> value_display(BANK1[10]), value_enable(BANK1[10]), value_highbp(BANK1[10]), value_plpbp(BANK1[10]), 
+;!		 -> value_rlyhigh(BANK1[10]), value_rlyplp(BANK1[10]), value_rlyslp(BANK1[10]), value_scale20(BANK1[10]), 
+;!		 -> value_scale4(BANK1[10]), value_sensor(BANK1[12]), value_slpbp(BANK1[10]), 
 ;!
 ;!    sprintf@f	PTR const unsigned char  size(2) Largest target is 30
 ;!		 -> STR_12(CODE[23]), STR_13(CODE[30]), STR_14(CODE[17]), STR_39(CODE[5]), 
-;!		 -> STR_42(CODE[5]), STR_45(CODE[2]), STR_50(CODE[5]), 
+;!		 -> STR_45(CODE[5]), STR_46(CODE[5]), STR_49(CODE[2]), STR_55(CODE[2]), 
+;!		 -> STR_60(CODE[5]), 
 ;!
-;!    sprintf@sp	PTR unsigned char  size(2) Largest target is 40
-;!		 -> main@buf(BANK1[40]), main@buf_421(BANK1[40]), menu_draw_input@value_buf(BANK0[12]), 
+;!    sprintf@sp	PTR unsigned char  size(1) Largest target is 40
+;!		 -> main@buf(BANK0[40]), main@buf_421(BANK0[40]), menu_draw_input@value_buf(COMRAM[20]), 
 ;!
-;!    strcat@cp	PTR unsigned char  size(1) Largest target is 12
-;!		 -> menu_draw_input@blank(BANK0[10]), menu_draw_input@value_buf(BANK0[12]), 
+;!    strcat@cp	PTR unsigned char  size(1) Largest target is 20
+;!		 -> menu_draw_input@blank(COMRAM[10]), menu_draw_input@value_buf(COMRAM[20]), 
 ;!
 ;!    strcat@from	PTR const unsigned char  size(2) Largest target is 2
-;!		 -> STR_46(CODE[2]), STR_47(CODE[2]), STR_48(CODE[2]), STR_49(CODE[2]), 
+;!		 -> STR_50(CODE[2]), STR_51(CODE[2]), STR_56(CODE[2]), STR_57(CODE[2]), 
+;!		 -> STR_58(CODE[2]), STR_59(CODE[2]), 
 ;!
-;!    strcat@to	PTR unsigned char  size(1) Largest target is 12
-;!		 -> menu_draw_input@blank(BANK0[10]), menu_draw_input@value_buf(BANK0[12]), 
+;!    strcat@to	PTR unsigned char  size(1) Largest target is 20
+;!		 -> menu_draw_input@blank(COMRAM[10]), menu_draw_input@value_buf(COMRAM[20]), 
 ;!
-;!    strcmp@s1	PTR const unsigned char  size(2) Largest target is 10
-;!		 -> value_back(COMRAM[1]), value_display(BANK1[10]), value_enable(COMRAM[10]), value_highbp(BANK1[10]), 
-;!		 -> value_plpbp(BANK1[10]), value_rlyhigh(BANK1[10]), value_rlyplp(BANK1[10]), value_rlyslp(BANK1[10]), 
-;!		 -> value_scale20(BANK1[10]), value_scale4(BANK0[10]), value_sensor(BANK0[10]), value_slpbp(BANK1[10]), 
+;!    strcmp@s1	PTR const unsigned char  size(2) Largest target is 12
+;!		 -> original_value(BANK0[10]), value_back(COMRAM[1]), value_display(BANK1[10]), value_enable(BANK1[10]), 
+;!		 -> value_highbp(BANK1[10]), value_plpbp(BANK1[10]), value_rlyhigh(BANK1[10]), value_rlyplp(BANK1[10]), 
+;!		 -> value_rlyslp(BANK1[10]), value_scale20(BANK1[10]), value_scale4(BANK1[10]), value_sensor(BANK1[12]), 
+;!		 -> value_slpbp(BANK1[10]), 
 ;!
-;!    strcmp@s2	PTR const unsigned char  size(2) Largest target is 1
-;!		 -> STR_51(CODE[1]), 
+;!    strcmp@s2	PTR const unsigned char  size(2) Largest target is 12
+;!		 -> STR_61(CODE[1]), STR_68(CODE[9]), STR_69(CODE[12]), STR_70(CODE[9]), 
+;!		 -> STR_71(CODE[12]), 
 ;!
-;!    strcpy@cp	PTR unsigned char  size(1) Largest target is 12
-;!		 -> menu_draw_input@value_buf(BANK0[12]), original_value(COMRAM[10]), value_enable(COMRAM[10]), 
+;!    strcpy@cp	PTR unsigned char  size(2) Largest target is 20
+;!		 -> menu_draw_input@value_buf(COMRAM[20]), original_value(BANK0[10]), value_enable(BANK1[10]), value_sensor(BANK1[12]), 
 ;!
-;!    strcpy@from	PTR const unsigned char  size(2) Largest target is 10
-;!		 -> menu_draw_input@blank(BANK0[10]), STR_52(CODE[8]), STR_53(CODE[9]), value_back(COMRAM[1]), 
-;!		 -> value_display(BANK1[10]), value_enable(COMRAM[10]), value_highbp(BANK1[10]), value_plpbp(BANK1[10]), 
-;!		 -> value_rlyhigh(BANK1[10]), value_rlyplp(BANK1[10]), value_rlyslp(BANK1[10]), value_scale20(BANK1[10]), 
-;!		 -> value_scale4(BANK0[10]), value_sensor(BANK0[10]), value_slpbp(BANK1[10]), 
+;!    strcpy@from	PTR const unsigned char  size(2) Largest target is 12
+;!		 -> menu_draw_input@blank(COMRAM[10]), STR_63(CODE[8]), STR_64(CODE[9]), STR_65(CODE[9]), 
+;!		 -> STR_66(CODE[12]), STR_67(CODE[5]), value_back(COMRAM[1]), value_display(BANK1[10]), 
+;!		 -> value_enable(BANK1[10]), value_highbp(BANK1[10]), value_plpbp(BANK1[10]), value_rlyhigh(BANK1[10]), 
+;!		 -> value_rlyplp(BANK1[10]), value_rlyslp(BANK1[10]), value_scale20(BANK1[10]), value_scale4(BANK1[10]), 
+;!		 -> value_sensor(BANK1[12]), value_slpbp(BANK1[10]), 
 ;!
-;!    strcpy@to	PTR unsigned char  size(1) Largest target is 12
-;!		 -> menu_draw_input@value_buf(BANK0[12]), original_value(COMRAM[10]), value_enable(COMRAM[10]), 
+;!    strcpy@to	PTR unsigned char  size(2) Largest target is 20
+;!		 -> menu_draw_input@value_buf(COMRAM[20]), original_value(BANK0[10]), value_enable(BANK1[10]), value_sensor(BANK1[12]), 
 ;!
-;!    strlen@cp	PTR const unsigned char  size(2) Largest target is 12
-;!		 -> menu_draw_input@value_buf(BANK0[12]), STR_43(CODE[8]), STR_44(CODE[9]), value_back(COMRAM[1]), 
-;!		 -> value_display(BANK1[10]), value_enable(COMRAM[10]), value_highbp(BANK1[10]), value_plpbp(BANK1[10]), 
-;!		 -> value_rlyhigh(BANK1[10]), value_rlyplp(BANK1[10]), value_rlyslp(BANK1[10]), value_scale20(BANK1[10]), 
-;!		 -> value_scale4(BANK0[10]), value_sensor(BANK0[10]), value_slpbp(BANK1[10]), 
+;!    strlen@cp	PTR const unsigned char  size(2) Largest target is 20
+;!		 -> menu_draw_input@value_buf(COMRAM[20]), STR_47(CODE[8]), STR_48(CODE[9]), STR_52(CODE[9]), 
+;!		 -> STR_53(CODE[5]), STR_54(CODE[5]), value_back(COMRAM[1]), value_display(BANK1[10]), 
+;!		 -> value_enable(BANK1[10]), value_highbp(BANK1[10]), value_plpbp(BANK1[10]), value_rlyhigh(BANK1[10]), 
+;!		 -> value_rlyplp(BANK1[10]), value_rlyslp(BANK1[10]), value_scale20(BANK1[10]), value_scale4(BANK1[10]), 
+;!		 -> value_sensor(BANK1[12]), value_slpbp(BANK1[10]), 
 ;!
-;!    strlen@s	PTR const unsigned char  size(2) Largest target is 12
-;!		 -> menu_draw_input@value_buf(BANK0[12]), STR_43(CODE[8]), STR_44(CODE[9]), value_back(COMRAM[1]), 
-;!		 -> value_display(BANK1[10]), value_enable(COMRAM[10]), value_highbp(BANK1[10]), value_plpbp(BANK1[10]), 
-;!		 -> value_rlyhigh(BANK1[10]), value_rlyplp(BANK1[10]), value_rlyslp(BANK1[10]), value_scale20(BANK1[10]), 
-;!		 -> value_scale4(BANK0[10]), value_sensor(BANK0[10]), value_slpbp(BANK1[10]), 
+;!    strlen@s	PTR const unsigned char  size(2) Largest target is 20
+;!		 -> menu_draw_input@value_buf(COMRAM[20]), STR_47(CODE[8]), STR_48(CODE[9]), STR_52(CODE[9]), 
+;!		 -> STR_53(CODE[5]), STR_54(CODE[5]), value_back(COMRAM[1]), value_display(BANK1[10]), 
+;!		 -> value_enable(BANK1[10]), value_highbp(BANK1[10]), value_plpbp(BANK1[10]), value_rlyhigh(BANK1[10]), 
+;!		 -> value_rlyplp(BANK1[10]), value_rlyslp(BANK1[10]), value_scale20(BANK1[10]), value_scale4(BANK1[10]), 
+;!		 -> value_sensor(BANK1[12]), value_slpbp(BANK1[10]), 
 ;!
 ;!    uart_print@str	PTR const unsigned char  size(2) Largest target is 40
-;!		 -> main@buf(BANK1[40]), main@buf_421(BANK1[40]), STR_1(CODE[27]), STR_10(CODE[22]), 
+;!		 -> main@buf(BANK0[40]), main@buf_421(BANK0[40]), STR_1(CODE[27]), STR_10(CODE[22]), 
 ;!		 -> STR_11(CODE[19]), STR_15(CODE[24]), STR_16(CODE[26]), STR_2(CODE[21]), 
 ;!		 -> STR_3(CODE[23]), STR_4(CODE[22]), STR_5(CODE[19]), STR_6(CODE[24]), 
 ;!		 -> STR_9(CODE[22]), 
 ;!
 ;!    uart_println@str	PTR const unsigned char  size(2) Largest target is 40
-;!		 -> main@buf(BANK1[40]), main@buf_421(BANK1[40]), STR_1(CODE[27]), STR_10(CODE[22]), 
+;!		 -> main@buf(BANK0[40]), main@buf_421(BANK0[40]), STR_1(CODE[27]), STR_10(CODE[22]), 
 ;!		 -> STR_11(CODE[19]), STR_15(CODE[24]), STR_16(CODE[26]), STR_2(CODE[21]), 
 ;!		 -> STR_3(CODE[23]), STR_4(CODE[22]), STR_5(CODE[19]), STR_6(CODE[24]), 
 ;!		 -> STR_9(CODE[22]), 
@@ -2676,7 +2853,7 @@ sprintf@c:	; 1 bytes @ 0x25
 ;!    _main->_menu_draw_input
 ;!    _uart_println->_uart_print
 ;!    _uart_print->_uart_write
-;!    _menu_handle_button->_beep
+;!    _menu_handle_button->_strcmp
 ;!    _menu_draw_options->_lcd_print_at
 ;!    _menu_draw_input->_sprintf
 ;!    _sprintf->___lwmod
@@ -2696,7 +2873,7 @@ sprintf@c:	; 1 bytes @ 0x25
 ;!
 ;!Critical Paths under _main in BANK0
 ;!
-;!    _main->_menu_draw_input
+;!    None.
 ;!
 ;!Critical Paths under _isr in BANK0
 ;!
@@ -2832,9 +3009,9 @@ sprintf@c:	; 1 bytes @ 0x25
 ;! ---------------------------------------------------------------------------------
 ;! (Depth) Function   	        Calls       Base Space   Used Autos Params    Refs
 ;! ---------------------------------------------------------------------------------
-;! (0) _main                                                90    90      0   25807
-;!                                             40 COMRAM     2     2      0
-;!                                              0 BANK1     88    88      0
+;! (0) _main                                                90    90      0   27066
+;!                                             94 COMRAM     2     2      0
+;!                                              0 BANK0     88    88      0
 ;!                               _beep
 ;!                       _encoder_init
 ;!                          _lcd_clear
@@ -2853,16 +3030,16 @@ sprintf@c:	; 1 bytes @ 0x25
 ;!                          _uart_init
 ;!                       _uart_println
 ;! ---------------------------------------------------------------------------------
-;! (1) _uart_println                                         2     0      2    1508
+;! (1) _uart_println                                         2     0      2    1251
 ;!                                             12 COMRAM     2     0      2
 ;!                         _uart_print
 ;!                         _uart_write
 ;! ---------------------------------------------------------------------------------
-;! (2) _uart_print                                           2     0      2     186
+;! (2) _uart_print                                           2     0      2     143
 ;!                                             10 COMRAM     2     0      2
 ;!                         _uart_write
 ;! ---------------------------------------------------------------------------------
-;! (2) _uart_write                                           1     1      0      31
+;! (2) _uart_write                                           1     1      0      22
 ;!                                              9 COMRAM     1     1      0
 ;! ---------------------------------------------------------------------------------
 ;! (1) _uart_init                                            0     0      0       0
@@ -2871,94 +3048,100 @@ sprintf@c:	; 1 bytes @ 0x25
 ;! ---------------------------------------------------------------------------------
 ;! (1) _menu_init                                            0     0      0       0
 ;! ---------------------------------------------------------------------------------
-;! (1) _menu_handle_encoder                                  7     5      2     183
+;! (1) _menu_handle_encoder                                  7     5      2     164
 ;!                                              9 COMRAM     7     5      2
 ;! ---------------------------------------------------------------------------------
-;! (1) _menu_handle_button                                   1     1      0    2281
-;!                                             14 COMRAM     1     1      0
+;! (1) _menu_handle_button                                   9     9      0    3198
+;!                                             16 COMRAM     9     9      0
 ;!                               _beep
+;!                             _strcmp
 ;!                             _strcpy
 ;! ---------------------------------------------------------------------------------
-;! (2) _beep                                                 5     3      2    1148
+;! (2) _beep                                                 5     3      2     958
 ;!                                              9 COMRAM     5     3      2
 ;! ---------------------------------------------------------------------------------
-;! (1) _menu_draw_options                                    6     6      0    4792
+;! (1) _menu_draw_options                                    6     6      0    4227
 ;!                                             19 COMRAM     6     6      0
 ;!                     _lcd_clear_line
 ;!                          _lcd_print
 ;!                       _lcd_print_at
 ;! ---------------------------------------------------------------------------------
-;! (1) _menu_draw_input                                     35    35      0   10611
-;!                                             38 COMRAM     2     2      0
-;!                                              0 BANK0     33    33      0
+;! (1) _menu_draw_input                                     57    57      0   12590
+;!                                             37 COMRAM    57    57      0
 ;!                     _lcd_clear_line
+;!                          _lcd_print
 ;!                       _lcd_print_at
+;!                     _lcd_set_cursor
+;!                             _memset
 ;!                            _sprintf
 ;!                             _strcat
 ;!                             _strcmp
 ;!                             _strcpy
 ;!                             _strlen
 ;! ---------------------------------------------------------------------------------
-;! (2) _strlen                                               4     2      2     400
+;! (2) _strlen                                               4     2      2     394
 ;!                                              9 COMRAM     4     2      2
 ;! ---------------------------------------------------------------------------------
-;! (2) _strcpy                                               4     1      3    1009
-;!                                              9 COMRAM     4     1      3
+;! (2) _strcpy                                               6     2      4    1009
+;!                                              9 COMRAM     6     2      4
 ;! ---------------------------------------------------------------------------------
-;! (2) _strcmp                                               7     3      4     313
+;! (2) _strcmp                                               7     3      4    1033
 ;!                                              9 COMRAM     7     3      4
 ;! ---------------------------------------------------------------------------------
-;! (2) _strcat                                               4     1      3     863
+;! (2) _strcat                                               4     1      3    1010
 ;!                                              9 COMRAM     4     1      3
 ;! ---------------------------------------------------------------------------------
-;! (1) _sprintf                                             23    15      8    2959
-;!                                             21 COMRAM    17     9      8
+;! (1) _sprintf                                             22    15      7    2585
+;!                                             21 COMRAM    16     9      7
 ;!                            ___lwdiv
 ;!                            ___lwmod
 ;! ---------------------------------------------------------------------------------
-;! (2) ___lwmod                                              5     1      4     412
+;! (2) ___lwmod                                              5     1      4     311
 ;!                                             16 COMRAM     5     1      4
 ;!                            ___lwdiv (ARG)
 ;! ---------------------------------------------------------------------------------
-;! (2) ___lwdiv                                              7     3      4     421
+;! (2) ___lwdiv                                              7     3      4     314
 ;!                                              9 COMRAM     7     3      4
 ;! ---------------------------------------------------------------------------------
-;! (2) _lcd_print_at                                         4     1      3    2491
+;! (2) _memset                                               6     1      5     324
+;!                                              9 COMRAM     6     1      5
+;! ---------------------------------------------------------------------------------
+;! (2) _lcd_print_at                                         4     1      3    2181
 ;!                                             15 COMRAM     4     1      3
 ;!                          _lcd_print
 ;!                     _lcd_set_cursor
 ;! ---------------------------------------------------------------------------------
-;! (2) _lcd_clear_line                                       1     1      0    1349
+;! (2) _lcd_clear_line                                       1     1      0    1225
 ;!                                             15 COMRAM     1     1      0
 ;!                          _lcd_print
 ;!                     _lcd_set_cursor
 ;! ---------------------------------------------------------------------------------
-;! (3) _lcd_set_cursor                                       3     2      1     620
+;! (3) _lcd_set_cursor                                       3     2      1     560
 ;!                                             12 COMRAM     3     2      1
 ;!                            _lcd_cmd
 ;! ---------------------------------------------------------------------------------
-;! (3) _lcd_print                                            2     0      2     698
+;! (3) _lcd_print                                            2     0      2     643
 ;!                                             11 COMRAM     2     0      2
 ;!                           _lcd_data
 ;! ---------------------------------------------------------------------------------
-;! (4) _lcd_data                                             1     1      0      93
+;! (4) _lcd_data                                             1     1      0      66
 ;!                                             10 COMRAM     1     1      0
 ;!                   _lcd_write_nibble
 ;! ---------------------------------------------------------------------------------
-;! (1) _lcd_init                                             2     2      0     124
+;! (1) _lcd_init                                             2     2      0      88
 ;!                                             12 COMRAM     2     2      0
 ;!                            _lcd_cmd
 ;!                   _lcd_write_nibble
 ;! ---------------------------------------------------------------------------------
-;! (1) _lcd_clear                                            1     1      0      93
+;! (1) _lcd_clear                                            1     1      0      66
 ;!                                             12 COMRAM     1     1      0
 ;!                            _lcd_cmd
 ;! ---------------------------------------------------------------------------------
-;! (4) _lcd_cmd                                              2     2      0      93
+;! (4) _lcd_cmd                                              2     2      0      66
 ;!                                             10 COMRAM     2     2      0
 ;!                   _lcd_write_nibble
 ;! ---------------------------------------------------------------------------------
-;! (5) _lcd_write_nibble                                     1     1      0      31
+;! (5) _lcd_write_nibble                                     1     1      0      22
 ;!                                              9 COMRAM     1     1      0
 ;!                   _lcd_pulse_enable
 ;! ---------------------------------------------------------------------------------
@@ -3000,9 +3183,12 @@ sprintf@c:	; 1 bytes @ 0x25
 ;!     _lcd_clear_line
 ;!       _lcd_print
 ;!       _lcd_set_cursor
+;!     _lcd_print
 ;!     _lcd_print_at
 ;!       _lcd_print
 ;!       _lcd_set_cursor
+;!     _lcd_set_cursor
+;!     _memset
 ;!     _sprintf
 ;!       ___lwdiv
 ;!       ___lwmod
@@ -3017,6 +3203,7 @@ sprintf@c:	; 1 bytes @ 0x25
 ;!     _lcd_print_at
 ;!   _menu_handle_button
 ;!     _beep
+;!     _strcmp
 ;!     _strcpy
 ;!   _menu_handle_encoder
 ;!   _menu_init
@@ -3063,13 +3250,13 @@ sprintf@c:	; 1 bytes @ 0x25
 ;!BITBANK2           100      0       0       8        0.0%
 ;!BANK2              100      0       0       9        0.0%
 ;!BITBANK1           100      0       0       6        0.0%
-;!BANK1              100     58      E4       7       89.1%
+;!BANK1              100      0      B6       7       71.1%
 ;!BITBANK15           80      0       0      34        0.0%
 ;!BANK15              80      0       0      35        0.0%
 ;!BITBANK0            80      0       0       4        0.0%
-;!BANK0               80     21      41       5       50.8%
+;!BANK0               80     58      7E       5       98.4%
 ;!BITCOMRAM           7E      0       0       0        0.0%
-;!COMRAM              7E     2A      5A       1       71.4%
+;!COMRAM              7E     60      75       1       92.9%
 ;!BITBIGSFRhhhhlh     1A      0       0      37        0.0%
 ;!BITBIGSFRhhhlh      11      0       0      39        0.0%
 ;!BITBIGSFRhhhhh       D      0       0      36        0.0%
@@ -3088,8 +3275,8 @@ sprintf@c:	; 1 bytes @ 0x25
 ;!SFR                  0      0       0     200        0.0%
 ;!STACK                0      0       0       2        0.0%
 ;!NULL                 0      0       0       0        0.0%
-;!ABS                  0      0     17F      49        0.0%
-;!DATA                 0      0     17F       3        0.0%
+;!ABS                  0      0     1A9      49        0.0%
+;!DATA                 0      0     1A9       3        0.0%
 ;!CODE                 0      0       0       0        0.0%
 
 	global	_main
@@ -3100,26 +3287,26 @@ sprintf@c:	; 1 bytes @ 0x25
 ;; Parameters:    Size  Location     Type
 ;;		None
 ;; Auto vars:     Size  Location     Type
-;;  buf            40    0[BANK1 ] unsigned char [40]
-;;  buf            40   40[BANK1 ] unsigned char [40]
-;;  delta           2   83[BANK1 ] int 
-;;  last_encoder    2   85[BANK1 ] int 
-;;  blink_timer     2   81[BANK1 ] unsigned int 
-;;  current_menu    1   87[BANK1 ] unsigned char 
-;;  was_editing     1   80[BANK1 ] unsigned char 
+;;  buf            40    0[BANK0 ] unsigned char [40]
+;;  buf            40   40[BANK0 ] unsigned char [40]
+;;  delta           2   83[BANK0 ] int 
+;;  last_encoder    2   85[BANK0 ] int 
+;;  blink_timer     2   81[BANK0 ] unsigned int 
+;;  current_menu    1   87[BANK0 ] unsigned char 
+;;  was_editing     1   80[BANK0 ] unsigned char 
 ;; Return value:  Size  Location     Type
 ;;                  1    wreg      void 
 ;; Registers used:
 ;;		wreg, fsr0l, fsr0h, fsr1l, fsr1h, fsr2l, fsr2h, status,2, status,0, tblptrl, tblptrh, tblptru, prodl, prodh, cstack
 ;; Tracked objects:
 ;;		On entry : 0/0
-;;		On exit  : 3F/1
+;;		On exit  : 3F/0
 ;;		Unchanged: 0/0
 ;; Data sizes:     COMRAM   BANK0   BANK1   BANK2   BANK3   BANK4   BANK5   BANK6   BANK7   BANK8   BANK9  BANK10  BANK11  BANK12  BANK13  BANK14  BANK15
 ;;      Params:         0       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0
-;;      Locals:         0       0      88       0       0       0       0       0       0       0       0       0       0       0       0       0       0
+;;      Locals:         0      88       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0
 ;;      Temps:          2       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0
-;;      Totals:         2       0      88       0       0       0       0       0       0       0       0       0       0       0       0       0       0
+;;      Totals:         2      88       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0
 ;;Total ram usage:       90 bytes
 ;; Hardware stack levels required when called: 7
 ;; This function calls:
@@ -3158,13 +3345,13 @@ _main:
 	callstack 24
 	line	226
 	
-l3049:
+l3005:
 	call	_system_init	;wreg free
 	line	227
 	call	_uart_init	;wreg free
 	line	229
 	
-l3051:
+l3007:
 		movlw	low(STR_1)
 	movwf	((c:uart_println@str))^00h,c
 	movlw	high(STR_1)
@@ -3173,7 +3360,7 @@ l3051:
 	call	_uart_println	;wreg free
 	line	230
 	
-l3053:
+l3009:
 		movlw	low(STR_2)
 	movwf	((c:uart_println@str))^00h,c
 	movlw	high(STR_2)
@@ -3182,11 +3369,11 @@ l3053:
 	call	_uart_println	;wreg free
 	line	232
 	
-l3055:
+l3011:
 	call	_lcd_init	;wreg free
 	line	234
 	
-l3057:
+l3013:
 		movlw	low(STR_3)
 	movwf	((c:uart_println@str))^00h,c
 	movlw	high(STR_3)
@@ -3195,41 +3382,41 @@ l3057:
 	call	_uart_println	;wreg free
 	line	235
 	
-l3059:
+l3015:
 	movlw	(080h)&0ffh
 	
 	call	_lcd_cmd
 	line	236
 	
-l3061:
+l3017:
 	movlw	(054h)&0ffh
 	
 	call	_lcd_data
 	line	237
 	
-l3063:
+l3019:
 	movlw	(045h)&0ffh
 	
 	call	_lcd_data
 	line	238
 	
-l3065:
+l3021:
 	movlw	(053h)&0ffh
 	
 	call	_lcd_data
 	line	239
 	
-l3067:
+l3023:
 	movlw	(054h)&0ffh
 	
 	call	_lcd_data
 	line	241
 	
-l3069:
+l3025:
 	call	_encoder_init	;wreg free
 	line	242
 	
-l3071:
+l3027:
 		movlw	low(STR_4)
 	movwf	((c:uart_println@str))^00h,c
 	movlw	high(STR_4)
@@ -3238,11 +3425,11 @@ l3071:
 	call	_uart_println	;wreg free
 	line	244
 	
-l3073:
+l3029:
 	call	_menu_init	;wreg free
 	line	245
 	
-l3075:; BSR set to: 0
+l3031:; BSR set to: 0
 
 		movlw	low(STR_5)
 	movwf	((c:uart_println@str))^00h,c
@@ -3252,7 +3439,7 @@ l3075:; BSR set to: 0
 	call	_uart_println	;wreg free
 	line	247
 	
-l3077:
+l3033:
 		movlw	low(STR_6)
 	movwf	((c:uart_println@str))^00h,c
 	movlw	high(STR_6)
@@ -3269,7 +3456,7 @@ l3077:
 	call	_lcd_set_cursor
 	line	250
 	
-l3079:
+l3035:
 		movlw	low(STR_7)
 	movwf	((c:lcd_print@str))^00h,c
 	movlw	high(STR_7)
@@ -3278,7 +3465,7 @@ l3079:
 	call	_lcd_print	;wreg free
 	line	251
 	
-l3081:
+l3037:
 	movlw	low(02h)
 	movwf	((c:lcd_set_cursor@col))^00h,c
 	movlw	(01h)&0ffh
@@ -3300,7 +3487,7 @@ l3081:
 	call	_uart_println	;wreg free
 	line	255
 	
-l3083:
+l3039:
 	movlw	high(064h)
 	movwf	((c:beep@duration_ms+1))^00h,c
 	movlw	low(064h)
@@ -3308,7 +3495,7 @@ l3083:
 	call	_beep	;wreg free
 	line	256
 	
-l3085:
+l3041:
 	asmopt push
 asmopt off
 movlw  5
@@ -3316,19 +3503,19 @@ movwf	(??_main+0+0+1)^00h,c
 movlw	15
 movwf	(??_main+0+0)^00h,c
 	movlw	241
-u3297:
+u3357:
 decfsz	wreg,f
-	bra	u3297
+	bra	u3357
 	decfsz	(??_main+0+0)^00h,c,f
-	bra	u3297
+	bra	u3357
 	decfsz	(??_main+0+0+1)^00h,c,f
-	bra	u3297
+	bra	u3357
 	nop
 asmopt pop
 
 	line	257
 	
-l3087:
+l3043:
 	movlw	high(064h)
 	movwf	((c:beep@duration_ms+1))^00h,c
 	movlw	low(064h)
@@ -3336,7 +3523,7 @@ l3087:
 	call	_beep	;wreg free
 	line	258
 	
-l3089:
+l3045:
 	asmopt push
 asmopt off
 movlw  5
@@ -3344,19 +3531,19 @@ movwf	(??_main+0+0+1)^00h,c
 movlw	15
 movwf	(??_main+0+0)^00h,c
 	movlw	241
-u3307:
+u3367:
 decfsz	wreg,f
-	bra	u3307
+	bra	u3367
 	decfsz	(??_main+0+0)^00h,c,f
-	bra	u3307
+	bra	u3367
 	decfsz	(??_main+0+0+1)^00h,c,f
-	bra	u3307
+	bra	u3367
 	nop
 asmopt pop
 
 	line	259
 	
-l3091:
+l3047:
 	movlw	high(0C8h)
 	movwf	((c:beep@duration_ms+1))^00h,c
 	movlw	low(0C8h)
@@ -3364,7 +3551,7 @@ l3091:
 	call	_beep	;wreg free
 	line	261
 	
-l3093:
+l3049:
 	asmopt push
 asmopt off
 movlw  82
@@ -3372,19 +3559,19 @@ movwf	(??_main+0+0+1)^00h,c
 movlw	43
 movwf	(??_main+0+0)^00h,c
 	movlw	0
-u3317:
+u3377:
 decfsz	wreg,f
-	bra	u3317
+	bra	u3377
 	decfsz	(??_main+0+0)^00h,c,f
-	bra	u3317
+	bra	u3377
 	decfsz	(??_main+0+0+1)^00h,c,f
-	bra	u3317
+	bra	u3377
 	nop2
 asmopt pop
 
 	line	263
 	
-l3095:
+l3051:
 		movlw	low(STR_10)
 	movwf	((c:uart_println@str))^00h,c
 	movlw	high(STR_10)
@@ -3393,39 +3580,39 @@ l3095:
 	call	_uart_println	;wreg free
 	line	264
 	
-l3097:
+l3053:
 	call	_lcd_clear	;wreg free
 	line	265
 	
-l3099:
+l3055:
 	movlw	low(0)
-	movlb	1	; () banked
+	movlb	0	; () banked
 	movwf	((main@current_menu))&0ffh
 	line	266
 	
-l3101:; BSR set to: 1
+l3057:; BSR set to: 0
 
 	call	_menu_draw_options	;wreg free
 	line	268
 	
-l3103:
+l3059:
 	movff	(_encoder_count),(main@last_encoder)	;volatile
 	movff	(_encoder_count+1),(main@last_encoder+1)	;volatile
 	line	269
 	
-l3105:
+l3061:
 	movlw	high(0)
-	movlb	1	; () banked
+	movlb	0	; () banked
 	movwf	((main@blink_timer+1))&0ffh
 	movlw	low(0)
 	movwf	((main@blink_timer))&0ffh
 	line	270
 	
-l3107:; BSR set to: 1
+l3063:; BSR set to: 0
 
 	line	272
 	
-l3109:; BSR set to: 1
+l3065:; BSR set to: 0
 
 		movlw	low(STR_11)
 	movwf	((c:uart_println@str))^00h,c
@@ -3435,41 +3622,33 @@ l3109:; BSR set to: 1
 	call	_uart_println	;wreg free
 	line	286
 	
-l3111:
-	movlb	1	; () banked
+l3067:
+	movlb	0	; () banked
 	movf	((main@last_encoder))&0ffh,w
-	movlb	0	; () banked
 xorwf	((_encoder_count))&0ffh,w	;volatile
-	bnz	u3100
-	movlb	1	; () banked
+	bnz	u3160
 movf	((main@last_encoder+1))&0ffh,w
-	movlb	0	; () banked
 xorwf	((_encoder_count+1))&0ffh,w	;volatile
 	btfsc	status,2
-	goto	u3101
-	goto	u3100
+	goto	u3161
+	goto	u3160
 
-u3101:
-	goto	l3137
-u3100:
+u3161:
+	goto	l3093
+u3160:
 	line	288
 	
-l3113:; BSR set to: 0
+l3069:; BSR set to: 0
 
-	movlb	1	; () banked
 	movf	((main@last_encoder))&0ffh,w
-	movlb	0	; () banked
 	subwf	((_encoder_count))&0ffh,w	;volatile
-	movlb	1	; () banked
 	movwf	((main@delta))&0ffh
 	movf	((main@last_encoder+1))&0ffh,w
-	movlb	0	; () banked
 	subwfb	((_encoder_count+1))&0ffh,w	;volatile
-	movlb	1	; () banked
 	movwf	1+((main@delta))&0ffh
 	line	292
 	
-l3115:; BSR set to: 1
+l3071:; BSR set to: 0
 
 	movlw	high(01h)
 	movwf	((c:beep@duration_ms+1))^00h,c
@@ -3478,58 +3657,53 @@ l3115:; BSR set to: 1
 	call	_beep	;wreg free
 	line	294
 	
-l3117:
+l3073:
 		movlw	low(main@buf)
 	movwf	((c:sprintf@sp))^00h,c
-	movlw	high(main@buf)
-	movwf	((c:sprintf@sp+1))^00h,c
 
 		movlw	low(STR_12)
 	movwf	((c:sprintf@f))^00h,c
 	movlw	high(STR_12)
 	movwf	((c:sprintf@f+1))^00h,c
 
-	movff	(_encoder_count),0+((c:?_sprintf)+04h)	;volatile
-	movff	(_encoder_count+1),1+((c:?_sprintf)+04h)	;volatile
-	movff	(main@delta),0+((c:?_sprintf)+06h)
-	movff	(main@delta+1),1+((c:?_sprintf)+06h)
+	movff	(_encoder_count),0+((c:?_sprintf)+03h)	;volatile
+	movff	(_encoder_count+1),1+((c:?_sprintf)+03h)	;volatile
+	movff	(main@delta),0+((c:?_sprintf)+05h)
+	movff	(main@delta+1),1+((c:?_sprintf)+05h)
 	call	_sprintf	;wreg free
 	line	295
 	
-l3119:
+l3075:
 		movlw	low(main@buf)
 	movwf	((c:uart_println@str))^00h,c
-	movlw	high(main@buf)
-	movwf	((c:uart_println@str+1))^00h,c
+	clrf	((c:uart_println@str+1))^00h,c
 
 	call	_uart_println	;wreg free
 	line	298
 	
-l3121:
+l3077:
 	movlb	0	; () banked
 	movf	(0+(_menu+03h))&0ffh,w
 	btfsc	status,2
-	goto	u3111
-	goto	u3110
-u3111:
-	goto	l3127
-u3110:
+	goto	u3171
+	goto	u3170
+u3171:
+	goto	l3083
+u3170:
 	line	300
 	
-l3123:; BSR set to: 0
+l3079:; BSR set to: 0
 
 		movlw	low(main@buf)
 	movwf	((c:sprintf@sp))^00h,c
-	movlw	high(main@buf)
-	movwf	((c:sprintf@sp+1))^00h,c
 
 		movlw	low(STR_13)
 	movwf	((c:sprintf@f))^00h,c
 	movlw	high(STR_13)
 	movwf	((c:sprintf@f+1))^00h,c
 
-	movff	(_menu),0+((c:?_sprintf)+04h)
-	clrf	(1+((c:?_sprintf)+04h))^00h,c
+	movff	(_menu),0+((c:?_sprintf)+03h)
+	clrf	(1+((c:?_sprintf)+03h))^00h,c
 	movf	((_menu))&0ffh,w
 	mullw	05h
 	movlw	low(_input_menu+02h)
@@ -3538,126 +3712,121 @@ l3123:; BSR set to: 0
 	movlw	high(_input_menu+02h)
 	addwfc	prod+1,w
 	movwf	1+c:fsr2l
-	movff	postinc2,0+((c:?_sprintf)+06h)
-	movff	postdec2,1+((c:?_sprintf)+06h)
+	movff	postinc2,0+((c:?_sprintf)+05h)
+	movff	postdec2,1+((c:?_sprintf)+05h)
 	call	_sprintf	;wreg free
 	line	301
 	
-l3125:
+l3081:
 		movlw	low(main@buf)
 	movwf	((c:uart_println@str))^00h,c
-	movlw	high(main@buf)
-	movwf	((c:uart_println@str+1))^00h,c
+	clrf	((c:uart_println@str+1))^00h,c
 
 	call	_uart_println	;wreg free
 	line	304
 	
-l3127:
+l3083:
 	movff	(main@delta),(c:menu_handle_encoder@delta)
 	movff	(main@delta+1),(c:menu_handle_encoder@delta+1)
 	call	_menu_handle_encoder	;wreg free
 	line	307
 	
-l3129:; BSR set to: 0
+l3085:; BSR set to: 0
 
-	movlb	1	; () banked
 	movf	((main@current_menu))&0ffh,w
 	btfss	status,2
-	goto	u3121
-	goto	u3120
-u3121:
-	goto	l3133
-u3120:
+	goto	u3181
+	goto	u3180
+u3181:
+	goto	l3089
+u3180:
 	line	309
 	
-l3131:; BSR set to: 1
+l3087:; BSR set to: 0
 
 	call	_menu_draw_options	;wreg free
 	line	310
-	goto	l3135
+	goto	l3091
 	line	313
 	
-l3133:; BSR set to: 1
+l3089:; BSR set to: 0
 
 	call	_menu_draw_input	;wreg free
 	line	316
 	
-l3135:
+l3091:
 	movff	(_encoder_count),(main@last_encoder)	;volatile
 	movff	(_encoder_count+1),(main@last_encoder+1)	;volatile
 	line	320
 	
-l3137:
+l3093:
 	movlb	0	; () banked
 	movf	((_button_pressed))&0ffh,w	;volatile
 	btfsc	status,2
-	goto	u3131
-	goto	u3130
-u3131:
-	goto	l3203
-u3130:
+	goto	u3191
+	goto	u3190
+u3191:
+	goto	l3159
+u3190:
 	line	322
 	
-l3139:; BSR set to: 0
+l3095:; BSR set to: 0
 
 	movlw	low(0)
 	movwf	((_button_pressed))&0ffh	;volatile
 	line	325
 	
-l3141:; BSR set to: 0
+l3097:; BSR set to: 0
 
 		movlw	low(main@buf_421)
 	movwf	((c:sprintf@sp))^00h,c
-	movlw	high(main@buf_421)
-	movwf	((c:sprintf@sp+1))^00h,c
 
 		movlw	low(STR_14)
 	movwf	((c:sprintf@f))^00h,c
 	movlw	high(STR_14)
 	movwf	((c:sprintf@f+1))^00h,c
 
-	movff	(_button_event),0+((c:?_sprintf)+04h)	;volatile
-	clrf	(1+((c:?_sprintf)+04h))^00h,c
+	movff	(_button_event),0+((c:?_sprintf)+03h)	;volatile
+	clrf	(1+((c:?_sprintf)+03h))^00h,c
 	call	_sprintf	;wreg free
 	line	326
 	
-l3143:
+l3099:
 		movlw	low(main@buf_421)
 	movwf	((c:uart_println@str))^00h,c
-	movlw	high(main@buf_421)
-	movwf	((c:uart_println@str+1))^00h,c
+	clrf	((c:uart_println@str+1))^00h,c
 
 	call	_uart_println	;wreg free
 	line	329
 	
-l3145:
+l3101:
 	movff	0+(_menu+03h),(main@was_editing)
 	line	331
 	
-l3147:
+l3103:
 	movlb	0	; () banked
 	movf	((_button_event))&0ffh,w	;volatile
 	btfsc	status,2
-	goto	u3141
-	goto	u3140
-u3141:
-	goto	l3203
-u3140:
+	goto	u3201
+	goto	u3200
+u3201:
+	goto	l3159
+u3200:
 	line	333
 	
-l3149:; BSR set to: 0
+l3105:; BSR set to: 0
 
 		decf	((_button_event))&0ffh,w	;volatile
 	btfss	status,2
-	goto	u3151
-	goto	u3150
+	goto	u3211
+	goto	u3210
 
-u3151:
-	goto	l3153
-u3150:
+u3211:
+	goto	l3109
+u3210:
 	line	335
 	
-l3151:; BSR set to: 0
+l3107:; BSR set to: 0
 
 	movlw	high(032h)
 	movwf	((c:beep@duration_ms+1))^00h,c
@@ -3665,23 +3834,23 @@ l3151:; BSR set to: 0
 	movwf	((c:beep@duration_ms))^00h,c
 	call	_beep	;wreg free
 	line	336
-	goto	l3161
+	goto	l3117
 	line	337
 	
-l3153:; BSR set to: 0
+l3109:; BSR set to: 0
 
 		movlw	2
 	xorwf	((_button_event))&0ffh,w	;volatile
 	btfss	status,2
-	goto	u3161
-	goto	u3160
+	goto	u3221
+	goto	u3220
 
-u3161:
-	goto	l3157
-u3160:
+u3221:
+	goto	l3113
+u3220:
 	line	339
 	
-l3155:; BSR set to: 0
+l3111:; BSR set to: 0
 
 	movlw	high(064h)
 	movwf	((c:beep@duration_ms+1))^00h,c
@@ -3689,23 +3858,23 @@ l3155:; BSR set to: 0
 	movwf	((c:beep@duration_ms))^00h,c
 	call	_beep	;wreg free
 	line	340
-	goto	l3161
+	goto	l3117
 	line	341
 	
-l3157:; BSR set to: 0
+l3113:; BSR set to: 0
 
 		movlw	3
 	xorwf	((_button_event))&0ffh,w	;volatile
 	btfss	status,2
-	goto	u3171
-	goto	u3170
+	goto	u3231
+	goto	u3230
 
-u3171:
-	goto	l3161
-u3170:
+u3231:
+	goto	l3117
+u3230:
 	line	343
 	
-l3159:; BSR set to: 0
+l3115:; BSR set to: 0
 
 	movlw	high(0C8h)
 	movwf	((c:beep@duration_ms+1))^00h,c
@@ -3714,77 +3883,74 @@ l3159:; BSR set to: 0
 	call	_beep	;wreg free
 	line	346
 	
-l3161:
+l3117:
 	movlb	0	; () banked
 	movf	((_button_event))&0ffh,w	;volatile
 	
 	call	_menu_handle_button
 	line	349
 	
-l3163:
-	movlb	1	; () banked
+l3119:
+	movlb	0	; () banked
 	movf	((main@was_editing))&0ffh,w
 	btfsc	status,2
-	goto	u3181
-	goto	u3180
-u3181:
-	goto	l3171
-u3180:
+	goto	u3241
+	goto	u3240
+u3241:
+	goto	l3127
+u3240:
 	
-l3165:; BSR set to: 1
+l3121:; BSR set to: 0
 
-	movlb	0	; () banked
 	movf	(0+(_menu+03h))&0ffh,w
 	btfss	status,2
-	goto	u3191
-	goto	u3190
-u3191:
-	goto	l3171
-u3190:
+	goto	u3251
+	goto	u3250
+u3251:
+	goto	l3127
+u3250:
 	line	351
 	
-l3167:; BSR set to: 0
+l3123:; BSR set to: 0
 
-	movlb	1	; () banked
 		decf	((main@current_menu))&0ffh,w
 	btfss	status,2
-	goto	u3201
-	goto	u3200
+	goto	u3261
+	goto	u3260
 
-u3201:
-	goto	l3171
-u3200:
+u3261:
+	goto	l3127
+u3260:
 	line	353
 	
-l3169:; BSR set to: 1
+l3125:; BSR set to: 0
 
 	call	_menu_draw_input	;wreg free
 	line	358
 	
-l3171:
+l3127:
 	movlb	0	; () banked
 		decf	((_button_event))&0ffh,w	;volatile
 	btfss	status,2
-	goto	u3211
-	goto	u3210
+	goto	u3271
+	goto	u3270
 
-u3211:
-	goto	l3187
-u3210:
+u3271:
+	goto	l3143
+u3270:
 	
-l3173:; BSR set to: 0
+l3129:; BSR set to: 0
 
-	movlb	1	; () banked
 	movf	((main@current_menu))&0ffh,w
 	btfss	status,2
-	goto	u3221
-	goto	u3220
-u3221:
-	goto	l3187
-u3220:
+	goto	u3281
+	goto	u3280
+u3281:
+	goto	l3143
+u3280:
 	line	360
 	
-l3175:; BSR set to: 1
+l3131:; BSR set to: 0
 
 		movlw	low(STR_15)
 	movwf	((c:uart_println@str))^00h,c
@@ -3794,48 +3960,48 @@ l3175:; BSR set to: 1
 	call	_uart_println	;wreg free
 	line	361
 	
-l3177:
+l3133:
 	movlw	low(01h)
-	movlb	1	; () banked
+	movlb	0	; () banked
 	movwf	((main@current_menu))&0ffh
 	line	362
 	
-l3179:; BSR set to: 1
+l3135:; BSR set to: 0
 
 	call	_menu_init	;wreg free
 	line	363
 	
-l3181:; BSR set to: 0
+l3137:; BSR set to: 0
 
 	movlw	low(0Ch)
 	movwf	(0+(_menu+02h))&0ffh
 	line	364
 	
-l3183:; BSR set to: 0
+l3139:; BSR set to: 0
 
 	call	_lcd_clear	;wreg free
 	line	365
 	
-l3185:
+l3141:
 	call	_menu_draw_input	;wreg free
 	line	366
-	goto	l3201
+	goto	l3157
 	line	367
 	
-l3187:
+l3143:; BSR set to: 0
+
 		movlw	3
-	movlb	0	; () banked
 	xorwf	((_button_event))&0ffh,w	;volatile
 	btfss	status,2
-	goto	u3231
-	goto	u3230
+	goto	u3291
+	goto	u3290
 
-u3231:
-	goto	l3201
-u3230:
+u3291:
+	goto	l3157
+u3290:
 	line	369
 	
-l3189:; BSR set to: 0
+l3145:; BSR set to: 0
 
 		movlw	low(STR_16)
 	movwf	((c:uart_println@str))^00h,c
@@ -3845,124 +4011,120 @@ l3189:; BSR set to: 0
 	call	_uart_println	;wreg free
 	line	370
 	
-l3191:
+l3147:
 	movlw	low(0)
-	movlb	1	; () banked
+	movlb	0	; () banked
 	movwf	((main@current_menu))&0ffh
 	line	371
 	
-l3193:; BSR set to: 1
+l3149:; BSR set to: 0
 
 	call	_menu_init	;wreg free
 	line	372
 	
-l3195:; BSR set to: 0
+l3151:; BSR set to: 0
 
 	movlw	low(05h)
 	movwf	(0+(_menu+02h))&0ffh
 	line	373
 	
-l3197:; BSR set to: 0
+l3153:; BSR set to: 0
 
 	call	_lcd_clear	;wreg free
 	line	374
 	
-l3199:
+l3155:
 	call	_menu_draw_options	;wreg free
 	line	377
 	
-l3201:
+l3157:
 	movlw	low(0)
 	movlb	0	; () banked
 	movwf	((_button_event))&0ffh	;volatile
 	line	382
 	
-l3203:; BSR set to: 0
+l3159:; BSR set to: 0
 
 	movf	(0+(_menu+03h))&0ffh,w
 	btfsc	status,2
-	goto	u3241
-	goto	u3240
-u3241:
-	goto	l3215
-u3240:
+	goto	u3301
+	goto	u3300
+u3301:
+	goto	l3171
+u3300:
 	line	384
 	
-l3205:; BSR set to: 0
+l3161:; BSR set to: 0
 
-	movlb	1	; () banked
 	infsnz	((main@blink_timer))&0ffh
 	incf	((main@blink_timer+1))&0ffh
 	line	385
 	
-l3207:; BSR set to: 1
+l3163:; BSR set to: 0
 
-		movlw	48
+		movlw	80
 	subwf	 ((main@blink_timer))&0ffh,w
-	movlw	117
+	movlw	195
 	subwfb	((main@blink_timer+1))&0ffh,w
 	btfss	status,0
-	goto	u3251
-	goto	u3250
+	goto	u3311
+	goto	u3310
 
-u3251:
-	goto	l3111
-u3250:
+u3311:
+	goto	l3067
+u3310:
 	line	387
 	
-l3209:; BSR set to: 1
+l3165:; BSR set to: 0
 
 	movlw	high(0)
 	movwf	((main@blink_timer+1))&0ffh
 	movlw	low(0)
 	movwf	((main@blink_timer))&0ffh
 	line	388
-	movlb	0	; () banked
 	movf	(0+(_menu+05h))&0ffh,w
 	btfsc	status,2
-	goto	u3261
-	goto	u3260
-u3261:
+	goto	u3321
+	goto	u3320
+u3321:
 	movlw	1
-	goto	u3270
-u3260:
+	goto	u3330
+u3320:
 	movlw	0
-u3270:
+u3330:
 	movwf	(0+(_menu+05h))&0ffh
 	line	389
 	
-l3211:; BSR set to: 0
+l3167:; BSR set to: 0
 
-	movlb	1	; () banked
 		decf	((main@current_menu))&0ffh,w
 	btfss	status,2
-	goto	u3281
-	goto	u3280
+	goto	u3341
+	goto	u3340
 
-u3281:
+u3341:
 	goto	l155
-u3280:
+u3340:
 	line	391
 	
-l3213:; BSR set to: 1
+l3169:; BSR set to: 0
 
 	call	_menu_draw_input	;wreg free
-	goto	l3111
+	goto	l3067
 	line	397
 	
-l3215:; BSR set to: 0
+l3171:; BSR set to: 0
 
 	movlw	high(0)
-	movlb	1	; () banked
 	movwf	((main@blink_timer+1))&0ffh
 	movlw	low(0)
 	movwf	((main@blink_timer))&0ffh
-	goto	l3111
+	goto	l3067
 	line	398
 	
-l155:; BSR set to: 1
+l155:; BSR set to: 0
 
-	goto	l3111
+	goto	l3067
 	global	start
 	goto	start
 	callstack 0
@@ -4014,26 +4176,26 @@ psect	text1
 	file	"src\main.c"
 	line	78
 	
-_uart_println:; BSR set to: 1
+_uart_println:; BSR set to: 0
 
 ;incstack = 0
 	callstack 27
 	line	80
 	
-l2801:
+l2243:
 		movff	(c:uart_println@str),(c:uart_print@str)
 	movff	(c:uart_println@str+1),(c:uart_print@str+1)
 
 	call	_uart_print	;wreg free
 	line	81
 	
-l2803:
+l2245:
 	movlw	(0Dh)&0ffh
 	
 	call	_uart_write
 	line	82
 	
-l2805:
+l2247:
 	movlw	(0Ah)&0ffh
 	
 	call	_uart_write
@@ -4093,59 +4255,59 @@ _uart_print:
 	callstack 27
 	line	72
 	
-l2659:
-	goto	l2665
+l2093:
+	goto	l2099
 	line	74
 	
-l2661:
+l2095:
 	movff	(c:uart_print@str),tblptrl
 	movff	(c:uart_print@str+1),tblptrh
 	clrf	tblptru
 	
 	movlw	high __ramtop-1
 	cpfsgt	tblptrh
-	bra	u2427
+	bra	u1487
 	tblrd	*
 	
 	movf	tablat,w
-	bra	u2420
-u2427:
+	bra	u1480
+u1487:
 	movff	tblptrl,fsr0l
 	movff	tblptrh,fsr0h
 	movf	indf0,w
-u2420:
+u1480:
 	
 	call	_uart_write
 	
-l2663:
+l2097:
 	infsnz	((c:uart_print@str))^00h,c
 	incf	((c:uart_print@str+1))^00h,c
 	line	72
 	
-l2665:
+l2099:
 	movff	(c:uart_print@str),tblptrl
 	movff	(c:uart_print@str+1),tblptrh
 	clrf	tblptru
 	
 	movlw	high __ramtop-1
 	cpfsgt	tblptrh
-	bra	u2437
+	bra	u1497
 	tblrd	*
 	
 	movf	tablat,w
-	bra	u2430
-u2437:
+	bra	u1490
+u1497:
 	movff	tblptrl,fsr0l
 	movff	tblptrh,fsr0h
 	movf	indf0,w
-u2430:
+u1490:
 	iorlw	0
 	btfss	status,2
-	goto	u2441
-	goto	u2440
-u2441:
-	goto	l2661
-u2440:
+	goto	u1501
+	goto	u1500
+u1501:
+	goto	l2095
+u1500:
 	line	76
 	
 l83:
@@ -4200,20 +4362,20 @@ _uart_write:
 	movwf	((c:uart_write@c))^00h,c
 	line	65
 	
-l2593:
+l2027:
 	line	66
 	
 l74:
 	line	65
 	btfss	((c:3998))^0f00h,c,4	;volatile
-	goto	u2291
-	goto	u2290
-u2291:
+	goto	u1351
+	goto	u1350
+u1351:
 	goto	l74
-u2290:
+u1350:
 	line	67
 	
-l2595:
+l2029:
 	movff	(c:uart_write@c),(c:4013)	;volatile
 	line	68
 	
@@ -4267,13 +4429,13 @@ _uart_init:
 	callstack 29
 	line	52
 	
-l2797:
+l2239:
 	bcf	((c:3988))^0f00h,c,6	;volatile
 	line	53
 	bsf	((c:3988))^0f00h,c,7	;volatile
 	line	56
 	
-l2799:
+l2241:
 	movlw	low(024h)
 	movwf	((c:4012))^0f00h,c	;volatile
 	line	57
@@ -4340,7 +4502,7 @@ _system_init:
 	callstack 29
 	line	89
 	
-l2807:
+l2249:
 	movlw	low(070h)
 	movwf	((c:4051))^0f00h,c	;volatile
 	line	90
@@ -4351,14 +4513,14 @@ l2807:
 l89:
 	line	93
 	btfss	((c:4051))^0f00h,c,2	;volatile
-	goto	u2651
-	goto	u2650
-u2651:
+	goto	u1721
+	goto	u1720
+u1721:
 	goto	l89
-u2650:
+u1720:
 	line	97
 	
-l2809:
+l2251:
 	movlw	low(0Fh)
 	movwf	((c:4033))^0f00h,c	;volatile
 	line	100
@@ -4366,18 +4528,18 @@ l2809:
 	movwf	((c:3986))^0f00h,c	;volatile
 	line	101
 	
-l2811:
+l2253:
 	setf	((c:3987))^0f00h,c	;volatile
 	line	102
 	movlw	low(0)
 	movwf	((c:3988))^0f00h,c	;volatile
 	line	103
 	
-l2813:
+l2255:
 	bsf	((c:3988))^0f00h,c,7	;volatile
 	line	106
 	
-l2815:
+l2257:
 	bcf	((c:4081))^0f00h,c,7	;volatile
 	line	109
 	movlw	low(0)
@@ -4400,7 +4562,7 @@ GLOBAL	__end_of_system_init
 
 ;; *************** function _menu_init *****************
 ;; Defined at:
-;;		line 74 in file "src\menu.c"
+;;		line 75 in file "src\menu.c"
 ;; Parameters:    Size  Location     Type
 ;;		None
 ;; Auto vars:     Size  Location     Type
@@ -4429,42 +4591,42 @@ GLOBAL	__end_of_system_init
 ;;
 psect	text6,class=CODE,space=0,reloc=2,group=0
 	file	"src\menu.c"
-	line	74
+	line	75
 global __ptext6
 __ptext6:
 psect	text6
 	file	"src\menu.c"
-	line	74
+	line	75
 	
 _menu_init:
 ;incstack = 0
 	callstack 29
-	line	76
+	line	77
 	
-l2857:
+l2299:
 	movlw	low(0)
 	movlb	0	; () banked
 	movwf	((_menu))&0ffh
-	line	77
+	line	78
 	movlw	low(0)
 	movwf	(0+(_menu+01h))&0ffh
-	line	78
+	line	79
 	movlw	low(05h)
 	movwf	(0+(_menu+02h))&0ffh
-	line	79
-	movlw	low(0)
-	movwf	(0+(_menu+03h))&0ffh
 	line	80
 	movlw	low(0)
-	movwf	(0+(_menu+05h))&0ffh
+	movwf	(0+(_menu+03h))&0ffh
 	line	81
+	movlw	low(0)
+	movwf	(0+(_menu+05h))&0ffh
+	line	82
 	movlw	high(0)
 	movwf	(1+(_menu+06h))&0ffh
 	movlw	low(0)
 	movwf	(0+(_menu+06h))&0ffh
-	line	82
+	line	83
 	
-l267:; BSR set to: 0
+l271:; BSR set to: 0
 
 	return	;funcret
 	callstack 0
@@ -4475,7 +4637,7 @@ GLOBAL	__end_of_menu_init
 
 ;; *************** function _menu_handle_encoder *****************
 ;; Defined at:
-;;		line 190 in file "src\menu.c"
+;;		line 211 in file "src\menu.c"
 ;; Parameters:    Size  Location     Type
 ;;  delta           2    9[COMRAM] int 
 ;; Auto vars:     Size  Location     Type
@@ -4503,86 +4665,169 @@ GLOBAL	__end_of_menu_init
 ;; This function uses a non-reentrant model
 ;;
 psect	text7,class=CODE,space=0,reloc=2,group=0
-	line	190
+	line	211
 global __ptext7
 __ptext7:
 psect	text7
 	file	"src\menu.c"
-	line	190
+	line	211
 	
 _menu_handle_encoder:; BSR set to: 0
 
 ;incstack = 0
 	callstack 29
-	line	193
+	line	214
 	
-l2881:
+l2323:
 	movlb	0	; () banked
 	movf	(0+(_menu+03h))&0ffh,w
 	btfsc	status,2
-	goto	u2711
-	goto	u2710
-u2711:
-	goto	l2891
-u2710:
-	line	195
+	goto	u1781
+	goto	u1780
+u1781:
+	goto	l2349
+u1780:
+	line	216
 	
-l2883:; BSR set to: 0
+l2325:; BSR set to: 0
 
 	movf	((c:menu_handle_encoder@delta))^00h,c,w
 iorwf	((c:menu_handle_encoder@delta+1))^00h,c,w
 	btfsc	status,2
-	goto	u2721
-	goto	u2720
+	goto	u1791
+	goto	u1790
 
-u2721:
-	goto	l317
-u2720:
+u1791:
+	goto	l340
+u1790:
+	line	218
 	
-l2885:; BSR set to: 0
+l2327:; BSR set to: 0
 
 	movf	((_menu))&0ffh,w
 	btfss	status,2
-	goto	u2731
-	goto	u2730
-u2731:
-	goto	l317
-u2730:
-	line	198
+	goto	u1801
+	goto	u1800
+u1801:
+	goto	l2331
+u1800:
+	line	221
 	
-l2887:; BSR set to: 0
+l2329:; BSR set to: 0
 
 	movf	((c:_enable_edit_flag))^00h,c,w
 	btfsc	status,2
-	goto	u2741
-	goto	u2740
-u2741:
+	goto	u1811
+	goto	u1810
+u1811:
 	movlw	1
-	goto	u2750
-u2740:
+	goto	u1820
+u1810:
 	movlw	0
-u2750:
+u1820:
 	movwf	((c:_enable_edit_flag))^00h,c
-	goto	l317
-	line	204
+	line	222
+	goto	l340
+	line	223
 	
-l2891:; BSR set to: 0
+l2331:; BSR set to: 0
+
+		decf	((_menu))&0ffh,w
+	btfss	status,2
+	goto	u1831
+	goto	u1830
+
+u1831:
+	goto	l340
+u1830:
+	line	226
+	
+l2333:; BSR set to: 0
 
 	btfsc	((c:menu_handle_encoder@delta+1))^00h,c,7
-	goto	u2761
+	goto	u1841
 	movf	((c:menu_handle_encoder@delta+1))^00h,c,w
-	bnz	u2760
+	bnz	u1840
 	decf	((c:menu_handle_encoder@delta))^00h,c,w
 	btfss	status,0
-	goto	u2761
-	goto	u2760
+	goto	u1841
+	goto	u1840
 
-u2761:
-	goto	l2901
-u2760:
-	line	207
+u1841:
+	goto	l2341
+u1840:
+	line	228
 	
-l2893:; BSR set to: 0
+l2335:; BSR set to: 0
+
+	incf	((c:_sensor_edit_flag))^00h,c
+	line	229
+	
+l2337:; BSR set to: 0
+
+		movlw	03h-1
+	cpfsgt	((c:_sensor_edit_flag))^00h,c
+	goto	u1851
+	goto	u1850
+
+u1851:
+	goto	l333
+u1850:
+	line	230
+	
+l2339:; BSR set to: 0
+
+	movlw	low(0)
+	movwf	((c:_sensor_edit_flag))^00h,c
+	goto	l340
+	line	234
+	
+l2341:; BSR set to: 0
+
+	movf	((c:_sensor_edit_flag))^00h,c,w
+	btfss	status,2
+	goto	u1861
+	goto	u1860
+u1861:
+	goto	l2345
+u1860:
+	line	235
+	
+l2343:; BSR set to: 0
+
+	movlw	low(02h)
+	movwf	((c:_sensor_edit_flag))^00h,c
+	goto	l340
+	line	237
+	
+l2345:; BSR set to: 0
+
+	decf	((c:_sensor_edit_flag))^00h,c
+	goto	l340
+	line	240
+	
+l333:; BSR set to: 0
+
+	goto	l340
+	line	245
+	
+l2349:; BSR set to: 0
+
+	btfsc	((c:menu_handle_encoder@delta+1))^00h,c,7
+	goto	u1871
+	movf	((c:menu_handle_encoder@delta+1))^00h,c,w
+	bnz	u1870
+	decf	((c:menu_handle_encoder@delta))^00h,c,w
+	btfss	status,0
+	goto	u1871
+	goto	u1870
+
+u1871:
+	goto	l2359
+u1870:
+	line	248
+	
+l2351:; BSR set to: 0
 
 	movlw	low(-1)
 	addwf	(0+(_menu+02h))&0ffh,w
@@ -4603,20 +4848,20 @@ l2893:; BSR set to: 0
 	xorlw	80h
 	subwfb	(??_menu_handle_encoder+4+0)^00h,c,w
 	btfsc	status,0
-	goto	u2771
-	goto	u2770
+	goto	u1881
+	goto	u1880
 
-u2771:
-	goto	l317
-u2770:
-	line	209
+u1881:
+	goto	l340
+u1880:
+	line	250
 	
-l2895:; BSR set to: 0
+l2353:; BSR set to: 0
 
 	incf	((_menu))&0ffh
-	line	212
+	line	253
 	
-l2897:; BSR set to: 0
+l2355:; BSR set to: 0
 
 	movf	(0+(_menu+01h))&0ffh,w
 	movwf	(??_menu_handle_encoder+0+0)^00h,c
@@ -4639,66 +4884,66 @@ l2897:; BSR set to: 0
 	xorlw	80h
 	subwfb	(??_menu_handle_encoder+4+0)^00h,c,w
 	btfss	status,0
-	goto	u2781
-	goto	u2780
+	goto	u1891
+	goto	u1890
 
-u2781:
-	goto	l317
-u2780:
-	line	214
+u1891:
+	goto	l340
+u1890:
+	line	255
 	
-l2899:; BSR set to: 0
+l2357:; BSR set to: 0
 
 	incf	(0+(_menu+01h))&0ffh
-	goto	l317
-	line	218
+	goto	l340
+	line	259
 	
-l2901:; BSR set to: 0
+l2359:; BSR set to: 0
 
 	btfsc	((c:menu_handle_encoder@delta+1))^00h,c,7
-	goto	u2790
-	goto	u2791
+	goto	u1900
+	goto	u1901
 
-u2791:
-	goto	l317
-u2790:
-	line	221
+u1901:
+	goto	l340
+u1900:
+	line	262
 	
-l2903:; BSR set to: 0
+l2361:; BSR set to: 0
 
 	movf	((_menu))&0ffh,w
 	btfsc	status,2
-	goto	u2801
-	goto	u2800
-u2801:
-	goto	l317
-u2800:
-	line	223
+	goto	u1911
+	goto	u1910
+u1911:
+	goto	l340
+u1910:
+	line	264
 	
-l2905:; BSR set to: 0
+l2363:; BSR set to: 0
 
 	decf	((_menu))&0ffh
-	line	226
+	line	267
 	
-l2907:; BSR set to: 0
+l2365:; BSR set to: 0
 
 		movf	(0+(_menu+01h))&0ffh,w
 	subwf	((_menu))&0ffh,w
 	btfsc	status,0
-	goto	u2811
-	goto	u2810
+	goto	u1921
+	goto	u1920
 
-u2811:
-	goto	l317
-u2810:
-	line	228
+u1921:
+	goto	l340
+u1920:
+	line	269
 	
-l2909:; BSR set to: 0
+l2367:; BSR set to: 0
 
 	decf	(0+(_menu+01h))&0ffh
-	line	232
+	line	273
 	
-l317:; BSR set to: 0
+l340:; BSR set to: 0
 
 	return	;funcret
 	callstack 0
@@ -4709,221 +4954,342 @@ GLOBAL	__end_of_menu_handle_encoder
 
 ;; *************** function _menu_handle_button *****************
 ;; Defined at:
-;;		line 235 in file "src\menu.c"
+;;		line 276 in file "src\menu.c"
 ;; Parameters:    Size  Location     Type
 ;;  press_type      1    wreg     unsigned char 
 ;; Auto vars:     Size  Location     Type
-;;  press_type      1   14[COMRAM] unsigned char 
+;;  press_type      1   24[COMRAM] unsigned char 
+;;  sensor_optio    6   16[COMRAM] PTR const unsigned char 
+;;		 -> STR_67(5), STR_66(12), STR_65(9), 
 ;; Return value:  Size  Location     Type
 ;;                  1    wreg      void 
 ;; Registers used:
-;;		wreg, fsr0l, fsr0h, fsr2l, fsr2h, status,2, status,0, tblptrl, tblptrh, tblptru, prodl, prodh, cstack
+;;		wreg, fsr0l, fsr0h, fsr1l, fsr1h, fsr2l, fsr2h, status,2, status,0, tblptrl, tblptrh, tblptru, prodl, prodh, cstack
 ;; Tracked objects:
 ;;		On entry : 3F/0
 ;;		On exit  : 0/0
 ;;		Unchanged: 0/0
 ;; Data sizes:     COMRAM   BANK0   BANK1   BANK2   BANK3   BANK4   BANK5   BANK6   BANK7   BANK8   BANK9  BANK10  BANK11  BANK12  BANK13  BANK14  BANK15
 ;;      Params:         0       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0
-;;      Locals:         1       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0
+;;      Locals:         9       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0
 ;;      Temps:          0       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0
-;;      Totals:         1       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0
-;;Total ram usage:        1 bytes
+;;      Totals:         9       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0
+;;Total ram usage:        9 bytes
 ;; Hardware stack levels used: 1
 ;; Hardware stack levels required when called: 2
 ;; This function calls:
 ;;		_beep
+;;		_strcmp
 ;;		_strcpy
 ;; This function is called by:
 ;;		_main
 ;; This function uses a non-reentrant model
 ;;
 psect	text8,class=CODE,space=0,reloc=2,group=0
-	line	235
+	line	276
 global __ptext8
 __ptext8:
 psect	text8
 	file	"src\menu.c"
-	line	235
+	line	276
 	
 _menu_handle_button:; BSR set to: 0
 
 ;incstack = 0
 	callstack 28
 	movwf	((c:menu_handle_button@press_type))^00h,c
-	line	237
+	line	278
 	
-l2995:
+l2925:
 	movlb	0	; () banked
 	movf	(0+(_menu+03h))&0ffh,w
 	btfsc	status,2
-	goto	u2961
-	goto	u2960
-u2961:
-	goto	l3025
-u2960:
-	line	239
+	goto	u2921
+	goto	u2920
+u2921:
+	goto	l2971
+u2920:
+	line	280
 	
-l2997:; BSR set to: 0
+l2927:; BSR set to: 0
 
 		decf	((c:menu_handle_button@press_type))^00h,c,w
 	btfss	status,2
-	goto	u2971
-	goto	u2970
+	goto	u2931
+	goto	u2930
 
-u2971:
-	goto	l3013
-u2970:
-	line	243
+u2931:
+	goto	l2951
+u2930:
+	line	283
 	
-l2999:; BSR set to: 0
+l2929:; BSR set to: 0
 
 	movf	((_menu))&0ffh,w
 	btfss	status,2
-	goto	u2981
-	goto	u2980
-u2981:
-	goto	l3007
-u2980:
-	line	245
+	goto	u2941
+	goto	u2940
+u2941:
+	goto	l2939
+u2940:
+	line	285
 	
-l3001:; BSR set to: 0
+l2931:; BSR set to: 0
 
 	movf	((c:_enable_edit_flag))^00h,c,w
-	btfsc	status,2
-	goto	u2991
-	goto	u2990
-u2991:
-	goto	l3005
-u2990:
-	line	247
+	btfss	status,2
+	goto	u2951
+	goto	u2950
+u2951:
+	goto	l2935
+u2950:
 	
-l3003:; BSR set to: 0
+l2933:; BSR set to: 0
+
+		movlw	low(STR_64)
+	movwf	((c:_menu_handle_button$733))^00h,c
+	movlw	high(STR_64)
+	movwf	((c:_menu_handle_button$733+1))^00h,c
+
+	goto	l2937
+	
+l2935:; BSR set to: 0
+
+		movlw	low(STR_63)
+	movwf	((c:_menu_handle_button$733))^00h,c
+	movlw	high(STR_63)
+	movwf	((c:_menu_handle_button$733+1))^00h,c
+
+	
+l2937:; BSR set to: 0
 
 		movlw	low(_value_enable)
 	movwf	((c:strcpy@to))^00h,c
+	movlw	high(_value_enable)
+	movwf	((c:strcpy@to+1))^00h,c
 
-		movlw	low(STR_52)
-	movwf	((c:strcpy@from))^00h,c
-	movlw	high(STR_52)
-	movwf	((c:strcpy@from+1))^00h,c
+		movff	(c:_menu_handle_button$733),(c:strcpy@from)
+	movff	(c:_menu_handle_button$733+1),(c:strcpy@from+1)
 
 	call	_strcpy	;wreg free
-	line	248
-	goto	l3007
-	line	251
+	line	286
+	goto	l2945
+	line	287
 	
-l3005:; BSR set to: 0
+l2939:; BSR set to: 0
 
-		movlw	low(_value_enable)
+		decf	((_menu))&0ffh,w
+	btfss	status,2
+	goto	u2961
+	goto	u2960
+
+u2961:
+	goto	l2945
+u2960:
+	line	289
+	
+l2941:; BSR set to: 0
+
+	lfsr	2,(menu_handle_button@F2312)
+	lfsr	1,(menu_handle_button@sensor_options)
+	movlw	6-1
+u2971:
+	movff	plusw2,plusw1
+	decf	wreg
+	bc	u2971
+
+	line	290
+	
+l2943:; BSR set to: 0
+
+		movlw	low(_value_sensor)
 	movwf	((c:strcpy@to))^00h,c
+	movlw	high(_value_sensor)
+	movwf	((c:strcpy@to+1))^00h,c
 
-		movlw	low(STR_53)
-	movwf	((c:strcpy@from))^00h,c
-	movlw	high(STR_53)
-	movwf	((c:strcpy@from+1))^00h,c
-
+	movf	((c:_sensor_edit_flag))^00h,c,w
+	mullw	02h
+	movf	(prodl)^0f00h,c,w
+	addlw	low(menu_handle_button@sensor_options)
+	movwf	fsr2l
+	clrf	fsr2h
+	movff	postinc2,(c:strcpy@from)
+	movff	postdec2,(c:strcpy@from+1)
 	call	_strcpy	;wreg free
-	line	255
+	line	293
 	
-l3007:
+l2945:
 	movlw	low(0)
 	movlb	0	; () banked
 	movwf	(0+(_menu+03h))&0ffh
-	line	256
+	line	294
 	
-l3009:; BSR set to: 0
+l2947:; BSR set to: 0
 
 	movlw	low(01h)
 	movwf	(0+(_menu+05h))&0ffh
-	line	257
+	line	295
 	
-l3011:; BSR set to: 0
+l2949:; BSR set to: 0
 
 	movlw	high(032h)
 	movwf	((c:beep@duration_ms+1))^00h,c
 	movlw	low(032h)
 	movwf	((c:beep@duration_ms))^00h,c
 	call	_beep	;wreg free
-	line	258
-	goto	l341
-	line	259
+	line	296
+	goto	l385
+	line	297
 	
-l3013:; BSR set to: 0
+l2951:; BSR set to: 0
 
 		movlw	2
 	xorwf	((c:menu_handle_button@press_type))^00h,c,w
 	btfss	status,2
+	goto	u2981
+	goto	u2980
+
+u2981:
+	goto	l385
+u2980:
+	line	300
+	
+l2953:; BSR set to: 0
+
+	movf	((_menu))&0ffh,w
+	btfss	status,2
+	goto	u2991
+	goto	u2990
+u2991:
+	goto	l2957
+u2990:
+	line	303
+	
+l2955:; BSR set to: 0
+
+		movlw	69
+	xorwf	((_original_value))&0ffh,w
+	btfsc	status,2
 	goto	u3001
 	goto	u3000
 
 u3001:
-	goto	l341
-u3000:
-	line	262
-	
-l3015:; BSR set to: 0
-
-	movf	((_menu))&0ffh,w
-	btfss	status,2
-	goto	u3011
+	movlw	1
 	goto	u3010
-u3011:
-	goto	l3019
+u3000:
+	movlw	0
 u3010:
-	line	265
+	movwf	((c:_enable_edit_flag))^00h,c
+	line	304
+	goto	l364
+	line	305
 	
-l3017:; BSR set to: 0
+l2957:; BSR set to: 0
 
-		movlw	69
-	xorwf	((c:_original_value))^00h,c,w
-	btfsc	status,2
+		decf	((_menu))&0ffh,w
+	btfss	status,2
 	goto	u3021
 	goto	u3020
 
 u3021:
-	movlw	1
-	goto	u3030
+	goto	l364
 u3020:
-	movlw	0
+	line	308
+	
+l2959:; BSR set to: 0
+
+		movlw	low(_original_value)
+	movwf	((c:strcmp@s1))^00h,c
+	clrf	((c:strcmp@s1+1))^00h,c
+
+		movlw	low(STR_68)
+	movwf	((c:strcmp@s2))^00h,c
+	movlw	high(STR_68)
+	movwf	((c:strcmp@s2+1))^00h,c
+
+	call	_strcmp	;wreg free
+	movf	(0+?_strcmp)^00h,c,w
+iorwf	(1+?_strcmp)^00h,c,w
+	btfss	status,2
+	goto	u3031
+	goto	u3030
+
+u3031:
+	goto	l2963
 u3030:
-	movwf	((c:_enable_edit_flag))^00h,c
-	line	267
+	line	309
 	
-l3019:; BSR set to: 0
-
+l2961:
 	movlw	low(0)
-	movwf	(0+(_menu+03h))&0ffh
-	line	268
+	movwf	((c:_sensor_edit_flag))^00h,c
+	goto	l364
+	line	310
 	
-l3021:; BSR set to: 0
+l2963:
+		movlw	low(_original_value)
+	movwf	((c:strcmp@s1))^00h,c
+	clrf	((c:strcmp@s1+1))^00h,c
 
+		movlw	low(STR_69)
+	movwf	((c:strcmp@s2))^00h,c
+	movlw	high(STR_69)
+	movwf	((c:strcmp@s2+1))^00h,c
+
+	call	_strcmp	;wreg free
+	movf	(0+?_strcmp)^00h,c,w
+iorwf	(1+?_strcmp)^00h,c,w
+	btfss	status,2
+	goto	u3041
+	goto	u3040
+
+u3041:
+	goto	l2967
+u3040:
+	line	311
+	
+l2965:
+	movlw	low(01h)
+	movwf	((c:_sensor_edit_flag))^00h,c
+	goto	l364
+	line	313
+	
+l2967:
+	movlw	low(02h)
+	movwf	((c:_sensor_edit_flag))^00h,c
+	line	315
+	
+l364:
+	movlw	low(0)
+	movlb	0	; () banked
+	movwf	(0+(_menu+03h))&0ffh
+	line	316
 	movlw	low(01h)
 	movwf	(0+(_menu+05h))&0ffh
-	line	269
+	line	317
 	
-l3023:; BSR set to: 0
+l2969:; BSR set to: 0
 
 	movlw	high(064h)
 	movwf	((c:beep@duration_ms+1))^00h,c
 	movlw	low(064h)
 	movwf	((c:beep@duration_ms))^00h,c
 	call	_beep	;wreg free
-	goto	l341
-	line	274
+	goto	l385
+	line	322
 	
-l3025:; BSR set to: 0
+l2971:; BSR set to: 0
 
 		decf	((c:menu_handle_button@press_type))^00h,c,w
 	btfss	status,2
-	goto	u3041
-	goto	u3040
+	goto	u3051
+	goto	u3050
 
-u3041:
-	goto	l3045
-u3040:
-	line	277
+u3051:
+	goto	l3001
+u3050:
+	line	325
 	
-l3027:; BSR set to: 0
+l2973:; BSR set to: 0
 
 	movf	((_menu))&0ffh,w
 	mullw	05h
@@ -4935,27 +5301,39 @@ l3027:; BSR set to: 0
 	movwf	1+c:fsr2l
 	movf	indf2,w
 	btfsc	status,2
-	goto	u3051
-	goto	u3050
-u3051:
-	goto	l3011
-u3050:
-	
-l3029:; BSR set to: 0
-
-	movf	((_menu))&0ffh,w
-	btfss	status,2
 	goto	u3061
 	goto	u3060
 u3061:
-	goto	l3011
+	goto	l2949
 u3060:
-	line	280
 	
-l3031:; BSR set to: 0
+l2975:; BSR set to: 0
+
+	movf	((_menu))&0ffh,w
+	btfsc	status,2
+	goto	u3071
+	goto	u3070
+u3071:
+	goto	l2979
+u3070:
+	
+l2977:; BSR set to: 0
+
+		decf	((_menu))&0ffh,w
+	btfss	status,2
+	goto	u3081
+	goto	u3080
+
+u3081:
+	goto	l2949
+u3080:
+	line	328
+	
+l2979:; BSR set to: 0
 
 		movlw	low(_original_value)
 	movwf	((c:strcpy@to))^00h,c
+	clrf	((c:strcpy@to+1))^00h,c
 
 	movf	((_menu))&0ffh,w
 	mullw	05h
@@ -4968,62 +5346,153 @@ l3031:; BSR set to: 0
 	movff	postinc2,(c:strcpy@from)
 	movff	postdec2,(c:strcpy@from+1)
 	call	_strcpy	;wreg free
-	line	281
+	line	330
 	
-l3033:
-		movlw	69
-	xorwf	((c:_value_enable))^00h,c,w
-	btfsc	status,2
-	goto	u3071
-	goto	u3070
+l2981:
+	movlb	0	; () banked
+	movf	((_menu))&0ffh,w
+	btfss	status,2
+	goto	u3091
+	goto	u3090
+u3091:
+	goto	l2985
+u3090:
+	line	332
+	
+l2983:; BSR set to: 0
 
-u3071:
+		movlw	69
+	movlb	1	; () banked
+	xorwf	((_value_enable))&0ffh,w
+	btfsc	status,2
+	goto	u3101
+	goto	u3100
+
+u3101:
 	movlw	1
-	goto	u3080
-u3070:
+	goto	u3110
+u3100:
 	movlw	0
-u3080:
+u3110:
 	movwf	((c:_enable_edit_flag))^00h,c
-	line	283
+	line	333
+	goto	l376
+	line	334
 	
-l3035:
+l2985:; BSR set to: 0
+
+		decf	((_menu))&0ffh,w
+	btfss	status,2
+	goto	u3121
+	goto	u3120
+
+u3121:
+	goto	l376
+u3120:
+	line	337
+	
+l2987:; BSR set to: 0
+
+		movlw	low(_value_sensor)
+	movwf	((c:strcmp@s1))^00h,c
+	movlw	high(_value_sensor)
+	movwf	((c:strcmp@s1+1))^00h,c
+
+		movlw	low(STR_70)
+	movwf	((c:strcmp@s2))^00h,c
+	movlw	high(STR_70)
+	movwf	((c:strcmp@s2+1))^00h,c
+
+	call	_strcmp	;wreg free
+	movf	(0+?_strcmp)^00h,c,w
+iorwf	(1+?_strcmp)^00h,c,w
+	btfss	status,2
+	goto	u3131
+	goto	u3130
+
+u3131:
+	goto	l2991
+u3130:
+	line	338
+	
+l2989:
+	movlw	low(0)
+	movwf	((c:_sensor_edit_flag))^00h,c
+	goto	l376
+	line	339
+	
+l2991:
+		movlw	low(_value_sensor)
+	movwf	((c:strcmp@s1))^00h,c
+	movlw	high(_value_sensor)
+	movwf	((c:strcmp@s1+1))^00h,c
+
+		movlw	low(STR_71)
+	movwf	((c:strcmp@s2))^00h,c
+	movlw	high(STR_71)
+	movwf	((c:strcmp@s2+1))^00h,c
+
+	call	_strcmp	;wreg free
+	movf	(0+?_strcmp)^00h,c,w
+iorwf	(1+?_strcmp)^00h,c,w
+	btfss	status,2
+	goto	u3141
+	goto	u3140
+
+u3141:
+	goto	l2995
+u3140:
+	line	340
+	
+l2993:
+	movlw	low(01h)
+	movwf	((c:_sensor_edit_flag))^00h,c
+	goto	l376
+	line	342
+	
+l2995:
+	movlw	low(02h)
+	movwf	((c:_sensor_edit_flag))^00h,c
+	line	345
+	
+l376:
 	movlw	low(01h)
 	movlb	0	; () banked
 	movwf	(0+(_menu+03h))&0ffh
-	line	284
-	
-l3037:; BSR set to: 0
-
+	line	346
 	movlw	high(0)
 	movwf	(1+(_menu+06h))&0ffh
 	movlw	low(0)
 	movwf	(0+(_menu+06h))&0ffh
-	goto	l3009
-	line	293
+	line	347
+	movlw	low(01h)
+	movwf	(0+(_menu+05h))&0ffh
+	goto	l2949
+	line	355
 	
-l3045:; BSR set to: 0
+l3001:; BSR set to: 0
 
 		movlw	3
 	xorwf	((c:menu_handle_button@press_type))^00h,c,w
 	btfss	status,2
-	goto	u3091
-	goto	u3090
+	goto	u3151
+	goto	u3150
 
-u3091:
-	goto	l341
-u3090:
-	line	296
+u3151:
+	goto	l385
+u3150:
+	line	358
 	
-l3047:; BSR set to: 0
+l3003:; BSR set to: 0
 
 	movlw	high(0C8h)
 	movwf	((c:beep@duration_ms+1))^00h,c
 	movlw	low(0C8h)
 	movwf	((c:beep@duration_ms))^00h,c
 	call	_beep	;wreg free
-	line	299
+	line	361
 	
-l341:
+l385:
 	return	;funcret
 	callstack 0
 GLOBAL	__end_of_menu_handle_button
@@ -5075,11 +5544,11 @@ _beep:
 	callstack 28
 	line	215
 	
-l2667:
+l2101:
 	bsf	((c:3979))^0f00h,c,2	;volatile
 	line	216
 	
-l2669:
+l2103:
 	movlw	high(0)
 	movwf	((c:beep@i+1))^00h,c
 	movlw	low(0)
@@ -5087,23 +5556,23 @@ l2669:
 	goto	l127
 	line	218
 	
-l2671:
+l2105:
 	asmopt push
 asmopt off
 movlw	11
 movwf	(??_beep+0+0)^00h,c
 	movlw	98
-u3327:
+u3387:
 decfsz	wreg,f
-	bra	u3327
+	bra	u3387
 	decfsz	(??_beep+0+0)^00h,c,f
-	bra	u3327
+	bra	u3387
 	nop2
 asmopt pop
 
 	line	216
 	
-l2673:
+l2107:
 	infsnz	((c:beep@i))^00h,c
 	incf	((c:beep@i+1))^00h,c
 	
@@ -5113,12 +5582,12 @@ l127:
 	movf	((c:beep@duration_ms+1))^00h,c,w
 	subwfb	((c:beep@i+1))^00h,c,w
 	btfss	status,0
-	goto	u2451
-	goto	u2450
+	goto	u1511
+	goto	u1510
 
-u2451:
-	goto	l2671
-u2450:
+u1511:
+	goto	l2105
+u1510:
 	
 l129:
 	line	220
@@ -5135,7 +5604,7 @@ GLOBAL	__end_of_beep
 
 ;; *************** function _menu_draw_options *****************
 ;; Defined at:
-;;		line 85 in file "src\menu.c"
+;;		line 86 in file "src\menu.c"
 ;; Parameters:    Size  Location     Type
 ;;		None
 ;; Auto vars:     Size  Location     Type
@@ -5145,7 +5614,7 @@ GLOBAL	__end_of_beep
 ;; Registers used:
 ;;		wreg, fsr0l, fsr0h, fsr2l, fsr2h, status,2, status,0, tblptrl, tblptrh, tblptru, prodl, prodh, cstack
 ;; Tracked objects:
-;;		On entry : 0/1
+;;		On entry : 0/0
 ;;		On exit  : 0/0
 ;;		Unchanged: 0/0
 ;; Data sizes:     COMRAM   BANK0   BANK1   BANK2   BANK3   BANK4   BANK5   BANK6   BANK7   BANK8   BANK9  BANK10  BANK11  BANK12  BANK13  BANK14  BANK15
@@ -5166,23 +5635,23 @@ GLOBAL	__end_of_beep
 ;;
 psect	text10,class=CODE,space=0,reloc=2,group=0
 	file	"src\menu.c"
-	line	85
+	line	86
 global __ptext10
 __ptext10:
 psect	text10
 	file	"src\menu.c"
-	line	85
+	line	86
 	
 _menu_draw_options:
 ;incstack = 0
 	callstack 24
-	line	88
+	line	89
 	
-l2859:
+l2301:
 	movlw	(0)&0ffh
 	
 	call	_lcd_clear_line
-	line	89
+	line	90
 	movlw	low(0)
 	movwf	((c:lcd_print_at@col))^00h,c
 		movlw	low(STR_35)
@@ -5193,22 +5662,22 @@ l2859:
 	movlw	(0)&0ffh
 	
 	call	_lcd_print_at
-	line	92
+	line	93
 	
-l2861:
+l2303:
 	movlw	low(0)
 	movwf	((c:menu_draw_options@i))^00h,c
-	goto	l2877
-	line	94
+	goto	l2319
+	line	95
 	
-l2863:; BSR set to: 0
+l2305:; BSR set to: 0
 
 	incf	((c:menu_draw_options@i))^00h,c,w
 	
 	call	_lcd_clear_line
-	line	97
+	line	98
 	
-l2865:
+l2307:
 	movlb	0	; () banked
 	movf	((_menu))&0ffh,w
 	movwf	(??_menu_draw_options+0+0)^00h,c
@@ -5222,19 +5691,19 @@ l2865:
 	addwfc	(??_menu_draw_options+2+1)^00h,c
 	movf	(??_menu_draw_options+0+0)^00h,c,w
 xorwf	(??_menu_draw_options+2+0)^00h,c,w
-	bnz	u2681
+	bnz	u1751
 movf	(??_menu_draw_options+0+1)^00h,c,w
 xorwf	(??_menu_draw_options+2+1)^00h,c,w
 	btfss	status,2
-	goto	u2681
-	goto	u2680
+	goto	u1751
+	goto	u1750
 
-u2681:
-	goto	l2873
-u2680:
-	line	99
+u1751:
+	goto	l2315
+u1750:
+	line	100
 	
-l2867:; BSR set to: 0
+l2309:; BSR set to: 0
 
 	movlw	low(0)
 	movwf	((c:lcd_print_at@col))^00h,c
@@ -5246,9 +5715,9 @@ l2867:; BSR set to: 0
 	incf	((c:menu_draw_options@i))^00h,c,w
 	
 	call	_lcd_print_at
-	line	100
+	line	101
 	
-l2869:
+l2311:
 	movf	((c:menu_draw_options@i))^00h,c,w
 	mullw	02h
 	movff	prodl,??_menu_draw_options+0+0
@@ -5263,20 +5732,20 @@ l2869:
 	movff	postinc2,(c:lcd_print@str)
 	movff	postdec2,(c:lcd_print@str+1)
 	call	_lcd_print	;wreg free
-	line	101
+	line	102
 	
-l2871:
+l2313:
 		movlw	low(STR_37)
 	movwf	((c:lcd_print@str))^00h,c
 	movlw	high(STR_37)
 	movwf	((c:lcd_print@str+1))^00h,c
 
 	call	_lcd_print	;wreg free
-	line	102
-	goto	l2875
-	line	105
+	line	103
+	goto	l2317
+	line	106
 	
-l2873:; BSR set to: 0
+l2315:; BSR set to: 0
 
 	movlw	low(01h)
 	movwf	((c:lcd_print_at@col))^00h,c
@@ -5295,22 +5764,22 @@ l2873:; BSR set to: 0
 	incf	((c:menu_draw_options@i))^00h,c,w
 	
 	call	_lcd_print_at
-	line	92
+	line	93
 	
-l2875:
+l2317:
 	incf	((c:menu_draw_options@i))^00h,c
 	
-l2877:
+l2319:
 		movlw	03h-0
 	cpfslt	((c:menu_draw_options@i))^00h,c
-	goto	u2691
-	goto	u2690
+	goto	u1761
+	goto	u1760
 
-u2691:
-	goto	l277
-u2690:
+u1761:
+	goto	l281
+u1760:
 	
-l2879:
+l2321:
 	movlb	0	; () banked
 	movf	(0+(_menu+02h))&0ffh,w
 	movwf	(??_menu_draw_options+0+0)^00h,c
@@ -5331,15 +5800,15 @@ l2879:
 	xorlw	80h
 	subwfb	(??_menu_draw_options+4+0)^00h,c,w
 	btfss	status,0
-	goto	u2701
-	goto	u2700
+	goto	u1771
+	goto	u1770
 
-u2701:
-	goto	l2863
-u2700:
-	line	108
+u1771:
+	goto	l2305
+u1770:
+	line	109
 	
-l277:
+l281:
 	return	;funcret
 	callstack 0
 GLOBAL	__end_of_menu_draw_options
@@ -5349,38 +5818,47 @@ GLOBAL	__end_of_menu_draw_options
 
 ;; *************** function _menu_draw_input *****************
 ;; Defined at:
-;;		line 111 in file "src\menu.c"
+;;		line 112 in file "src\menu.c"
 ;; Parameters:    Size  Location     Type
 ;;		None
 ;; Auto vars:     Size  Location     Type
-;;  j               1   29[BANK0 ] unsigned char 
-;;  j               1   28[BANK0 ] unsigned char 
-;;  blank          10    0[BANK0 ] unsigned char [10]
-;;  val_len         1   23[BANK0 ] unsigned char 
-;;  val_len         1   22[BANK0 ] unsigned char 
-;;  value_buf      12   10[BANK0 ] unsigned char [12]
-;;  item_idx        1   32[BANK0 ] unsigned char 
-;;  val_len         1   30[BANK0 ] unsigned char 
-;;  i               1   31[BANK0 ] unsigned char 
+;;  j               1   90[COMRAM] unsigned char 
+;;  j               1   89[COMRAM] unsigned char 
+;;  j               1   88[COMRAM] unsigned char 
+;;  blank          10   39[COMRAM] unsigned char [10]
+;;  val_len         1   83[COMRAM] unsigned char 
+;;  sensor_optio    6   55[COMRAM] PTR const unsigned char 
+;;		 -> STR_54(5), STR_53(5), STR_52(9), 
+;;  val_len         1   82[COMRAM] unsigned char 
+;;  val_len         1   81[COMRAM] unsigned char 
+;;  sensor_optio    6   49[COMRAM] PTR const unsigned char 
+;;		 -> STR_44(5), STR_43(5), STR_42(9), 
+;;  value_buf      20   61[COMRAM] unsigned char [20]
+;;  item_idx        1   93[COMRAM] unsigned char 
+;;  val_len         1   91[COMRAM] unsigned char 
+;;  i               1   92[COMRAM] unsigned char 
 ;; Return value:  Size  Location     Type
 ;;                  1    wreg      void 
 ;; Registers used:
 ;;		wreg, fsr0l, fsr0h, fsr1l, fsr1h, fsr2l, fsr2h, status,2, status,0, tblptrl, tblptrh, tblptru, prodl, prodh, cstack
 ;; Tracked objects:
-;;		On entry : 0/1
-;;		On exit  : 3F/0
+;;		On entry : 0/0
+;;		On exit  : 0/0
 ;;		Unchanged: 0/0
 ;; Data sizes:     COMRAM   BANK0   BANK1   BANK2   BANK3   BANK4   BANK5   BANK6   BANK7   BANK8   BANK9  BANK10  BANK11  BANK12  BANK13  BANK14  BANK15
 ;;      Params:         0       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0
-;;      Locals:         0      33       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0
+;;      Locals:        55       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0
 ;;      Temps:          2       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0
-;;      Totals:         2      33       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0
-;;Total ram usage:       35 bytes
+;;      Totals:        57       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0
+;;Total ram usage:       57 bytes
 ;; Hardware stack levels used: 1
 ;; Hardware stack levels required when called: 6
 ;; This function calls:
 ;;		_lcd_clear_line
+;;		_lcd_print
 ;;		_lcd_print_at
+;;		_lcd_set_cursor
+;;		_memset
 ;;		_sprintf
 ;;		_strcat
 ;;		_strcmp
@@ -5391,23 +5869,23 @@ GLOBAL	__end_of_menu_draw_options
 ;; This function uses a non-reentrant model
 ;;
 psect	text11,class=CODE,space=0,reloc=2,group=0
-	line	111
+	line	112
 global __ptext11
 __ptext11:
 psect	text11
 	file	"src\menu.c"
-	line	111
+	line	112
 	
 _menu_draw_input:
 ;incstack = 0
 	callstack 24
-	line	114
+	line	115
 	
-l2911:
+l2811:
 	movlw	(0)&0ffh
 	
 	call	_lcd_clear_line
-	line	115
+	line	116
 	movlw	low(0)
 	movwf	((c:lcd_print_at@col))^00h,c
 		movlw	low(STR_38)
@@ -5418,34 +5896,32 @@ l2911:
 	movlw	(0)&0ffh
 	
 	call	_lcd_print_at
-	line	118
+	line	119
 	
-l2913:
+l2813:
 	movlw	low(0)
-	movlb	0	; () banked
-	movwf	((menu_draw_input@i))&0ffh
-	goto	l2991
-	line	120
-	
-l2915:; BSR set to: 0
-
-	movf	(0+(_menu+01h))&0ffh,w
-	addwf	((menu_draw_input@i))&0ffh,w
-	movwf	((menu_draw_input@item_idx))&0ffh
+	movwf	((c:menu_draw_input@i))^00h,c
+	goto	l2921
 	line	121
 	
-l2917:; BSR set to: 0
+l2815:
+	movlb	0	; () banked
+	movf	(0+(_menu+01h))&0ffh,w
+	addwf	((c:menu_draw_input@i))^00h,c,w
+	movwf	((c:menu_draw_input@item_idx))^00h,c
+	line	122
+	
+l2817:; BSR set to: 0
 
-	incf	((menu_draw_input@i))&0ffh,w
+	incf	((c:menu_draw_input@i))^00h,c,w
 	
 	call	_lcd_clear_line
-	line	124
+	line	125
 	
-l2919:
+l2819:
 	movlw	low(0)
 	movwf	((c:lcd_print_at@col))^00h,c
-	movlb	0	; () banked
-	movf	((menu_draw_input@item_idx))&0ffh,w
+	movf	((c:menu_draw_input@item_idx))^00h,c,w
 	mullw	05h
 	movlw	low(_input_menu)
 	addwf	(prodl)^0f00h,c,w
@@ -5455,115 +5931,175 @@ l2919:
 	movwf	1+c:fsr2l
 	movff	postinc2,(c:lcd_print_at@str)
 	movff	postdec2,(c:lcd_print_at@str+1)
-	incf	((menu_draw_input@i))&0ffh,w
+	incf	((c:menu_draw_input@i))^00h,c,w
 	
 	call	_lcd_print_at
 	line	129
 	
-l2921:
-	movlb	0	; () banked
-	movf	((menu_draw_input@item_idx))&0ffh,w
-xorwf	((_menu))&0ffh,w
-	btfss	status,2
-	goto	u2821
-	goto	u2820
+l2821:
+		movlw	low(menu_draw_input@value_buf)
+	movwf	((c:memset@p1))^00h,c
 
-u2821:
-	goto	l2979
-u2820:
+	movlw	high(0)
+	movwf	((c:memset@c+1))^00h,c
+	movlw	low(0)
+	movwf	((c:memset@c))^00h,c
+	movlw	high(014h)
+	movwf	((c:memset@n+1))^00h,c
+	movlw	low(014h)
+	movwf	((c:memset@n))^00h,c
+	call	_memset	;wreg free
 	line	131
 	
-l2923:; BSR set to: 0
+l2823:
+	movf	((c:menu_draw_input@item_idx))^00h,c,w
+	movlb	0	; () banked
+xorwf	((_menu))&0ffh,w
+	btfss	status,2
+	goto	u2731
+	goto	u2730
+
+u2731:
+	goto	l2905
+u2730:
+	line	133
+	
+l2825:; BSR set to: 0
 
 	movf	(0+(_menu+03h))&0ffh,w
 	btfsc	status,2
-	goto	u2831
-	goto	u2830
-u2831:
-	goto	l2977
-u2830:
-	line	134
+	goto	u2741
+	goto	u2740
+u2741:
+	goto	l2903
+u2740:
+	line	136
 	
-l2925:; BSR set to: 0
+l2827:; BSR set to: 0
 
 	movf	(0+(_menu+05h))&0ffh,w
 	btfsc	status,2
-	goto	u2841
-	goto	u2840
-u2841:
-	goto	l2939
-u2840:
-	line	137
-	
-l2927:; BSR set to: 0
-
-	movf	((menu_draw_input@item_idx))&0ffh,w
-	btfss	status,2
-	goto	u2851
-	goto	u2850
-u2851:
-	goto	l2937
-u2850:
+	goto	u2751
+	goto	u2750
+u2751:
+	goto	l2847
+u2750:
 	line	139
 	
-l2929:; BSR set to: 0
+l2829:; BSR set to: 0
+
+	movf	((c:menu_draw_input@item_idx))^00h,c,w
+	btfss	status,2
+	goto	u2761
+	goto	u2760
+u2761:
+	goto	l2839
+u2760:
+	line	141
+	
+l2831:; BSR set to: 0
 
 	movf	((c:_enable_edit_flag))^00h,c,w
 	btfss	status,2
-	goto	u2861
-	goto	u2860
-u2861:
-	goto	l2933
-u2860:
+	goto	u2771
+	goto	u2770
+u2771:
+	goto	l2835
+u2770:
 	
-l2931:; BSR set to: 0
+l2833:; BSR set to: 0
 
 		movlw	low(STR_41)
-	movwf	((_menu_draw_input$681))&0ffh
+	movwf	((c:_menu_draw_input$689))^00h,c
 	movlw	high(STR_41)
-	movwf	((_menu_draw_input$681+1))&0ffh
+	movwf	((c:_menu_draw_input$689+1))^00h,c
 
-	goto	l2935
+	goto	l2837
 	
-l2933:; BSR set to: 0
+l2835:; BSR set to: 0
 
 		movlw	low(STR_40)
-	movwf	((_menu_draw_input$681))&0ffh
+	movwf	((c:_menu_draw_input$689))^00h,c
 	movlw	high(STR_40)
-	movwf	((_menu_draw_input$681+1))&0ffh
+	movwf	((c:_menu_draw_input$689+1))^00h,c
 
 	
-l2935:; BSR set to: 0
+l2837:; BSR set to: 0
 
 		movlw	low(menu_draw_input@value_buf)
 	movwf	((c:sprintf@sp))^00h,c
-	clrf	((c:sprintf@sp+1))^00h,c
 
 		movlw	low(STR_39)
 	movwf	((c:sprintf@f))^00h,c
 	movlw	high(STR_39)
 	movwf	((c:sprintf@f+1))^00h,c
 
-		movff	(_menu_draw_input$681),0+((c:?_sprintf)+04h)
-	movff	(_menu_draw_input$681+1),1+((c:?_sprintf)+04h)
+		movff	(c:_menu_draw_input$689),0+((c:?_sprintf)+03h)
+	movff	(c:_menu_draw_input$689+1),1+((c:?_sprintf)+03h)
 
 	call	_sprintf	;wreg free
-	line	140
-	goto	l2981
+	line	142
+	goto	l2907
 	line	143
 	
-l2937:; BSR set to: 0
+l2839:; BSR set to: 0
+
+		decf	((c:menu_draw_input@item_idx))^00h,c,w
+	btfss	status,2
+	goto	u2781
+	goto	u2780
+
+u2781:
+	goto	l2845
+u2780:
+	line	145
+	
+l2841:; BSR set to: 0
+
+	lfsr	2,(menu_draw_input@F2297)
+	lfsr	1,(menu_draw_input@sensor_options)
+	movlw	6-1
+u2791:
+	movff	plusw2,plusw1
+	decf	wreg
+	bc	u2791
+
+	line	146
+	
+l2843:; BSR set to: 0
 
 		movlw	low(menu_draw_input@value_buf)
 	movwf	((c:sprintf@sp))^00h,c
-	clrf	((c:sprintf@sp+1))^00h,c
 
-		movlw	low(STR_42)
+		movlw	low(STR_45)
 	movwf	((c:sprintf@f))^00h,c
-	movlw	high(STR_42)
+	movlw	high(STR_45)
 	movwf	((c:sprintf@f+1))^00h,c
 
-	movf	((menu_draw_input@item_idx))&0ffh,w
+	movf	((c:_sensor_edit_flag))^00h,c,w
+	mullw	02h
+	movf	(prodl)^0f00h,c,w
+	addlw	low(menu_draw_input@sensor_options)
+	movwf	fsr2l
+	clrf	fsr2h
+	movff	postinc2,0+((c:?_sprintf)+03h)
+	movff	postdec2,1+((c:?_sprintf)+03h)
+	call	_sprintf	;wreg free
+	line	147
+	goto	l2907
+	line	150
+	
+l2845:; BSR set to: 0
+
+		movlw	low(menu_draw_input@value_buf)
+	movwf	((c:sprintf@sp))^00h,c
+
+		movlw	low(STR_46)
+	movwf	((c:sprintf@f))^00h,c
+	movlw	high(STR_46)
+	movwf	((c:sprintf@f+1))^00h,c
+
+	movf	((c:menu_draw_input@item_idx))^00h,c,w
 	mullw	05h
 	movlw	low(_input_menu+02h)
 	addwf	(prodl)^0f00h,c,w
@@ -5571,130 +6107,220 @@ l2937:; BSR set to: 0
 	movlw	high(_input_menu+02h)
 	addwfc	prod+1,w
 	movwf	1+c:fsr2l
-	movff	postinc2,0+((c:?_sprintf)+04h)
-	movff	postdec2,1+((c:?_sprintf)+04h)
+	movff	postinc2,0+((c:?_sprintf)+03h)
+	movff	postdec2,1+((c:?_sprintf)+03h)
 	call	_sprintf	;wreg free
-	goto	l2981
-	line	149
+	goto	l2907
+	line	156
 	
-l2939:; BSR set to: 0
+l2847:; BSR set to: 0
 
-	movf	((menu_draw_input@item_idx))&0ffh,w
+	movf	((c:menu_draw_input@item_idx))^00h,c,w
 	btfss	status,2
-	goto	u2871
-	goto	u2870
-u2871:
-	goto	l2961
-u2870:
-	line	151
+	goto	u2801
+	goto	u2800
+u2801:
+	goto	l2869
+u2800:
+	line	158
 	
-l2941:; BSR set to: 0
+l2849:; BSR set to: 0
 
 	movf	((c:_enable_edit_flag))^00h,c,w
 	btfss	status,2
-	goto	u2881
-	goto	u2880
-u2881:
-	goto	l2945
-u2880:
+	goto	u2811
+	goto	u2810
+u2811:
+	goto	l2853
+u2810:
 	
-l2943:; BSR set to: 0
+l2851:; BSR set to: 0
 
-		movlw	low(STR_44)
-	movwf	((_menu_draw_input$687))&0ffh
-	movlw	high(STR_44)
-	movwf	((_menu_draw_input$687+1))&0ffh
+		movlw	low(STR_48)
+	movwf	((c:_menu_draw_input$701))^00h,c
+	movlw	high(STR_48)
+	movwf	((c:_menu_draw_input$701+1))^00h,c
 
-	goto	l2947
+	goto	l2855
 	
-l2945:; BSR set to: 0
+l2853:; BSR set to: 0
 
-		movlw	low(STR_43)
-	movwf	((_menu_draw_input$687))&0ffh
-	movlw	high(STR_43)
-	movwf	((_menu_draw_input$687+1))&0ffh
+		movlw	low(STR_47)
+	movwf	((c:_menu_draw_input$701))^00h,c
+	movlw	high(STR_47)
+	movwf	((c:_menu_draw_input$701+1))^00h,c
 
 	
-l2947:; BSR set to: 0
+l2855:; BSR set to: 0
 
-		movff	(_menu_draw_input$687),(c:strlen@s)
-	movff	(_menu_draw_input$687+1),(c:strlen@s+1)
+		movff	(c:_menu_draw_input$701),(c:strlen@s)
+	movff	(c:_menu_draw_input$701+1),(c:strlen@s+1)
 
 	call	_strlen	;wreg free
 	movf	(0+?_strlen)^00h,c,w
-	movlb	0	; () banked
-	movwf	((menu_draw_input@val_len))&0ffh
-	line	152
+	movwf	((c:menu_draw_input@val_len))^00h,c
+	line	159
 	
-l2949:; BSR set to: 0
-
+l2857:
 		movlw	low(menu_draw_input@value_buf)
 	movwf	((c:sprintf@sp))^00h,c
-	clrf	((c:sprintf@sp+1))^00h,c
 
-		movlw	low(STR_45)
+		movlw	low(STR_49)
 	movwf	((c:sprintf@f))^00h,c
-	movlw	high(STR_45)
+	movlw	high(STR_49)
 	movwf	((c:sprintf@f+1))^00h,c
 
 	call	_sprintf	;wreg free
-	line	153
+	line	160
 	
-l2951:
+l2859:
 	movlw	low(0)
-	movlb	0	; () banked
-	movwf	((menu_draw_input@j))&0ffh
-	goto	l2957
-	line	154
+	movwf	((c:menu_draw_input@j))^00h,c
+	goto	l2865
+	line	161
 	
-l2953:; BSR set to: 0
-
+l2861:
 		movlw	low(menu_draw_input@value_buf)
 	movwf	((c:strcat@to))^00h,c
 
-		movlw	low(STR_46)
+		movlw	low(STR_50)
 	movwf	((c:strcat@from))^00h,c
-	movlw	high(STR_46)
+	movlw	high(STR_50)
 	movwf	((c:strcat@from+1))^00h,c
 
 	call	_strcat	;wreg free
-	line	153
+	line	160
 	
-l2955:
-	movlb	0	; () banked
-	incf	((menu_draw_input@j))&0ffh
+l2863:
+	incf	((c:menu_draw_input@j))^00h,c
 	
-l2957:; BSR set to: 0
-
-		movf	((menu_draw_input@val_len))&0ffh,w
-	subwf	((menu_draw_input@j))&0ffh,w
+l2865:
+		movf	((c:menu_draw_input@val_len))^00h,c,w
+	subwf	((c:menu_draw_input@j))^00h,c,w
 	btfss	status,0
-	goto	u2891
-	goto	u2890
+	goto	u2821
+	goto	u2820
 
-u2891:
-	goto	l2953
-u2890:
-	line	155
+u2821:
+	goto	l2861
+u2820:
+	line	162
 	
-l2959:; BSR set to: 0
-
+l2867:
 		movlw	low(menu_draw_input@value_buf)
 	movwf	((c:strcat@to))^00h,c
 
-		movlw	low(STR_47)
+		movlw	low(STR_51)
 	movwf	((c:strcat@from))^00h,c
-	movlw	high(STR_47)
+	movlw	high(STR_51)
 	movwf	((c:strcat@from+1))^00h,c
 
 	call	_strcat	;wreg free
-	line	156
-	goto	l2981
-	line	159
+	line	163
+	goto	l2907
+	line	164
 	
-l2961:; BSR set to: 0
+l2869:; BSR set to: 0
 
-	movf	((menu_draw_input@item_idx))&0ffh,w
+		decf	((c:menu_draw_input@item_idx))^00h,c,w
+	btfss	status,2
+	goto	u2831
+	goto	u2830
+
+u2831:
+	goto	l2887
+u2830:
+	line	166
+	
+l2871:; BSR set to: 0
+
+	lfsr	2,(menu_draw_input@F2301)
+	lfsr	1,(menu_draw_input@sensor_options_710)
+	movlw	6-1
+u2841:
+	movff	plusw2,plusw1
+	decf	wreg
+	bc	u2841
+
+	line	167
+	
+l2873:; BSR set to: 0
+
+	movf	((c:_sensor_edit_flag))^00h,c,w
+	mullw	02h
+	movf	(prodl)^0f00h,c,w
+	addlw	low(menu_draw_input@sensor_options_710)
+	movwf	fsr2l
+	clrf	fsr2h
+	movff	postinc2,(c:strlen@s)
+	movff	postdec2,(c:strlen@s+1)
+	call	_strlen	;wreg free
+	movf	(0+?_strlen)^00h,c,w
+	movwf	((c:menu_draw_input@val_len_711))^00h,c
+	line	168
+	
+l2875:
+		movlw	low(menu_draw_input@value_buf)
+	movwf	((c:sprintf@sp))^00h,c
+
+		movlw	low(STR_55)
+	movwf	((c:sprintf@f))^00h,c
+	movlw	high(STR_55)
+	movwf	((c:sprintf@f+1))^00h,c
+
+	call	_sprintf	;wreg free
+	line	169
+	
+l2877:
+	movlw	low(0)
+	movwf	((c:menu_draw_input@j_713))^00h,c
+	goto	l2883
+	line	170
+	
+l2879:
+		movlw	low(menu_draw_input@value_buf)
+	movwf	((c:strcat@to))^00h,c
+
+		movlw	low(STR_56)
+	movwf	((c:strcat@from))^00h,c
+	movlw	high(STR_56)
+	movwf	((c:strcat@from+1))^00h,c
+
+	call	_strcat	;wreg free
+	line	169
+	
+l2881:
+	incf	((c:menu_draw_input@j_713))^00h,c
+	
+l2883:
+		movf	((c:menu_draw_input@val_len_711))^00h,c,w
+	subwf	((c:menu_draw_input@j_713))^00h,c,w
+	btfss	status,0
+	goto	u2851
+	goto	u2850
+
+u2851:
+	goto	l2879
+u2850:
+	line	171
+	
+l2885:
+		movlw	low(menu_draw_input@value_buf)
+	movwf	((c:strcat@to))^00h,c
+
+		movlw	low(STR_57)
+	movwf	((c:strcat@from))^00h,c
+	movlw	high(STR_57)
+	movwf	((c:strcat@from+1))^00h,c
+
+	call	_strcat	;wreg free
+	line	172
+	goto	l2907
+	line	175
+	
+l2887:; BSR set to: 0
+
+	movf	((c:menu_draw_input@item_idx))^00h,c,w
 	mullw	05h
 	movlw	low(_input_menu+02h)
 	addwf	(prodl)^0f00h,c,w
@@ -5706,96 +6332,89 @@ l2961:; BSR set to: 0
 	movff	postdec2,(c:strlen@s+1)
 	call	_strlen	;wreg free
 	movf	(0+?_strlen)^00h,c,w
-	movlb	0	; () banked
-	movwf	((menu_draw_input@val_len_692))&0ffh
-	line	160
+	movwf	((c:menu_draw_input@val_len_716))^00h,c
+	line	176
 	
-l2963:; BSR set to: 0
-
-	lfsr	2,(menu_draw_input@F2299)
+l2889:
+	lfsr	2,(menu_draw_input@F2306)
 	lfsr	1,(menu_draw_input@blank)
 	movlw	10-1
-u2901:
+u2861:
 	movff	plusw2,plusw1
 	decf	wreg
-	bc	u2901
+	bc	u2861
 
-	line	161
+	line	177
 	
-l2965:; BSR set to: 0
-
+l2891:
 	movlw	low(0)
-	movwf	((menu_draw_input@j_695))&0ffh
-	goto	l2971
-	line	162
+	movwf	((c:menu_draw_input@j_719))^00h,c
+	goto	l2897
+	line	178
 	
-l2967:; BSR set to: 0
-
+l2893:
 		movlw	low(menu_draw_input@blank)
 	movwf	((c:strcat@to))^00h,c
 
-		movlw	low(STR_48)
+		movlw	low(STR_58)
 	movwf	((c:strcat@from))^00h,c
-	movlw	high(STR_48)
+	movlw	high(STR_58)
 	movwf	((c:strcat@from+1))^00h,c
 
 	call	_strcat	;wreg free
-	line	161
+	line	177
 	
-l2969:
-	movlb	0	; () banked
-	incf	((menu_draw_input@j_695))&0ffh
+l2895:
+	incf	((c:menu_draw_input@j_719))^00h,c
 	
-l2971:; BSR set to: 0
-
-		movf	((menu_draw_input@val_len_692))&0ffh,w
-	subwf	((menu_draw_input@j_695))&0ffh,w
+l2897:
+		movf	((c:menu_draw_input@val_len_716))^00h,c,w
+	subwf	((c:menu_draw_input@j_719))^00h,c,w
 	btfss	status,0
-	goto	u2911
-	goto	u2910
+	goto	u2871
+	goto	u2870
 
-u2911:
-	goto	l2967
-u2910:
-	line	163
+u2871:
+	goto	l2893
+u2870:
+	line	179
 	
-l2973:; BSR set to: 0
-
+l2899:
 		movlw	low(menu_draw_input@blank)
 	movwf	((c:strcat@to))^00h,c
 
-		movlw	low(STR_49)
+		movlw	low(STR_59)
 	movwf	((c:strcat@from))^00h,c
-	movlw	high(STR_49)
+	movlw	high(STR_59)
 	movwf	((c:strcat@from+1))^00h,c
 
 	call	_strcat	;wreg free
-	line	164
+	line	180
 	
-l2975:
+l2901:
 		movlw	low(menu_draw_input@value_buf)
 	movwf	((c:strcpy@to))^00h,c
+	clrf	((c:strcpy@to+1))^00h,c
 
 		movlw	low(menu_draw_input@blank)
 	movwf	((c:strcpy@from))^00h,c
 	clrf	((c:strcpy@from+1))^00h,c
 
 	call	_strcpy	;wreg free
-	goto	l2981
-	line	171
+	goto	l2907
+	line	187
 	
-l2977:; BSR set to: 0
+l2903:; BSR set to: 0
 
 		movlw	low(menu_draw_input@value_buf)
 	movwf	((c:sprintf@sp))^00h,c
-	clrf	((c:sprintf@sp+1))^00h,c
 
-		movlw	low(STR_50)
+		movlw	low(STR_60)
 	movwf	((c:sprintf@f))^00h,c
-	movlw	high(STR_50)
+	movlw	high(STR_60)
 	movwf	((c:sprintf@f+1))^00h,c
 
-	movf	((menu_draw_input@item_idx))&0ffh,w
+	movf	((c:menu_draw_input@item_idx))^00h,c,w
 	mullw	05h
 	movlw	low(_input_menu+02h)
 	addwf	(prodl)^0f00h,c,w
@@ -5803,18 +6422,19 @@ l2977:; BSR set to: 0
 	movlw	high(_input_menu+02h)
 	addwfc	prod+1,w
 	movwf	1+c:fsr2l
-	movff	postinc2,0+((c:?_sprintf)+04h)
-	movff	postdec2,1+((c:?_sprintf)+04h)
+	movff	postinc2,0+((c:?_sprintf)+03h)
+	movff	postdec2,1+((c:?_sprintf)+03h)
 	call	_sprintf	;wreg free
-	goto	l2981
-	line	177
+	goto	l2907
+	line	193
 	
-l2979:; BSR set to: 0
+l2905:; BSR set to: 0
 
 		movlw	low(menu_draw_input@value_buf)
 	movwf	((c:strcpy@to))^00h,c
+	clrf	((c:strcpy@to+1))^00h,c
 
-	movf	((menu_draw_input@item_idx))&0ffh,w
+	movf	((c:menu_draw_input@item_idx))^00h,c,w
 	mullw	05h
 	movlw	low(_input_menu+02h)
 	addwf	(prodl)^0f00h,c,w
@@ -5825,32 +6445,29 @@ l2979:; BSR set to: 0
 	movff	postinc2,(c:strcpy@from)
 	movff	postdec2,(c:strcpy@from+1)
 	call	_strcpy	;wreg free
-	line	181
+	line	197
 	
-l2981:
+l2907:
 		movlw	low(menu_draw_input@value_buf)
 	movwf	((c:strlen@s))^00h,c
 	clrf	((c:strlen@s+1))^00h,c
 
 	call	_strlen	;wreg free
 	movf	(0+?_strlen)^00h,c,w
-	movlb	0	; () banked
-	movwf	((menu_draw_input@val_len_699))&0ffh
-	line	182
+	movwf	((c:menu_draw_input@val_len_723))^00h,c
+	line	198
 	
-l2983:; BSR set to: 0
-
-	movf	((menu_draw_input@val_len_699))&0ffh,w
+l2909:
+	movf	((c:menu_draw_input@val_len_723))^00h,c,w
 	btfsc	status,2
-	goto	u2921
-	goto	u2920
-u2921:
-	goto	l2989
-u2920:
+	goto	u2881
+	goto	u2880
+u2881:
+	goto	l2919
+u2880:
 	
-l2985:; BSR set to: 0
-
-	movf	((menu_draw_input@item_idx))&0ffh,w
+l2911:
+	movf	((c:menu_draw_input@item_idx))^00h,c,w
 	mullw	05h
 	movlw	low(_input_menu+02h)
 	addwf	(prodl)^0f00h,c,w
@@ -5860,77 +6477,89 @@ l2985:; BSR set to: 0
 	movwf	1+c:fsr2l
 	movff	postinc2,(c:strcmp@s1)
 	movff	postdec2,(c:strcmp@s1+1)
-		movlw	low(STR_51)
+		movlw	low(STR_61)
 	movwf	((c:strcmp@s2))^00h,c
-	movlw	high(STR_51)
+	movlw	high(STR_61)
 	movwf	((c:strcmp@s2+1))^00h,c
 
 	call	_strcmp	;wreg free
 	movf	(0+?_strcmp)^00h,c,w
 iorwf	(1+?_strcmp)^00h,c,w
 	btfsc	status,2
-	goto	u2931
-	goto	u2930
+	goto	u2891
+	goto	u2890
 
-u2931:
-	goto	l2989
-u2930:
-	line	184
+u2891:
+	goto	l2919
+u2890:
+	line	201
 	
-l2987:; BSR set to: 0
+l2913:
+	movlw	low(08h)
+	movwf	((c:lcd_set_cursor@col))^00h,c
+	incf	((c:menu_draw_input@i))^00h,c,w
+	
+	call	_lcd_set_cursor
+	line	202
+	
+l2915:
+		movlw	low(STR_62)
+	movwf	((c:lcd_print@str))^00h,c
+	movlw	high(STR_62)
+	movwf	((c:lcd_print@str+1))^00h,c
 
-	movf	((menu_draw_input@val_len_699))&0ffh,w
+	call	_lcd_print	;wreg free
+	line	205
+	
+l2917:
+	movf	((c:menu_draw_input@val_len_723))^00h,c,w
 	sublw	low(014h)
 	movwf	((c:lcd_print_at@col))^00h,c
 		movlw	low(menu_draw_input@value_buf)
 	movwf	((c:lcd_print_at@str))^00h,c
 	clrf	((c:lcd_print_at@str+1))^00h,c
 
-	incf	((menu_draw_input@i))&0ffh,w
+	incf	((c:menu_draw_input@i))^00h,c,w
 	
 	call	_lcd_print_at
-	line	118
+	line	119
 	
-l2989:
-	movlb	0	; () banked
-	incf	((menu_draw_input@i))&0ffh
+l2919:
+	incf	((c:menu_draw_input@i))^00h,c
 	
-l2991:; BSR set to: 0
-
+l2921:
 		movlw	03h-0
-	cpfslt	((menu_draw_input@i))&0ffh
-	goto	u2941
-	goto	u2940
+	cpfslt	((c:menu_draw_input@i))^00h,c
+	goto	u2901
+	goto	u2900
 
-u2941:
-	goto	l312
-u2940:
+u2901:
+	goto	l327
+u2900:
 	
-l2993:; BSR set to: 0
-
-	movf	((menu_draw_input@i))&0ffh,w
+l2923:
+	movf	((c:menu_draw_input@i))^00h,c,w
 	movff	0+(_menu+01h),??_menu_draw_input+0+0
 	clrf	(??_menu_draw_input+0+0+1)^00h,c
 	addwf	(??_menu_draw_input+0+0)^00h,c
 	movlw	0
 	addwfc	(??_menu_draw_input+0+1)^00h,c
 	btfsc	(??_menu_draw_input+0+1)^00h,c,7
-	goto	u2951
+	goto	u2911
 	movf	(??_menu_draw_input+0+1)^00h,c,w
-	bnz	u2950
+	bnz	u2910
 	movlw	12
 	subwf	 (??_menu_draw_input+0+0)^00h,c,w
 	btfss	status,0
-	goto	u2951
-	goto	u2950
+	goto	u2911
+	goto	u2910
 
-u2951:
-	goto	l2915
-u2950:
-	line	187
+u2911:
+	goto	l2815
+u2910:
+	line	208
 	
-l312:; BSR set to: 0
-
+l327:
 	return	;funcret
 	callstack 0
 GLOBAL	__end_of_menu_draw_input
@@ -5943,16 +6572,18 @@ GLOBAL	__end_of_menu_draw_input
 ;;		line 4 in file "C:\Program Files\Microchip\xc8\v2.46\pic\sources\c90\common\strlen.c"
 ;; Parameters:    Size  Location     Type
 ;;  s               2    9[COMRAM] PTR const unsigned char 
-;;		 -> STR_44(9), STR_43(8), menu_draw_input@value_buf(12), value_back(1), 
-;;		 -> value_display(10), value_rlyslp(10), value_rlyplp(10), value_rlyhigh(10), 
-;;		 -> value_slpbp(10), value_plpbp(10), value_highbp(10), value_scale20(10), 
-;;		 -> value_scale4(10), value_sensor(10), value_enable(10), 
+;;		 -> STR_54(5), STR_53(5), STR_52(9), STR_48(9), 
+;;		 -> STR_47(8), menu_draw_input@value_buf(20), value_back(1), value_display(10), 
+;;		 -> value_rlyslp(10), value_rlyplp(10), value_rlyhigh(10), value_slpbp(10), 
+;;		 -> value_plpbp(10), value_highbp(10), value_scale20(10), value_scale4(10), 
+;;		 -> value_sensor(12), value_enable(10), 
 ;; Auto vars:     Size  Location     Type
 ;;  cp              2   11[COMRAM] PTR const unsigned char 
-;;		 -> STR_44(9), STR_43(8), menu_draw_input@value_buf(12), value_back(1), 
-;;		 -> value_display(10), value_rlyslp(10), value_rlyplp(10), value_rlyhigh(10), 
-;;		 -> value_slpbp(10), value_plpbp(10), value_highbp(10), value_scale20(10), 
-;;		 -> value_scale4(10), value_sensor(10), value_enable(10), 
+;;		 -> STR_54(5), STR_53(5), STR_52(9), STR_48(9), 
+;;		 -> STR_47(8), menu_draw_input@value_buf(20), value_back(1), value_display(10), 
+;;		 -> value_rlyslp(10), value_rlyplp(10), value_rlyhigh(10), value_slpbp(10), 
+;;		 -> value_plpbp(10), value_highbp(10), value_scale20(10), value_scale4(10), 
+;;		 -> value_sensor(12), value_enable(10), 
 ;; Return value:  Size  Location     Type
 ;;                  2    9[COMRAM] unsigned int 
 ;; Registers used:
@@ -5984,52 +6615,51 @@ psect	text12
 	file	"C:\Program Files\Microchip\xc8\v2.46\pic\sources\c90\common\strlen.c"
 	line	4
 	
-_strlen:; BSR set to: 0
-
+_strlen:
 ;incstack = 0
 	callstack 28
 	line	8
 	
-l2759:
+l2201:
 		movff	(c:strlen@s),(c:strlen@cp)
 	movff	(c:strlen@s+1),(c:strlen@cp+1)
 
 	line	9
-	goto	l2763
+	goto	l2205
 	line	10
 	
-l2761:
+l2203:
 	infsnz	((c:strlen@cp))^00h,c
 	incf	((c:strlen@cp+1))^00h,c
 	line	9
 	
-l2763:
+l2205:
 	movff	(c:strlen@cp),tblptrl
 	movff	(c:strlen@cp+1),tblptrh
 	clrf	tblptru
 	
 	movlw	high __ramtop-1
 	cpfsgt	tblptrh
-	bra	u2577
+	bra	u1647
 	tblrd	*
 	
 	movf	tablat,w
-	bra	u2570
-u2577:
+	bra	u1640
+u1647:
 	movff	tblptrl,fsr0l
 	movff	tblptrh,fsr0h
 	movf	indf0,w
-u2570:
+u1640:
 	iorlw	0
 	btfss	status,2
-	goto	u2581
-	goto	u2580
-u2581:
-	goto	l2761
-u2580:
+	goto	u1651
+	goto	u1650
+u1651:
+	goto	l2203
+u1650:
 	line	12
 	
-l2765:
+l2207:
 	movf	((c:strlen@s))^00h,c,w
 	subwf	((c:strlen@cp))^00h,c,w
 	movwf	((c:?_strlen))^00h,c
@@ -6038,7 +6668,7 @@ l2765:
 	movwf	1+((c:?_strlen))^00h,c
 	line	13
 	
-l1065:
+l1115:
 	return	;funcret
 	callstack 0
 GLOBAL	__end_of_strlen
@@ -6050,18 +6680,19 @@ GLOBAL	__end_of_strlen
 ;; Defined at:
 ;;		line 8 in file "C:\Program Files\Microchip\xc8\v2.46\pic\sources\c90\common\strcpy.c"
 ;; Parameters:    Size  Location     Type
-;;  to              1    9[COMRAM] PTR unsigned char 
-;;		 -> original_value(10), menu_draw_input@value_buf(12), value_enable(10), 
-;;  from            2   10[COMRAM] PTR const unsigned char 
-;;		 -> STR_53(9), STR_52(8), menu_draw_input@blank(10), value_back(1), 
-;;		 -> value_display(10), value_rlyslp(10), value_rlyplp(10), value_rlyhigh(10), 
-;;		 -> value_slpbp(10), value_plpbp(10), value_highbp(10), value_scale20(10), 
-;;		 -> value_scale4(10), value_sensor(10), value_enable(10), 
+;;  to              2    9[COMRAM] PTR unsigned char 
+;;		 -> original_value(10), menu_draw_input@value_buf(20), value_sensor(12), value_enable(10), 
+;;  from            2   11[COMRAM] PTR const unsigned char 
+;;		 -> STR_67(5), STR_66(12), STR_65(9), STR_64(9), 
+;;		 -> STR_63(8), menu_draw_input@blank(10), value_back(1), value_display(10), 
+;;		 -> value_rlyslp(10), value_rlyplp(10), value_rlyhigh(10), value_slpbp(10), 
+;;		 -> value_plpbp(10), value_highbp(10), value_scale20(10), value_scale4(10), 
+;;		 -> value_sensor(12), value_enable(10), 
 ;; Auto vars:     Size  Location     Type
-;;  cp              1   12[COMRAM] PTR unsigned char 
-;;		 -> original_value(10), menu_draw_input@value_buf(12), value_enable(10), 
+;;  cp              2   13[COMRAM] PTR unsigned char 
+;;		 -> original_value(10), menu_draw_input@value_buf(20), value_sensor(12), value_enable(10), 
 ;; Return value:  Size  Location     Type
-;;                  1    wreg      PTR unsigned char 
+;;                  2    9[COMRAM] PTR unsigned char 
 ;; Registers used:
 ;;		wreg, fsr0l, fsr0h, fsr2l, fsr2h, status,2, status,0, tblptrl, tblptrh, tblptru
 ;; Tracked objects:
@@ -6069,11 +6700,11 @@ GLOBAL	__end_of_strlen
 ;;		On exit  : 0/0
 ;;		Unchanged: 0/0
 ;; Data sizes:     COMRAM   BANK0   BANK1   BANK2   BANK3   BANK4   BANK5   BANK6   BANK7   BANK8   BANK9  BANK10  BANK11  BANK12  BANK13  BANK14  BANK15
-;;      Params:         3       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0
-;;      Locals:         1       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0
+;;      Params:         4       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0
+;;      Locals:         2       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0
 ;;      Temps:          0       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0
-;;      Totals:         4       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0
-;;Total ram usage:        4 bytes
+;;      Totals:         6       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0
+;;Total ram usage:        6 bytes
 ;; Hardware stack levels used: 1
 ;; Hardware stack levels required when called: 1
 ;; This function calls:
@@ -6097,51 +6728,52 @@ _strcpy:
 	callstack 28
 	line	18
 	
-l2779:
+l2793:
 		movff	(c:strcpy@to),(c:strcpy@cp)
+	movff	(c:strcpy@to+1),(c:strcpy@cp+1)
 
 	line	19
-	goto	l2783
+	goto	l2797
 	line	20
 	
-l2781:
-	incf	((c:strcpy@cp))^00h,c
+l2795:
+	infsnz	((c:strcpy@cp))^00h,c
+	incf	((c:strcpy@cp+1))^00h,c
 	line	21
 	infsnz	((c:strcpy@from))^00h,c
 	incf	((c:strcpy@from+1))^00h,c
 	line	19
 	
-l2783:
+l2797:
 	movff	(c:strcpy@from),tblptrl
 	movff	(c:strcpy@from+1),tblptrh
 	clrf	tblptru
 	
-	movf	((c:strcpy@cp))^00h,c,w
-	movwf	fsr2l
-	clrf	fsr2h
+	movff	(c:strcpy@cp),fsr2l
+	movff	(c:strcpy@cp+1),fsr2h
 	movlw	high __ramtop-1
 	cpfsgt	tblptrh
-	bra	u2617
+	bra	u2697
 	tblrd	*
 	
 	movf	tablat,w
-	bra	u2610
-u2617:
+	bra	u2690
+u2697:
 	movff	tblptrl,fsr0l
 	movff	tblptrh,fsr0h
 	movf	indf0,w
-u2610:
+u2690:
 	movwf	indf2
 	movf	indf2,w
 	btfss	status,2
-	goto	u2621
-	goto	u2620
-u2621:
-	goto	l2781
-u2620:
+	goto	u2701
+	goto	u2700
+u2701:
+	goto	l2795
+u2700:
 	line	24
 	
-l1059:
+l1109:
 	return	;funcret
 	callstack 0
 GLOBAL	__end_of_strcpy
@@ -6154,11 +6786,13 @@ GLOBAL	__end_of_strcpy
 ;;		line 33 in file "C:\Program Files\Microchip\xc8\v2.46\pic\sources\c90\common\strcmp.c"
 ;; Parameters:    Size  Location     Type
 ;;  s1              2    9[COMRAM] PTR const unsigned char 
-;;		 -> value_back(1), value_display(10), value_rlyslp(10), value_rlyplp(10), 
-;;		 -> value_rlyhigh(10), value_slpbp(10), value_plpbp(10), value_highbp(10), 
-;;		 -> value_scale20(10), value_scale4(10), value_sensor(10), value_enable(10), 
+;;		 -> original_value(10), value_back(1), value_display(10), value_rlyslp(10), 
+;;		 -> value_rlyplp(10), value_rlyhigh(10), value_slpbp(10), value_plpbp(10), 
+;;		 -> value_highbp(10), value_scale20(10), value_scale4(10), value_sensor(12), 
+;;		 -> value_enable(10), 
 ;;  s2              2   11[COMRAM] PTR const unsigned char 
-;;		 -> STR_51(1), 
+;;		 -> STR_71(12), STR_70(9), STR_69(12), STR_68(9), 
+;;		 -> STR_61(1), 
 ;; Auto vars:     Size  Location     Type
 ;;  r               1   15[COMRAM] char 
 ;; Return value:  Size  Location     Type
@@ -6166,9 +6800,9 @@ GLOBAL	__end_of_strcpy
 ;; Registers used:
 ;;		wreg, fsr2l, fsr2h, status,2, status,0, tblptrl, tblptrh, tblptru
 ;; Tracked objects:
-;;		On entry : 3F/0
-;;		On exit  : 3F/0
-;;		Unchanged: 3F/0
+;;		On entry : 0/0
+;;		On exit  : 0/0
+;;		Unchanged: 0/0
 ;; Data sizes:     COMRAM   BANK0   BANK1   BANK2   BANK3   BANK4   BANK5   BANK6   BANK7   BANK8   BANK9  BANK10  BANK11  BANK12  BANK13  BANK14  BANK15
 ;;      Params:         4       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0
 ;;      Locals:         1       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0
@@ -6181,6 +6815,7 @@ GLOBAL	__end_of_strcpy
 ;;		Nothing
 ;; This function is called by:
 ;;		_menu_draw_input
+;;		_menu_handle_button
 ;; This function uses a non-reentrant model
 ;;
 psect	text14,class=CODE,space=0,reloc=2,group=3
@@ -6197,13 +6832,11 @@ _strcmp:
 	callstack 28
 	line	37
 	
-l2785:; BSR set to: 0
-
-	goto	l2789
+l2799:
+	goto	l2803
 	line	38
 	
-l2787:; BSR set to: 0
-
+l2801:
 	infsnz	((c:strcmp@s1))^00h,c
 	incf	((c:strcmp@s1+1))^00h,c
 	line	39
@@ -6211,8 +6844,7 @@ l2787:; BSR set to: 0
 	incf	((c:strcmp@s2+1))^00h,c
 	line	37
 	
-l2789:; BSR set to: 0
-
+l2803:
 	movff	(c:strcmp@s2),tblptrl
 	movff	(c:strcmp@s2+1),tblptrh
 	if	0	;tblptru may be non-zero
@@ -6235,27 +6867,25 @@ movlw	low highword(__mediumconst)
 	movwf	((c:strcmp@r))^00h,c
 	movf	((c:strcmp@r))^00h,c,w
 	btfss	status,2
-	goto	u2631
-	goto	u2630
-u2631:
-	goto	l2793
-u2630:
+	goto	u2711
+	goto	u2710
+u2711:
+	goto	l2807
+u2710:
 	
-l2791:; BSR set to: 0
-
+l2805:
 	movff	(c:strcmp@s1),fsr2l
 	movff	(c:strcmp@s1+1),fsr2h
 	movf	indf2,w
 	btfss	status,2
-	goto	u2641
-	goto	u2640
-u2641:
-	goto	l2787
-u2640:
+	goto	u2721
+	goto	u2720
+u2721:
+	goto	l2801
+u2720:
 	line	41
 	
-l2793:; BSR set to: 0
-
+l2807:
 	movf	((c:strcmp@r))^00h,c,w
 	movwf	((c:?_strcmp))^00h,c
 	clrf	((c:?_strcmp+1))^00h,c
@@ -6263,8 +6893,7 @@ l2793:; BSR set to: 0
 	decf	((c:?_strcmp+1))^00h,c
 	line	42
 	
-l1053:; BSR set to: 0
-
+l1103:
 	return	;funcret
 	callstack 0
 GLOBAL	__end_of_strcmp
@@ -6277,12 +6906,13 @@ GLOBAL	__end_of_strcmp
 ;;		line 8 in file "C:\Program Files\Microchip\xc8\v2.46\pic\sources\c90\common\strcat.c"
 ;; Parameters:    Size  Location     Type
 ;;  to              1    9[COMRAM] PTR unsigned char 
-;;		 -> menu_draw_input@blank(10), menu_draw_input@value_buf(12), 
+;;		 -> menu_draw_input@blank(10), menu_draw_input@value_buf(20), 
 ;;  from            2   10[COMRAM] PTR const unsigned char 
-;;		 -> STR_49(2), STR_48(2), STR_47(2), STR_46(2), 
+;;		 -> STR_59(2), STR_58(2), STR_57(2), STR_56(2), 
+;;		 -> STR_51(2), STR_50(2), 
 ;; Auto vars:     Size  Location     Type
 ;;  cp              1   12[COMRAM] PTR unsigned char 
-;;		 -> menu_draw_input@blank(10), menu_draw_input@value_buf(12), 
+;;		 -> menu_draw_input@blank(10), menu_draw_input@value_buf(20), 
 ;; Return value:  Size  Location     Type
 ;;                  1    wreg      PTR unsigned char 
 ;; Registers used:
@@ -6314,45 +6944,44 @@ psect	text15
 	file	"C:\Program Files\Microchip\xc8\v2.46\pic\sources\c90\common\strcat.c"
 	line	8
 	
-_strcat:; BSR set to: 0
-
+_strcat:
 ;incstack = 0
 	callstack 28
 	line	18
 	
-l2769:
+l2211:
 		movff	(c:strcat@to),(c:strcat@cp)
 
 	line	19
-	goto	l2773
+	goto	l2215
 	line	20
 	
-l2771:
+l2213:
 	incf	((c:strcat@cp))^00h,c
 	line	19
 	
-l2773:
+l2215:
 	movf	((c:strcat@cp))^00h,c,w
 	movwf	fsr2l
 	clrf	fsr2h
 	movf	indf2,w
 	btfss	status,2
-	goto	u2591
-	goto	u2590
-u2591:
-	goto	l2771
-u2590:
-	goto	l2777
+	goto	u1661
+	goto	u1660
+u1661:
+	goto	l2213
+u1660:
+	goto	l2219
 	line	22
 	
-l2775:
+l2217:
 	incf	((c:strcat@cp))^00h,c
 	line	23
 	infsnz	((c:strcat@from))^00h,c
 	incf	((c:strcat@from+1))^00h,c
 	line	21
 	
-l2777:
+l2219:
 	movff	(c:strcat@from),tblptrl
 	movff	(c:strcat@from+1),tblptrh
 	if	0	;tblptru may be non-zero
@@ -6371,14 +7000,14 @@ movlw	low highword(__mediumconst)
 	movff	tablat,indf2
 	movf	indf2,w
 	btfss	status,2
-	goto	u2601
-	goto	u2600
-u2601:
-	goto	l2775
-u2600:
+	goto	u1671
+	goto	u1670
+u1671:
+	goto	l2217
+u1670:
 	line	26
 	
-l1045:
+l1095:
 	return	;funcret
 	callstack 0
 GLOBAL	__end_of_strcat
@@ -6390,39 +7019,41 @@ GLOBAL	__end_of_strcat
 ;; Defined at:
 ;;		line 505 in file "C:\Program Files\Microchip\xc8\v2.46\pic\sources\c90\common\doprnt.c"
 ;; Parameters:    Size  Location     Type
-;;  sp              2   21[COMRAM] PTR unsigned char 
-;;		 -> menu_draw_input@value_buf(12), main@buf_421(40), main@buf(40), 
-;;  f               2   23[COMRAM] PTR const unsigned char 
-;;		 -> STR_50(5), STR_45(2), STR_42(5), STR_39(5), 
-;;		 -> STR_14(17), STR_13(30), STR_12(23), 
+;;  sp              1   21[COMRAM] PTR unsigned char 
+;;		 -> menu_draw_input@value_buf(20), main@buf_421(40), main@buf(40), 
+;;  f               2   22[COMRAM] PTR const unsigned char 
+;;		 -> STR_60(5), STR_55(2), STR_49(2), STR_46(5), 
+;;		 -> STR_45(5), STR_39(5), STR_14(17), STR_13(30), 
+;;		 -> STR_12(23), 
 ;; Auto vars:     Size  Location     Type
 ;;  tmpval          4    0        struct .
-;;  val             2   35[COMRAM] unsigned int 
-;;  cp              2   33[COMRAM] PTR const unsigned char 
-;;		 -> STR_54(7), ?_sprintf(2), STR_41(9), STR_40(8), 
-;;		 -> value_back(1), value_display(10), value_rlyslp(10), value_rlyplp(10), 
-;;		 -> value_rlyhigh(10), value_slpbp(10), value_plpbp(10), value_highbp(10), 
-;;		 -> value_scale20(10), value_scale4(10), value_sensor(10), value_enable(10), 
+;;  val             2   34[COMRAM] unsigned int 
+;;  cp              2   32[COMRAM] PTR const unsigned char 
+;;		 -> STR_72(7), ?_sprintf(2), STR_44(5), STR_43(5), 
+;;		 -> STR_42(9), STR_41(9), STR_40(8), value_back(1), 
+;;		 -> value_display(10), value_rlyslp(10), value_rlyplp(10), value_rlyhigh(10), 
+;;		 -> value_slpbp(10), value_plpbp(10), value_highbp(10), value_scale20(10), 
+;;		 -> value_scale4(10), value_sensor(12), value_enable(10), 
 ;;  len             2    0        unsigned int 
-;;  c               1   37[COMRAM] unsigned char 
-;;  ap              1   32[COMRAM] PTR void [1]
+;;  c               1   36[COMRAM] unsigned char 
+;;  ap              1   31[COMRAM] PTR void [1]
 ;;		 -> ?_sprintf(2), 
-;;  prec            1   31[COMRAM] char 
-;;  flag            1   30[COMRAM] unsigned char 
+;;  prec            1   30[COMRAM] char 
+;;  flag            1   29[COMRAM] unsigned char 
 ;; Return value:  Size  Location     Type
 ;;                  2   21[COMRAM] int 
 ;; Registers used:
 ;;		wreg, fsr0l, fsr0h, fsr2l, fsr2h, status,2, status,0, tblptrl, tblptrh, tblptru, prodl, prodh, cstack
 ;; Tracked objects:
-;;		On entry : 0/1
+;;		On entry : 0/0
 ;;		On exit  : 0/0
 ;;		Unchanged: 0/0
 ;; Data sizes:     COMRAM   BANK0   BANK1   BANK2   BANK3   BANK4   BANK5   BANK6   BANK7   BANK8   BANK9  BANK10  BANK11  BANK12  BANK13  BANK14  BANK15
-;;      Params:         8       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0
+;;      Params:         7       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0
 ;;      Locals:         8       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0
 ;;      Temps:          1       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0
-;;      Totals:        17       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0
-;;Total ram usage:       17 bytes
+;;      Totals:        16       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0
+;;Total ram usage:       16 bytes
 ;; Hardware stack levels used: 1
 ;; Hardware stack levels required when called: 2
 ;; This function calls:
@@ -6447,137 +7078,137 @@ _sprintf:
 	callstack 28
 	line	550
 	
-l2675:
-		movlw	low(?_sprintf+04h)
+l2109:
+		movlw	low(?_sprintf+03h)
 	movwf	((c:sprintf@ap))^00h,c
 
 	line	553
-	goto	l2745
+	goto	l2179
 	line	555
 	
-l2677:
+l2111:
 		movlw	37
 	xorwf	((c:sprintf@c))^00h,c,w
 	btfsc	status,2
-	goto	u2461
-	goto	u2460
+	goto	u1521
+	goto	u1520
 
-u2461:
-	goto	l2683
-u2460:
+u1521:
+	goto	l2117
+u1520:
 	line	558
 	
-l2679:
-	movff	(c:sprintf@sp),fsr2l
-	movff	(c:sprintf@sp+1),fsr2h
+l2113:
+	movf	((c:sprintf@sp))^00h,c,w
+	movwf	fsr2l
+	clrf	fsr2h
 	movff	(c:sprintf@c),indf2
 
 	
-l2681:
-	infsnz	((c:sprintf@sp))^00h,c
-	incf	((c:sprintf@sp+1))^00h,c
+l2115:
+	incf	((c:sprintf@sp))^00h,c
 	line	559
-	goto	l2745
+	goto	l2179
 	line	565
 	
-l2683:
+l2117:
 	movlw	low(0)
 	movwf	((c:sprintf@flag))^00h,c
 	line	661
-	goto	l2703
+	goto	l2137
 	line	760
 	
-l2685:
+l2119:
 	movf	((c:sprintf@ap))^00h,c,w
 	movwf	fsr2l
 	clrf	fsr2h
 	movff	postinc2,(c:sprintf@cp)
 	movff	postdec2,(c:sprintf@cp+1)
 	
-l2687:
+l2121:
 	movlw	(02h)&0ffh
 	addwf	((c:sprintf@ap))^00h,c
 	line	766
 	
-l2689:
+l2123:
 	movf	((c:sprintf@cp))^00h,c,w
 iorwf	((c:sprintf@cp+1))^00h,c,w
 	btfss	status,2
-	goto	u2471
-	goto	u2470
+	goto	u1531
+	goto	u1530
 
-u2471:
-	goto	l2699
-u2470:
+u1531:
+	goto	l2133
+u1530:
 	line	767
 	
-l2691:
-		movlw	low(STR_54)
+l2125:
+		movlw	low(STR_72)
 	movwf	((c:sprintf@cp))^00h,c
-	movlw	high(STR_54)
+	movlw	high(STR_72)
 	movwf	((c:sprintf@cp+1))^00h,c
 
-	goto	l2699
+	goto	l2133
 	line	804
 	
-l2693:
+l2127:
 	movff	(c:sprintf@cp),tblptrl
 	movff	(c:sprintf@cp+1),tblptrh
 	clrf	tblptru
 	
-	movff	(c:sprintf@sp),fsr2l
-	movff	(c:sprintf@sp+1),fsr2h
+	movf	((c:sprintf@sp))^00h,c,w
+	movwf	fsr2l
+	clrf	fsr2h
 	movlw	high __ramtop-1
 	cpfsgt	tblptrh
-	bra	u2487
+	bra	u1547
 	tblrd	*
 	
 	movf	tablat,w
-	bra	u2480
-u2487:
+	bra	u1540
+u1547:
 	movff	tblptrl,fsr0l
 	movff	tblptrh,fsr0h
 	movf	indf0,w
-u2480:
+u1540:
 	movwf	indf2
 	
-l2695:
+l2129:
 	infsnz	((c:sprintf@cp))^00h,c
 	incf	((c:sprintf@cp+1))^00h,c
 	
-l2697:
-	infsnz	((c:sprintf@sp))^00h,c
-	incf	((c:sprintf@sp+1))^00h,c
+l2131:
+	incf	((c:sprintf@sp))^00h,c
 	line	803
 	
-l2699:
+l2133:
 	movff	(c:sprintf@cp),tblptrl
 	movff	(c:sprintf@cp+1),tblptrh
 	clrf	tblptru
 	
 	movlw	high __ramtop-1
 	cpfsgt	tblptrh
-	bra	u2497
+	bra	u1557
 	tblrd	*
 	
 	movf	tablat,w
-	bra	u2490
-u2497:
+	bra	u1550
+u1557:
 	movff	tblptrl,fsr0l
 	movff	tblptrh,fsr0h
 	movf	indf0,w
-u2490:
+u1550:
 	iorlw	0
 	btfss	status,2
-	goto	u2501
-	goto	u2500
-u2501:
-	goto	l2693
-u2500:
-	goto	l2745
+	goto	u1561
+	goto	u1560
+u1561:
+	goto	l2127
+u1560:
+	goto	l2179
 	line	661
 	
-l2703:
+l2137:
 	movff	(c:sprintf@f),tblptrl
 	movff	(c:sprintf@f+1),tblptrh
 	infsnz	((c:sprintf@f))^00h,c
@@ -6603,60 +7234,60 @@ movlw	low highword(__mediumconst)
 
 	xorlw	0^0	; case 0
 	skipnz
-	goto	l2747
+	goto	l2181
 	xorlw	100^0	; case 100
 	skipnz
-	goto	l2705
+	goto	l2139
 	xorlw	105^100	; case 105
 	skipnz
-	goto	l2705
+	goto	l2139
 	xorlw	115^105	; case 115
 	skipnz
-	goto	l2685
-	goto	l2745
+	goto	l2119
+	goto	l2179
 
 	line	1285
 	
-l2705:
+l2139:
 	movf	((c:sprintf@ap))^00h,c,w
 	movwf	fsr2l
 	clrf	fsr2h
 	movff	postinc2,(c:sprintf@val)
 	movff	postdec2,(c:sprintf@val+1)
 	
-l2707:
+l2141:
 	movlw	(02h)&0ffh
 	addwf	((c:sprintf@ap))^00h,c
 	line	1287
 	
-l2709:
+l2143:
 	btfsc	((c:sprintf@val+1))^00h,c,7
-	goto	u2510
-	goto	u2511
+	goto	u1570
+	goto	u1571
 
-u2511:
-	goto	l2715
-u2510:
+u1571:
+	goto	l2149
+u1570:
 	line	1288
 	
-l2711:
+l2145:
 	movlw	(03h)&0ffh
 	iorwf	((c:sprintf@flag))^00h,c
 	line	1289
 	
-l2713:
+l2147:
 	negf	((c:sprintf@val))^00h,c
 	comf	((c:sprintf@val+1))^00h,c
 	btfsc	status,0
 	incf	((c:sprintf@val+1))^00h,c
 	line	1331
 	
-l2715:
+l2149:
 	movlw	low(01h)
 	movwf	((c:sprintf@c))^00h,c
 	line	1332
 	
-l2721:
+l2155:
 	movf	((c:sprintf@c))^00h,c,w
 	mullw	02h
 	movlw	low((_dpowers))
@@ -6678,60 +7309,60 @@ movlw	low highword(__mediumconst)
 	movf	tablat,w
 	subwfb	((c:sprintf@val+1))^00h,c,w
 	btfsc	status,0
-	goto	u2521
-	goto	u2520
+	goto	u1581
+	goto	u1580
 
-u2521:
-	goto	l2725
-u2520:
-	goto	l2729
+u1581:
+	goto	l2159
+u1580:
+	goto	l2163
 	line	1331
 	
-l2725:
+l2159:
 	incf	((c:sprintf@c))^00h,c
 	
-l2727:
+l2161:
 		movlw	5
 	xorwf	((c:sprintf@c))^00h,c,w
 	btfss	status,2
-	goto	u2531
-	goto	u2530
+	goto	u1591
+	goto	u1590
 
-u2531:
-	goto	l2721
-u2530:
+u1591:
+	goto	l2155
+u1590:
 	line	1464
 	
-l2729:
+l2163:
 	movff	(c:sprintf@flag),??_sprintf+0+0
 	movlw	03h
 	andwf	(??_sprintf+0+0)^00h,c
 	btfsc	status,2
-	goto	u2541
-	goto	u2540
-u2541:
-	goto	l2735
-u2540:
+	goto	u1601
+	goto	u1600
+u1601:
+	goto	l2169
+u1600:
 	line	1465
 	
-l2731:
-	movff	(c:sprintf@sp),fsr2l
-	movff	(c:sprintf@sp+1),fsr2h
+l2165:
+	movf	((c:sprintf@sp))^00h,c,w
+	movwf	fsr2l
+	clrf	fsr2h
 	movlw	low(02Dh)
 	movwf	indf2
 	
-l2733:
-	infsnz	((c:sprintf@sp))^00h,c
-	incf	((c:sprintf@sp+1))^00h,c
+l2167:
+	incf	((c:sprintf@sp))^00h,c
 	line	1498
 	
-l2735:
+l2169:
 	movff	(c:sprintf@c),(c:sprintf@prec)
 	line	1500
-	goto	l2743
+	goto	l2177
 	line	1515
 	
-l2737:
+l2171:
 	movf	((c:sprintf@prec))^00h,c,w
 	mullw	02h
 	movlw	low((_dpowers))
@@ -6768,30 +7399,30 @@ movlw	low highword(__mediumconst)
 	movwf	((c:sprintf@c))^00h,c
 	line	1550
 	
-l2739:
-	movff	(c:sprintf@sp),fsr2l
-	movff	(c:sprintf@sp+1),fsr2h
+l2173:
+	movf	((c:sprintf@sp))^00h,c,w
+	movwf	fsr2l
+	clrf	fsr2h
 	movff	(c:sprintf@c),indf2
 
 	
-l2741:
-	infsnz	((c:sprintf@sp))^00h,c
-	incf	((c:sprintf@sp+1))^00h,c
+l2175:
+	incf	((c:sprintf@sp))^00h,c
 	line	1500
 	
-l2743:
+l2177:
 	decf	((c:sprintf@prec))^00h,c
 		incf	((c:sprintf@prec))^00h,c,w
 	btfss	status,2
-	goto	u2551
-	goto	u2550
+	goto	u1611
+	goto	u1610
 
-u2551:
-	goto	l2737
-u2550:
+u1611:
+	goto	l2171
+u1610:
 	line	553
 	
-l2745:
+l2179:
 	movff	(c:sprintf@f),tblptrl
 	movff	(c:sprintf@f+1),tblptrh
 	infsnz	((c:sprintf@f))^00h,c
@@ -6809,20 +7440,21 @@ movlw	low highword(__mediumconst)
 	movff	tablat,(c:sprintf@c)
 	movf	((c:sprintf@c))^00h,c,w
 	btfss	status,2
-	goto	u2561
-	goto	u2560
-u2561:
-	goto	l2677
-u2560:
+	goto	u1621
+	goto	u1620
+u1621:
+	goto	l2111
+u1620:
 	line	1564
 	
-l2747:
-	movff	(c:sprintf@sp),fsr2l
-	movff	(c:sprintf@sp+1),fsr2h
+l2181:
+	movf	((c:sprintf@sp))^00h,c,w
+	movwf	fsr2l
+	clrf	fsr2h
 	clrf	indf2
 	line	1567
 	
-l374:
+l418:
 	return	;funcret
 	callstack 0
 GLOBAL	__end_of_sprintf
@@ -6843,7 +7475,7 @@ GLOBAL	__end_of_sprintf
 ;; Registers used:
 ;;		wreg, status,2, status,0
 ;; Tracked objects:
-;;		On entry : 0/1
+;;		On entry : 0/0
 ;;		On exit  : 0/0
 ;;		Unchanged: 0/0
 ;; Data sizes:     COMRAM   BANK0   BANK1   BANK2   BANK3   BANK4   BANK5   BANK6   BANK7   BANK8   BANK9  BANK10  BANK11  BANK12  BANK13  BANK14  BANK15
@@ -6874,26 +7506,26 @@ ___lwmod:
 	callstack 28
 	line	12
 	
-l2643:
+l2077:
 	movf	((c:___lwmod@divisor))^00h,c,w
 iorwf	((c:___lwmod@divisor+1))^00h,c,w
 	btfsc	status,2
-	goto	u2391
-	goto	u2390
+	goto	u1451
+	goto	u1450
 
-u2391:
-	goto	l866
-u2390:
+u1451:
+	goto	l910
+u1450:
 	line	13
 	
-l2645:
+l2079:
 	movlw	low(01h)
 	movwf	((c:___lwmod@counter))^00h,c
 	line	14
-	goto	l2649
+	goto	l2083
 	line	15
 	
-l2647:
+l2081:
 	bcf	status,0
 	rlcf	((c:___lwmod@divisor))^00h,c
 	rlcf	((c:___lwmod@divisor+1))^00h,c
@@ -6901,31 +7533,31 @@ l2647:
 	incf	((c:___lwmod@counter))^00h,c
 	line	14
 	
-l2649:
+l2083:
 	
 	btfss	((c:___lwmod@divisor+1))^00h,c,(15)&7
-	goto	u2401
-	goto	u2400
-u2401:
-	goto	l2647
-u2400:
+	goto	u1461
+	goto	u1460
+u1461:
+	goto	l2081
+u1460:
 	line	19
 	
-l2651:
+l2085:
 		movf	((c:___lwmod@divisor))^00h,c,w
 	subwf	((c:___lwmod@dividend))^00h,c,w
 	movf	((c:___lwmod@divisor+1))^00h,c,w
 	subwfb	((c:___lwmod@dividend+1))^00h,c,w
 	btfss	status,0
-	goto	u2411
-	goto	u2410
+	goto	u1471
+	goto	u1470
 
-u2411:
-	goto	l2655
-u2410:
+u1471:
+	goto	l2089
+u1470:
 	line	20
 	
-l2653:
+l2087:
 	movf	((c:___lwmod@divisor))^00h,c,w
 	subwf	((c:___lwmod@dividend))^00h,c
 	movf	((c:___lwmod@divisor+1))^00h,c,w
@@ -6933,25 +7565,25 @@ l2653:
 
 	line	21
 	
-l2655:
+l2089:
 	bcf	status,0
 	rrcf	((c:___lwmod@divisor+1))^00h,c
 	rrcf	((c:___lwmod@divisor))^00h,c
 	line	22
 	
-l2657:
+l2091:
 	decfsz	((c:___lwmod@counter))^00h,c
 	
-	goto	l2651
+	goto	l2085
 	line	23
 	
-l866:
+l910:
 	line	24
 	movff	(c:___lwmod@dividend),(c:?___lwmod)
 	movff	(c:___lwmod@dividend+1),(c:?___lwmod+1)
 	line	25
 	
-l873:
+l917:
 	return	;funcret
 	callstack 0
 GLOBAL	__end_of___lwmod
@@ -6966,14 +7598,14 @@ GLOBAL	__end_of___lwmod
 ;;  dividend        2    9[COMRAM] unsigned int 
 ;;  divisor         2   11[COMRAM] unsigned int 
 ;; Auto vars:     Size  Location     Type
-;;  quotient        2   14[COMRAM] unsigned int 
-;;  counter         1   13[COMRAM] unsigned char 
+;;  quotient        2   13[COMRAM] unsigned int 
+;;  counter         1   15[COMRAM] unsigned char 
 ;; Return value:  Size  Location     Type
 ;;                  2    9[COMRAM] unsigned int 
 ;; Registers used:
 ;;		wreg, status,2, status,0
 ;; Tracked objects:
-;;		On entry : 0/1
+;;		On entry : 0/0
 ;;		On exit  : 0/0
 ;;		Unchanged: 0/0
 ;; Data sizes:     COMRAM   BANK0   BANK1   BANK2   BANK3   BANK4   BANK5   BANK6   BANK7   BANK8   BANK9  BANK10  BANK11  BANK12  BANK13  BANK14  BANK15
@@ -7004,33 +7636,33 @@ ___lwdiv:
 	callstack 28
 	line	13
 	
-l2621:
+l2055:
 	movlw	high(0)
 	movwf	((c:___lwdiv@quotient+1))^00h,c
 	movlw	low(0)
 	movwf	((c:___lwdiv@quotient))^00h,c
 	line	14
 	
-l2623:
+l2057:
 	movf	((c:___lwdiv@divisor))^00h,c,w
 iorwf	((c:___lwdiv@divisor+1))^00h,c,w
 	btfsc	status,2
-	goto	u2361
-	goto	u2360
+	goto	u1421
+	goto	u1420
 
-u2361:
-	goto	l856
-u2360:
+u1421:
+	goto	l900
+u1420:
 	line	15
 	
-l2625:
+l2059:
 	movlw	low(01h)
 	movwf	((c:___lwdiv@counter))^00h,c
 	line	16
-	goto	l2629
+	goto	l2063
 	line	17
 	
-l2627:
+l2061:
 	bcf	status,0
 	rlcf	((c:___lwdiv@divisor))^00h,c
 	rlcf	((c:___lwdiv@divisor+1))^00h,c
@@ -7038,37 +7670,37 @@ l2627:
 	incf	((c:___lwdiv@counter))^00h,c
 	line	16
 	
-l2629:
+l2063:
 	
 	btfss	((c:___lwdiv@divisor+1))^00h,c,(15)&7
-	goto	u2371
-	goto	u2370
-u2371:
-	goto	l2627
-u2370:
+	goto	u1431
+	goto	u1430
+u1431:
+	goto	l2061
+u1430:
 	line	21
 	
-l2631:
+l2065:
 	bcf	status,0
 	rlcf	((c:___lwdiv@quotient))^00h,c
 	rlcf	((c:___lwdiv@quotient+1))^00h,c
 	line	22
 	
-l2633:
+l2067:
 		movf	((c:___lwdiv@divisor))^00h,c,w
 	subwf	((c:___lwdiv@dividend))^00h,c,w
 	movf	((c:___lwdiv@divisor+1))^00h,c,w
 	subwfb	((c:___lwdiv@dividend+1))^00h,c,w
 	btfss	status,0
-	goto	u2381
-	goto	u2380
+	goto	u1441
+	goto	u1440
 
-u2381:
-	goto	l2639
-u2380:
+u1441:
+	goto	l2073
+u1440:
 	line	23
 	
-l2635:
+l2069:
 	movf	((c:___lwdiv@divisor))^00h,c,w
 	subwf	((c:___lwdiv@dividend))^00h,c
 	movf	((c:___lwdiv@divisor+1))^00h,c,w
@@ -7076,44 +7708,133 @@ l2635:
 
 	line	24
 	
-l2637:
+l2071:
 	bsf	(0+(0/8)+(c:___lwdiv@quotient))^00h,c,(0)&7
 	line	26
 	
-l2639:
+l2073:
 	bcf	status,0
 	rrcf	((c:___lwdiv@divisor+1))^00h,c
 	rrcf	((c:___lwdiv@divisor))^00h,c
 	line	27
 	
-l2641:
+l2075:
 	decfsz	((c:___lwdiv@counter))^00h,c
 	
-	goto	l2631
+	goto	l2065
 	line	28
 	
-l856:
+l900:
 	line	29
 	movff	(c:___lwdiv@quotient),(c:?___lwdiv)
 	movff	(c:___lwdiv@quotient+1),(c:?___lwdiv+1)
 	line	30
 	
-l863:
+l907:
 	return	;funcret
 	callstack 0
 GLOBAL	__end_of___lwdiv
 	__end_of___lwdiv:
 	signat	___lwdiv,8314
+	global	_memset
+
+;; *************** function _memset *****************
+;; Defined at:
+;;		line 8 in file "C:\Program Files\Microchip\xc8\v2.46\pic\sources\c90\common\memset.c"
+;; Parameters:    Size  Location     Type
+;;  p1              1    9[COMRAM] PTR void 
+;;		 -> menu_draw_input@value_buf(20), 
+;;  c               2   10[COMRAM] int 
+;;  n               2   12[COMRAM] unsigned int 
+;; Auto vars:     Size  Location     Type
+;;  p               1   14[COMRAM] PTR unsigned char 
+;;		 -> menu_draw_input@value_buf(20), 
+;; Return value:  Size  Location     Type
+;;                  1    wreg      PTR void 
+;; Registers used:
+;;		wreg, fsr2l, fsr2h, status,2, status,0
+;; Tracked objects:
+;;		On entry : 0/0
+;;		On exit  : 0/0
+;;		Unchanged: 0/0
+;; Data sizes:     COMRAM   BANK0   BANK1   BANK2   BANK3   BANK4   BANK5   BANK6   BANK7   BANK8   BANK9  BANK10  BANK11  BANK12  BANK13  BANK14  BANK15
+;;      Params:         5       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0
+;;      Locals:         1       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0
+;;      Temps:          0       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0
+;;      Totals:         6       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0       0
+;;Total ram usage:        6 bytes
+;; Hardware stack levels used: 1
+;; Hardware stack levels required when called: 1
+;; This function calls:
+;;		Nothing
+;; This function is called by:
+;;		_menu_draw_input
+;; This function uses a non-reentrant model
+;;
+psect	text19,class=CODE,space=0,reloc=2,group=3
+	file	"C:\Program Files\Microchip\xc8\v2.46\pic\sources\c90\common\memset.c"
+	line	8
+global __ptext19
+__ptext19:
+psect	text19
+	file	"C:\Program Files\Microchip\xc8\v2.46\pic\sources\c90\common\memset.c"
+	line	8
+	
+_memset:
+;incstack = 0
+	callstack 28
+	line	18
+	
+l2193:
+		movff	(c:memset@p1),(c:memset@p)
+
+	line	19
+	goto	l2199
+	line	20
+	
+l2195:
+	movf	((c:memset@p))^00h,c,w
+	movwf	fsr2l
+	clrf	fsr2h
+	movff	(c:memset@c),indf2
+
+	
+l2197:
+	incf	((c:memset@p))^00h,c
+	line	19
+	
+l2199:
+	decf	((c:memset@n))^00h,c
+	btfss	status,0
+	decf	((c:memset@n+1))^00h,c
+		incf	((c:memset@n))^00h,c,w
+	bnz	u1631
+	incf	((c:memset@n+1))^00h,c,w
+	btfss	status,2
+	goto	u1631
+	goto	u1630
+
+u1631:
+	goto	l2195
+u1630:
+	line	22
+	
+l1086:
+	return	;funcret
+	callstack 0
+GLOBAL	__end_of_memset
+	__end_of_memset:
+	signat	_memset,12410
 	global	_lcd_print_at
 
 ;; *************** function _lcd_print_at *****************
 ;; Defined at:
-;;		line 60 in file "src\menu.c"
+;;		line 61 in file "src\menu.c"
 ;; Parameters:    Size  Location     Type
 ;;  row             1    wreg     unsigned char 
 ;;  col             1   15[COMRAM] unsigned char 
 ;;  str             2   16[COMRAM] PTR const unsigned char 
-;;		 -> menu_draw_input@value_buf(12), STR_38(8), STR_36(2), STR_35(8), 
+;;		 -> menu_draw_input@value_buf(20), STR_38(8), STR_36(2), STR_35(8), 
 ;;		 -> STR_33(5), STR_32(8), STR_31(8), STR_30(8), 
 ;;		 -> STR_29(9), STR_28(6), STR_27(6), STR_26(8), 
 ;;		 -> STR_25(11), STR_24(10), STR_23(7), STR_22(7), 
@@ -7126,7 +7847,7 @@ GLOBAL	__end_of___lwdiv
 ;; Registers used:
 ;;		wreg, fsr0l, fsr0h, status,2, status,0, tblptrl, tblptrh, tblptru, cstack
 ;; Tracked objects:
-;;		On entry : 0/1
+;;		On entry : 0/0
 ;;		On exit  : 0/0
 ;;		Unchanged: 0/0
 ;; Data sizes:     COMRAM   BANK0   BANK1   BANK2   BANK3   BANK4   BANK5   BANK6   BANK7   BANK8   BANK9  BANK10  BANK11  BANK12  BANK13  BANK14  BANK15
@@ -7145,36 +7866,36 @@ GLOBAL	__end_of___lwdiv
 ;;		_menu_draw_input
 ;; This function uses a non-reentrant model
 ;;
-psect	text19,class=CODE,space=0,reloc=2,group=0
+psect	text20,class=CODE,space=0,reloc=2,group=0
 	file	"src\menu.c"
-	line	60
-global __ptext19
-__ptext19:
-psect	text19
+	line	61
+global __ptext20
+__ptext20:
+psect	text20
 	file	"src\menu.c"
-	line	60
+	line	61
 	
 _lcd_print_at:
 ;incstack = 0
 	callstack 24
 	movwf	((c:lcd_print_at@row))^00h,c
-	line	62
+	line	63
 	
-l2751:
+l2185:
 	movff	(c:lcd_print_at@col),(c:lcd_set_cursor@col)
 	movf	((c:lcd_print_at@row))^00h,c,w
 	
 	call	_lcd_set_cursor
-	line	63
+	line	64
 	
-l2753:
+l2187:
 		movff	(c:lcd_print_at@str),(c:lcd_print@str)
 	movff	(c:lcd_print_at@str+1),(c:lcd_print@str+1)
 
 	call	_lcd_print	;wreg free
-	line	64
+	line	65
 	
-l261:
+l265:
 	return	;funcret
 	callstack 0
 GLOBAL	__end_of_lcd_print_at
@@ -7184,7 +7905,7 @@ GLOBAL	__end_of_lcd_print_at
 
 ;; *************** function _lcd_clear_line *****************
 ;; Defined at:
-;;		line 67 in file "src\menu.c"
+;;		line 68 in file "src\menu.c"
 ;; Parameters:    Size  Location     Type
 ;;  row             1    wreg     unsigned char 
 ;; Auto vars:     Size  Location     Type
@@ -7194,7 +7915,7 @@ GLOBAL	__end_of_lcd_print_at
 ;; Registers used:
 ;;		wreg, fsr0l, fsr0h, status,2, status,0, tblptrl, tblptrh, tblptru, cstack
 ;; Tracked objects:
-;;		On entry : 0/1
+;;		On entry : 0/0
 ;;		On exit  : 0/0
 ;;		Unchanged: 0/0
 ;; Data sizes:     COMRAM   BANK0   BANK1   BANK2   BANK3   BANK4   BANK5   BANK6   BANK7   BANK8   BANK9  BANK10  BANK11  BANK12  BANK13  BANK14  BANK15
@@ -7213,38 +7934,38 @@ GLOBAL	__end_of_lcd_print_at
 ;;		_menu_draw_input
 ;; This function uses a non-reentrant model
 ;;
-psect	text20,class=CODE,space=0,reloc=2,group=0
-	line	67
-global __ptext20
-__ptext20:
-psect	text20
+psect	text21,class=CODE,space=0,reloc=2,group=0
+	line	68
+global __ptext21
+__ptext21:
+psect	text21
 	file	"src\menu.c"
-	line	67
+	line	68
 	
 _lcd_clear_line:
 ;incstack = 0
 	callstack 24
 	movwf	((c:lcd_clear_line@row))^00h,c
-	line	69
+	line	70
 	
-l2755:
+l2189:
 	movlw	low(0)
 	movwf	((c:lcd_set_cursor@col))^00h,c
 	movf	((c:lcd_clear_line@row))^00h,c,w
 	
 	call	_lcd_set_cursor
-	line	70
+	line	71
 	
-l2757:
+l2191:
 		movlw	low(STR_34)
 	movwf	((c:lcd_print@str))^00h,c
 	movlw	high(STR_34)
 	movwf	((c:lcd_print@str+1))^00h,c
 
 	call	_lcd_print	;wreg free
-	line	71
+	line	72
 	
-l264:
+l268:
 	return	;funcret
 	callstack 0
 GLOBAL	__end_of_lcd_clear_line
@@ -7283,14 +8004,15 @@ GLOBAL	__end_of_lcd_clear_line
 ;;		_main
 ;;		_lcd_print_at
 ;;		_lcd_clear_line
+;;		_menu_draw_input
 ;; This function uses a non-reentrant model
 ;;
-psect	text21,class=CODE,space=0,reloc=2,group=0
+psect	text22,class=CODE,space=0,reloc=2,group=0
 	file	"src\main.c"
 	line	193
-global __ptext21
-__ptext21:
-psect	text21
+global __ptext22
+__ptext22:
+psect	text22
 	file	"src\main.c"
 	line	193
 	
@@ -7300,63 +8022,63 @@ _lcd_set_cursor:
 	movwf	((c:lcd_set_cursor@row))^00h,c
 	line	195
 	
-l2597:
+l2031:
 	movff	(c:lcd_set_cursor@col),(c:lcd_set_cursor@pos)
 	line	196
 	
-l2599:
+l2033:
 		decf	((c:lcd_set_cursor@row))^00h,c,w
 	btfss	status,2
-	goto	u2301
-	goto	u2300
+	goto	u1361
+	goto	u1360
 
-u2301:
-	goto	l2603
-u2300:
+u1361:
+	goto	l2037
+u1360:
 	line	197
 	
-l2601:
+l2035:
 	movlw	(040h)&0ffh
 	addwf	((c:lcd_set_cursor@pos))^00h,c
-	goto	l2611
+	goto	l2045
 	line	198
 	
-l2603:
+l2037:
 		movlw	2
 	xorwf	((c:lcd_set_cursor@row))^00h,c,w
 	btfss	status,2
-	goto	u2311
-	goto	u2310
+	goto	u1371
+	goto	u1370
 
-u2311:
-	goto	l2607
-u2310:
+u1371:
+	goto	l2041
+u1370:
 	line	199
 	
-l2605:
+l2039:
 	movlw	(014h)&0ffh
 	addwf	((c:lcd_set_cursor@pos))^00h,c
-	goto	l2611
+	goto	l2045
 	line	200
 	
-l2607:
+l2041:
 		movlw	3
 	xorwf	((c:lcd_set_cursor@row))^00h,c,w
 	btfss	status,2
-	goto	u2321
-	goto	u2320
+	goto	u1381
+	goto	u1380
 
-u2321:
-	goto	l2611
-u2320:
+u1381:
+	goto	l2045
+u1380:
 	line	201
 	
-l2609:
+l2043:
 	movlw	(054h)&0ffh
 	addwf	((c:lcd_set_cursor@pos))^00h,c
 	line	202
 	
-l2611:
+l2045:
 	movf	((c:lcd_set_cursor@pos))^00h,c,w
 	iorlw	low(080h)
 	
@@ -7376,13 +8098,13 @@ GLOBAL	__end_of_lcd_set_cursor
 ;;		line 205 in file "src\main.c"
 ;; Parameters:    Size  Location     Type
 ;;  str             2   11[COMRAM] PTR const unsigned char 
-;;		 -> menu_draw_input@value_buf(12), STR_38(8), STR_37(2), STR_36(2), 
-;;		 -> STR_35(8), STR_34(21), STR_33(5), STR_32(8), 
-;;		 -> STR_31(8), STR_30(8), STR_29(9), STR_28(6), 
-;;		 -> STR_27(6), STR_26(8), STR_25(11), STR_24(10), 
-;;		 -> STR_23(7), STR_22(7), STR_21(5), STR_20(6), 
-;;		 -> STR_19(13), STR_18(11), STR_17(10), STR_8(15), 
-;;		 -> STR_7(13), 
+;;		 -> STR_62(13), menu_draw_input@value_buf(20), STR_38(8), STR_37(2), 
+;;		 -> STR_36(2), STR_35(8), STR_34(21), STR_33(5), 
+;;		 -> STR_32(8), STR_31(8), STR_30(8), STR_29(9), 
+;;		 -> STR_28(6), STR_27(6), STR_26(8), STR_25(11), 
+;;		 -> STR_24(10), STR_23(7), STR_22(7), STR_21(5), 
+;;		 -> STR_20(6), STR_19(13), STR_18(11), STR_17(10), 
+;;		 -> STR_8(15), STR_7(13), 
 ;; Auto vars:     Size  Location     Type
 ;;		None
 ;; Return value:  Size  Location     Type
@@ -7408,13 +8130,14 @@ GLOBAL	__end_of_lcd_set_cursor
 ;;		_lcd_print_at
 ;;		_lcd_clear_line
 ;;		_menu_draw_options
+;;		_menu_draw_input
 ;; This function uses a non-reentrant model
 ;;
-psect	text22,class=CODE,space=0,reloc=2,group=0
+psect	text23,class=CODE,space=0,reloc=2,group=0
 	line	205
-global __ptext22
-__ptext22:
-psect	text22
+global __ptext23
+__ptext23:
+psect	text23
 	file	"src\main.c"
 	line	205
 	
@@ -7423,59 +8146,59 @@ _lcd_print:
 	callstack 24
 	line	207
 	
-l2613:
-	goto	l2619
+l2047:
+	goto	l2053
 	line	209
 	
-l2615:
+l2049:
 	movff	(c:lcd_print@str),tblptrl
 	movff	(c:lcd_print@str+1),tblptrh
 	clrf	tblptru
 	
 	movlw	high __ramtop-1
 	cpfsgt	tblptrh
-	bra	u2337
+	bra	u1397
 	tblrd	*
 	
 	movf	tablat,w
-	bra	u2330
-u2337:
+	bra	u1390
+u1397:
 	movff	tblptrl,fsr0l
 	movff	tblptrh,fsr0h
 	movf	indf0,w
-u2330:
+u1390:
 	
 	call	_lcd_data
 	
-l2617:
+l2051:
 	infsnz	((c:lcd_print@str))^00h,c
 	incf	((c:lcd_print@str+1))^00h,c
 	line	207
 	
-l2619:
+l2053:
 	movff	(c:lcd_print@str),tblptrl
 	movff	(c:lcd_print@str+1),tblptrh
 	clrf	tblptru
 	
 	movlw	high __ramtop-1
 	cpfsgt	tblptrh
-	bra	u2347
+	bra	u1407
 	tblrd	*
 	
 	movf	tablat,w
-	bra	u2340
-u2347:
+	bra	u1400
+u1407:
 	movff	tblptrl,fsr0l
 	movff	tblptrh,fsr0h
 	movf	indf0,w
-u2340:
+u1400:
 	iorlw	0
 	btfss	status,2
-	goto	u2351
-	goto	u2350
-u2351:
-	goto	l2615
-u2350:
+	goto	u1411
+	goto	u1410
+u1411:
+	goto	l2049
+u1410:
 	line	211
 	
 l124:
@@ -7516,11 +8239,11 @@ GLOBAL	__end_of_lcd_print
 ;;		_main
 ;; This function uses a non-reentrant model
 ;;
-psect	text23,class=CODE,space=0,reloc=2,group=0
+psect	text24,class=CODE,space=0,reloc=2,group=0
 	line	140
-global __ptext23
-__ptext23:
-psect	text23
+global __ptext24
+__ptext24:
+psect	text24
 	file	"src\main.c"
 	line	140
 	
@@ -7530,11 +8253,11 @@ _lcd_data:
 	movwf	((c:lcd_data@data))^00h,c
 	line	142
 	
-l2587:
+l2021:
 	bsf	((c:3977))^0f00h,c,6	;volatile
 	line	143
 	
-l2589:
+l2023:
 	swapf	((c:lcd_data@data))^00h,c,w
 	andlw	(0ffh shr 4) & 0ffh
 	
@@ -7545,13 +8268,13 @@ l2589:
 	call	_lcd_write_nibble
 	line	145
 	
-l2591:
+l2025:
 	asmopt push
 asmopt off
 	movlw	133
-u3337:
+u3397:
 decfsz	wreg,f
-	bra	u3337
+	bra	u3397
 	nop
 asmopt pop
 
@@ -7595,11 +8318,11 @@ GLOBAL	__end_of_lcd_data
 ;;		_main
 ;; This function uses a non-reentrant model
 ;;
-psect	text24,class=CODE,space=0,reloc=2,group=0
+psect	text25,class=CODE,space=0,reloc=2,group=0
 	line	148
-global __ptext24
-__ptext24:
-psect	text24
+global __ptext25
+__ptext25:
+psect	text25
 	file	"src\main.c"
 	line	148
 	
@@ -7608,7 +8331,7 @@ _lcd_init:
 	callstack 26
 	line	151
 	
-l2817:
+l2259:
 	asmopt push
 asmopt off
 movlw  3
@@ -7616,43 +8339,43 @@ movwf	(??_lcd_init+0+0+1)^00h,c
 movlw	8
 movwf	(??_lcd_init+0+0)^00h,c
 	movlw	119
-u3347:
+u3407:
 decfsz	wreg,f
-	bra	u3347
+	bra	u3407
 	decfsz	(??_lcd_init+0+0)^00h,c,f
-	bra	u3347
+	bra	u3407
 	decfsz	(??_lcd_init+0+0+1)^00h,c,f
-	bra	u3347
+	bra	u3407
 	nop
 asmopt pop
 
 	line	154
 	
-l2819:
+l2261:
 	bcf	((c:3977))^0f00h,c,6	;volatile
 	line	155
 	
-l2821:
+l2263:
 	bcf	((c:3977))^0f00h,c,7	;volatile
 	line	158
 	
-l2823:
+l2265:
 	movlw	(03h)&0ffh
 	
 	call	_lcd_write_nibble
 	line	159
 	
-l2825:
+l2267:
 	asmopt push
 asmopt off
 movlw	52
 movwf	(??_lcd_init+0+0)^00h,c
 	movlw	242
-u3357:
+u3417:
 decfsz	wreg,f
-	bra	u3357
+	bra	u3417
 	decfsz	(??_lcd_init+0+0)^00h,c,f
-	bra	u3357
+	bra	u3417
 asmopt pop
 
 	line	160
@@ -7661,23 +8384,23 @@ asmopt pop
 	call	_lcd_write_nibble
 	line	161
 	
-l2827:
+l2269:
 	asmopt push
 asmopt off
 movlw	11
 movwf	(??_lcd_init+0+0)^00h,c
 	movlw	98
-u3367:
+u3427:
 decfsz	wreg,f
-	bra	u3367
+	bra	u3427
 	decfsz	(??_lcd_init+0+0)^00h,c,f
-	bra	u3367
+	bra	u3427
 	nop2
 asmopt pop
 
 	line	162
 	
-l2829:
+l2271:
 	movlw	(03h)&0ffh
 	
 	call	_lcd_write_nibble
@@ -7687,33 +8410,33 @@ asmopt off
 movlw	11
 movwf	(??_lcd_init+0+0)^00h,c
 	movlw	98
-u3377:
+u3437:
 decfsz	wreg,f
-	bra	u3377
+	bra	u3437
 	decfsz	(??_lcd_init+0+0)^00h,c,f
-	bra	u3377
+	bra	u3437
 	nop2
 asmopt pop
 
 	line	166
 	
-l2831:
+l2273:
 	movlw	(02h)&0ffh
 	
 	call	_lcd_write_nibble
 	line	167
 	
-l2833:
+l2275:
 	asmopt push
 asmopt off
 movlw	11
 movwf	(??_lcd_init+0+0)^00h,c
 	movlw	98
-u3387:
+u3447:
 decfsz	wreg,f
-	bra	u3387
+	bra	u3447
 	decfsz	(??_lcd_init+0+0)^00h,c,f
-	bra	u3387
+	bra	u3447
 	nop2
 asmopt pop
 
@@ -7731,45 +8454,45 @@ asmopt pop
 	call	_lcd_cmd
 	line	177
 	
-l2835:
+l2277:
 	asmopt push
 asmopt off
 movlw	21
 movwf	(??_lcd_init+0+0)^00h,c
 	movlw	198
-u3397:
+u3457:
 decfsz	wreg,f
-	bra	u3397
+	bra	u3457
 	decfsz	(??_lcd_init+0+0)^00h,c,f
-	bra	u3397
+	bra	u3457
 	nop2
 asmopt pop
 
 	line	180
 	
-l2837:
+l2279:
 	movlw	(06h)&0ffh
 	
 	call	_lcd_cmd
 	line	183
 	
-l2839:
+l2281:
 	movlw	(02h)&0ffh
 	
 	call	_lcd_cmd
 	line	184
 	
-l2841:
+l2283:
 	asmopt push
 asmopt off
 movlw	21
 movwf	(??_lcd_init+0+0)^00h,c
 	movlw	198
-u3407:
+u3467:
 decfsz	wreg,f
-	bra	u3407
+	bra	u3467
 	decfsz	(??_lcd_init+0+0)^00h,c,f
-	bra	u3407
+	bra	u3467
 	nop2
 asmopt pop
 
@@ -7812,11 +8535,11 @@ GLOBAL	__end_of_lcd_init
 ;;		_main
 ;; This function uses a non-reentrant model
 ;;
-psect	text25,class=CODE,space=0,reloc=2,group=0
+psect	text26,class=CODE,space=0,reloc=2,group=0
 	line	187
-global __ptext25
-__ptext25:
-psect	text25
+global __ptext26
+__ptext26:
+psect	text26
 	file	"src\main.c"
 	line	187
 	
@@ -7825,23 +8548,23 @@ _lcd_clear:
 	callstack 26
 	line	189
 	
-l2843:
+l2285:
 	movlw	(01h)&0ffh
 	
 	call	_lcd_cmd
 	line	190
 	
-l2845:
+l2287:
 	asmopt push
 asmopt off
 movlw	21
 movwf	(??_lcd_clear+0+0)^00h,c
 	movlw	198
-u3417:
+u3477:
 decfsz	wreg,f
-	bra	u3417
+	bra	u3477
 	decfsz	(??_lcd_clear+0+0)^00h,c,f
-	bra	u3417
+	bra	u3477
 	nop2
 asmopt pop
 
@@ -7887,11 +8610,11 @@ GLOBAL	__end_of_lcd_clear
 ;;		_main
 ;; This function uses a non-reentrant model
 ;;
-psect	text26,class=CODE,space=0,reloc=2,group=0
+psect	text27,class=CODE,space=0,reloc=2,group=0
 	line	132
-global __ptext26
-__ptext26:
-psect	text26
+global __ptext27
+__ptext27:
+psect	text27
 	file	"src\main.c"
 	line	132
 	
@@ -7901,11 +8624,11 @@ _lcd_cmd:
 	movwf	((c:lcd_cmd@cmd))^00h,c
 	line	134
 	
-l2581:
+l2015:
 	bcf	((c:3977))^0f00h,c,6	;volatile
 	line	135
 	
-l2583:
+l2017:
 	swapf	((c:lcd_cmd@cmd))^00h,c,w
 	andlw	(0ffh shr 4) & 0ffh
 	
@@ -7916,17 +8639,17 @@ l2583:
 	call	_lcd_write_nibble
 	line	137
 	
-l2585:
+l2019:
 	asmopt push
 asmopt off
 movlw	21
 movwf	(??_lcd_cmd+0+0)^00h,c
 	movlw	198
-u3427:
+u3487:
 decfsz	wreg,f
-	bra	u3427
+	bra	u3487
 	decfsz	(??_lcd_cmd+0+0)^00h,c,f
-	bra	u3427
+	bra	u3487
 	nop2
 asmopt pop
 
@@ -7971,11 +8694,11 @@ GLOBAL	__end_of_lcd_cmd
 ;;		_lcd_init
 ;; This function uses a non-reentrant model
 ;;
-psect	text27,class=CODE,space=0,reloc=2,group=0
+psect	text28,class=CODE,space=0,reloc=2,group=0
 	line	123
-global __ptext27
-__ptext27:
-psect	text27
+global __ptext28
+__ptext28:
+psect	text28
 	file	"src\main.c"
 	line	123
 	
@@ -7985,7 +8708,7 @@ _lcd_write_nibble:
 	movwf	((c:lcd_write_nibble@nibble))^00h,c
 	line	126
 	
-l2577:
+l2011:
 	movlw	(0F0h)&0ffh
 	andwf	((c:3977))^0f00h,c	;volatile
 	line	128
@@ -7994,7 +8717,7 @@ l2577:
 	iorwf	((c:3977))^0f00h,c	;volatile
 	line	129
 	
-l2579:
+l2013:
 	call	_lcd_pulse_enable	;wreg free
 	line	130
 	
@@ -8035,11 +8758,11 @@ GLOBAL	__end_of_lcd_write_nibble
 ;;		_lcd_write_nibble
 ;; This function uses a non-reentrant model
 ;;
-psect	text28,class=CODE,space=0,reloc=2,group=0
+psect	text29,class=CODE,space=0,reloc=2,group=0
 	line	115
-global __ptext28
-__ptext28:
-psect	text28
+global __ptext29
+__ptext29:
+psect	text29
 	file	"src\main.c"
 	line	115
 	
@@ -8048,7 +8771,7 @@ _lcd_pulse_enable:
 	callstack 24
 	line	117
 	
-l2573:
+l2007:
 	bsf	((c:3977))^0f00h,c,7	;volatile
 	line	118
 		asmopt push
@@ -8063,14 +8786,14 @@ l2573:
 	bcf	((c:3977))^0f00h,c,7	;volatile
 	line	120
 	
-l2575:
+l2009:
 	asmopt push
 asmopt off
 	movlw	160
-u3437:
+u3497:
 	nop2
 decfsz	wreg,f
-	bra	u3437
+	bra	u3497
 asmopt pop
 
 	line	121
@@ -8112,12 +8835,12 @@ GLOBAL	__end_of_lcd_pulse_enable
 ;;		_main
 ;; This function uses a non-reentrant model
 ;;
-psect	text29,class=CODE,space=0,reloc=2,group=0
+psect	text30,class=CODE,space=0,reloc=2,group=0
 	file	"src\encoder.c"
 	line	106
-global __ptext29
-__ptext29:
-psect	text29
+global __ptext30
+__ptext30:
+psect	text30
 	file	"src\encoder.c"
 	line	106
 	
@@ -8126,7 +8849,7 @@ _encoder_init:
 	callstack 29
 	line	109
 	
-l2847:
+l2289:
 	movlw	low(0C4h)
 	movwf	((c:4053))^0f00h,c	;volatile
 	line	110
@@ -8134,39 +8857,39 @@ l2847:
 	movwf	((c:4054))^0f00h,c	;volatile
 	line	113
 	
-l2849:
+l2291:
 	bcf	((c:4082))^0f00h,c,2	;volatile
 	line	114
 	
-l2851:
+l2293:
 	bsf	((c:4082))^0f00h,c,5	;volatile
 	line	115
 	
-l2853:
+l2295:
 	bsf	((c:4082))^0f00h,c,7	;volatile
 	line	118
 	
-l2855:
+l2297:
 	btfsc	((c:3969))^0f00h,c,2	;volatile
-	goto	u2661
-	goto	u2660
-u2661:
+	goto	u1731
+	goto	u1730
+u1731:
 	clrf	(??_encoder_init+0+0)^00h,c
 	incf	(??_encoder_init+0+0)^00h,c
-	goto	u2668
-u2660:
+	goto	u1738
+u1730:
 	clrf	(??_encoder_init+0+0)^00h,c
-u2668:
+u1738:
 	btfsc	((c:3969))^0f00h,c,1	;volatile
-	goto	u2671
-	goto	u2670
-u2671:
+	goto	u1741
+	goto	u1740
+u1741:
 	clrf	(??_encoder_init+1+0)^00h,c
 	incf	(??_encoder_init+1+0)^00h,c
-	goto	u2678
-u2670:
+	goto	u1748
+u1740:
 	clrf	(??_encoder_init+1+0)^00h,c
-u2678:
+u1748:
 	bcf	status,0
 	rlcf	(??_encoder_init+1+0)^00h,c,w
 	iorwf	(??_encoder_init+0+0)^00h,c,w
@@ -8239,45 +8962,45 @@ int_func:
 	movff	tablat+0,??_isr+5
 	line	30
 	
-i2l2513:
+i2l2733:
 	btfss	((c:4082))^0f00h,c,2	;volatile
-	goto	i2u215_41
-	goto	i2u215_40
-i2u215_41:
+	goto	i2u255_41
+	goto	i2u255_40
+i2u255_41:
 	goto	i2l205
-i2u215_40:
+i2u255_40:
 	line	33
 	
-i2l2515:
+i2l2735:
 	movlw	low(06h)
 	movwf	((c:4054))^0f00h,c	;volatile
 	line	34
 	
-i2l2517:
+i2l2737:
 	bcf	((c:4082))^0f00h,c,2	;volatile
 	line	37
 	
-i2l2519:
+i2l2739:
 	btfsc	((c:3969))^0f00h,c,2	;volatile
-	goto	i2u216_41
-	goto	i2u216_40
-i2u216_41:
+	goto	i2u256_41
+	goto	i2u256_40
+i2u256_41:
 	clrf	(??_isr+0+0)^00h,c
 	incf	(??_isr+0+0)^00h,c
-	goto	i2u216_48
-i2u216_40:
+	goto	i2u256_48
+i2u256_40:
 	clrf	(??_isr+0+0)^00h,c
-i2u216_48:
+i2u256_48:
 	btfsc	((c:3969))^0f00h,c,1	;volatile
-	goto	i2u217_41
-	goto	i2u217_40
-i2u217_41:
+	goto	i2u257_41
+	goto	i2u257_40
+i2u257_41:
 	clrf	(??_isr+1+0)^00h,c
 	incf	(??_isr+1+0)^00h,c
-	goto	i2u217_48
-i2u217_40:
+	goto	i2u257_48
+i2u257_40:
 	clrf	(??_isr+1+0)^00h,c
-i2u217_48:
+i2u257_48:
 	bcf	status,0
 	rlcf	(??_isr+1+0)^00h,c,w
 	iorwf	(??_isr+0+0)^00h,c,w
@@ -8285,7 +9008,7 @@ i2u217_48:
 	movwf	((c:isr@new_state))^00h,c
 	line	38
 	
-i2l2521:
+i2l2741:
 	rlncf	((c:_enc_state))^00h,c,w
 	rlncf	wreg
 	andlw	(0ffh shl 2) & 0ffh
@@ -8293,7 +9016,7 @@ i2l2521:
 	movwf	((c:isr@combined))^00h,c
 	line	41
 	
-i2l2523:
+i2l2743:
 	movlw	low((_enc_table))
 	addwf	((c:isr@combined))^00h,c,w
 	movwf	tblptrl
@@ -8312,120 +9035,120 @@ movlw	low highword(__mediumconst)
 	addwf	((c:_enc_accumulator))^00h,c
 	line	44
 	
-i2l2525:
+i2l2745:
 	movf	((c:isr@new_state))^00h,c,w
 	btfss	status,2
-	goto	i2u218_41
-	goto	i2u218_40
-i2u218_41:
-	goto	i2l2539
-i2u218_40:
+	goto	i2u258_41
+	goto	i2u258_40
+i2u258_41:
+	goto	i2l2759
+i2u258_40:
 	line	46
 	
-i2l2527:
+i2l2747:
 		movf	((c:_enc_accumulator))^00h,c,w
 	xorlw	80h
 	addlw	-(80h^04h)
 	btfss	status,0
-	goto	i2u219_41
-	goto	i2u219_40
+	goto	i2u259_41
+	goto	i2u259_40
 
-i2u219_41:
-	goto	i2l2533
-i2u219_40:
+i2u259_41:
+	goto	i2l2753
+i2u259_40:
 	line	48
 	
-i2l2529:
+i2l2749:
 	movlb	0	; () banked
 	infsnz	((_encoder_count))&0ffh	;volatile
 	incf	((_encoder_count+1))&0ffh	;volatile
 	line	49
 	
-i2l2531:; BSR set to: 0
+i2l2751:; BSR set to: 0
 
 	movlw	low(0)
 	movwf	((c:_enc_accumulator))^00h,c
 	line	50
-	goto	i2l2539
+	goto	i2l2759
 	line	51
 	
-i2l2533:
+i2l2753:
 		movf	((c:_enc_accumulator))^00h,c,w
 	xorlw	80h
 	addlw	-(80h^-3)
 	btfsc	status,0
-	goto	i2u220_41
-	goto	i2u220_40
+	goto	i2u260_41
+	goto	i2u260_40
 
-i2u220_41:
-	goto	i2l2539
-i2u220_40:
+i2u260_41:
+	goto	i2l2759
+i2u260_40:
 	line	53
 	
-i2l2535:
+i2l2755:
 	movlb	0	; () banked
 	decf	((_encoder_count))&0ffh	;volatile
 	btfss	status,0
 	decf	((_encoder_count+1))&0ffh	;volatile
-	goto	i2l2531
+	goto	i2l2751
 	line	58
 	
-i2l2539:
+i2l2759:
 	movff	(c:isr@new_state),(c:_enc_state)
 	line	61
 	
-i2l2541:
+i2l2761:
 	movlw	0
 	btfsc	((c:3969))^0f00h,c,6	;volatile
 	movlw	1
 	movwf	((c:isr@btn))^00h,c
 	line	62
 	
-i2l2543:
+i2l2763:
 	movf	((c:_last_btn))^00h,c,w
 xorwf	((c:isr@btn))^00h,c,w
 	btfsc	status,2
-	goto	i2u221_41
-	goto	i2u221_40
+	goto	i2u261_41
+	goto	i2u261_40
 
-i2u221_41:
-	goto	i2l2567
-i2u221_40:
+i2u261_41:
+	goto	i2l2787
+i2u261_40:
 	line	64
 	
-i2l2545:
+i2l2765:
 	incf	((c:_btn_debounce))^00h,c
 	line	65
 	
-i2l2547:
+i2l2767:
 		movlw	014h-1
 	cpfsgt	((c:_btn_debounce))^00h,c
-	goto	i2u222_41
-	goto	i2u222_40
+	goto	i2u262_41
+	goto	i2u262_40
 
-i2u222_41:
+i2u262_41:
 	goto	i2l205
-i2u222_40:
+i2u262_40:
 	line	67
 	
-i2l2549:
+i2l2769:
 	movff	(c:isr@btn),(c:_last_btn)
 	line	68
 	
-i2l2551:
+i2l2771:
 	movlw	low(0)
 	movwf	((c:_btn_debounce))^00h,c
 	line	70
 	movf	((c:isr@btn))^00h,c,w
 	btfss	status,2
-	goto	i2u223_41
-	goto	i2u223_40
-i2u223_41:
-	goto	i2l2555
-i2u223_40:
+	goto	i2u263_41
+	goto	i2u263_40
+i2u263_41:
+	goto	i2l2775
+i2u263_40:
 	line	73
 	
-i2l2553:
+i2l2773:
 	movlw	high(0)
 	movwf	((c:_button_hold_ms+1))^00h,c	;volatile
 	movlw	low(0)
@@ -8434,21 +9157,21 @@ i2l2553:
 	goto	i2l205
 	line	78
 	
-i2l2555:
+i2l2775:
 		movlw	8
 	subwf	 ((c:_button_hold_ms))^00h,c,w	;volatile
 	movlw	7
 	subwfb	((c:_button_hold_ms+1))^00h,c,w	;volatile
 	btfss	status,0
-	goto	i2u224_41
-	goto	i2u224_40
+	goto	i2u264_41
+	goto	i2u264_40
 
-i2u224_41:
-	goto	i2l2559
-i2u224_40:
+i2u264_41:
+	goto	i2l2779
+i2u264_40:
 	line	80
 	
-i2l2557:
+i2l2777:
 	movlw	low(03h)
 	movlb	0	; () banked
 	movwf	((_button_event))&0ffh	;volatile
@@ -8456,21 +9179,21 @@ i2l2557:
 	goto	i2l199
 	line	82
 	
-i2l2559:
+i2l2779:
 		movlw	132
 	subwf	 ((c:_button_hold_ms))^00h,c,w	;volatile
 	movlw	3
 	subwfb	((c:_button_hold_ms+1))^00h,c,w	;volatile
 	btfss	status,0
-	goto	i2u225_41
-	goto	i2u225_40
+	goto	i2u265_41
+	goto	i2u265_40
 
-i2u225_41:
-	goto	i2l2563
-i2u225_40:
+i2u265_41:
+	goto	i2l2783
+i2u265_40:
 	line	84
 	
-i2l2561:
+i2l2781:
 	movlw	low(02h)
 	movlb	0	; () banked
 	movwf	((_button_event))&0ffh	;volatile
@@ -8478,21 +9201,21 @@ i2l2561:
 	goto	i2l199
 	line	86
 	
-i2l2563:
+i2l2783:
 		movf	((c:_button_hold_ms+1))^00h,c,w	;volatile
-	bnz	i2u226_40
+	bnz	i2u266_40
 	movlw	50
 	subwf	 ((c:_button_hold_ms))^00h,c,w	;volatile
 	btfss	status,0
-	goto	i2u226_41
-	goto	i2u226_40
+	goto	i2u266_41
+	goto	i2u266_40
 
-i2u226_41:
+i2u266_41:
 	goto	i2l199
-i2u226_40:
+i2u266_40:
 	line	88
 	
-i2l2565:
+i2l2785:
 	movlw	low(01h)
 	movlb	0	; () banked
 	movwf	((_button_event))&0ffh	;volatile
@@ -8505,32 +9228,32 @@ i2l199:
 	goto	i2l205
 	line	96
 	
-i2l2567:
+i2l2787:
 	movlw	low(0)
 	movwf	((c:_btn_debounce))^00h,c
 	line	98
 	movf	((c:isr@btn))^00h,c,w
 	btfss	status,2
-	goto	i2u227_41
-	goto	i2u227_40
-i2u227_41:
+	goto	i2u267_41
+	goto	i2u267_40
+i2u267_41:
 	goto	i2l205
-i2u227_40:
+i2u267_40:
 	
-i2l2569:
+i2l2789:
 		incf	((c:_button_hold_ms))^00h,c,w	;volatile
-	bnz	i2u228_40
+	bnz	i2u268_40
 	incf	((c:_button_hold_ms+1))^00h,c,w	;volatile
 	btfsc	status,2
-	goto	i2u228_41
-	goto	i2u228_40
+	goto	i2u268_41
+	goto	i2u268_40
 
-i2u228_41:
+i2u268_41:
 	goto	i2l205
-i2u228_40:
+i2u268_40:
 	line	100
 	
-i2l2571:
+i2l2791:
 	infsnz	((c:_button_hold_ms))^00h,c	;volatile
 	incf	((c:_button_hold_ms+1))^00h,c	;volatile
 	line	104

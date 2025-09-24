@@ -382,7 +382,7 @@ void main(void)
         if (menu.in_edit_mode)
         {
             blink_timer++;
-            if (blink_timer >= 30000) // Fast blinking
+            if (blink_timer >= 50000) // Fast blinking
             {
                 blink_timer = 0;
                 menu.blink_state = !menu.blink_state;
