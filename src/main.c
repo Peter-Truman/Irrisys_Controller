@@ -289,7 +289,7 @@ void main(void)
 
             // Add encoder tick sound - commented out for better performance
             // beep(1);
-
+            beep(1);
             char buf[40];
             sprintf(buf, "Encoder: %d, Delta: %d", encoder_count, delta);
             uart_println(buf);
