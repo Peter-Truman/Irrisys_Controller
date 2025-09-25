@@ -7,7 +7,7 @@
 	;
 	; Compiler options:
 	;
-	; src\main.c src\encoder.c src\menu.c -osrc\main -Iinclude
+	; src\main.c src\encoder.c src\menu.c src\eeprom.c -osrc\main -Iinclude
 	;
 
 

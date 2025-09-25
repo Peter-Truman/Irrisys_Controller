@@ -1,68 +1,50 @@
 /**
- * IRRISYS - Irrigation Pump Protection Controller
- * Main test file for menu system
+ * IRRISYS - Menu System with EEPROM Integration
+ * Working stable version with 32MHz operation
  */
 
 #include "../include/config.h"
 #include "../include/encoder.h"
 #include "../include/menu.h"
-#include <xc.h>
-#include <stdint.h>
+#include "../include/eeprom.h"
 #include <stdio.h>
-#include <string.h>
 
-#define _XTAL_FREQ 32000000 // 32MHz with PLL
+// External variables from encoder
+extern volatile uint16_t button_hold_ms;
+extern volatile uint8_t button_event;
 
-// Configuration bits for PIC18F2525
-#pragma config OSC = INTIO67  // Internal oscillator, port function on RA6 and RA7
-#pragma config FCMEN = OFF    // Fail-Safe Clock Monitor disabled
-#pragma config IESO = OFF     // Oscillator Switchover mode disabled
-#pragma config PWRT = ON      // Power-up Timer enabled
-#pragma config BOREN = ON     // Brown-out Reset enabled
-#pragma config BORV = 3       // Brown-out voltage 2.05V
-#pragma config WDT = OFF      // Watchdog Timer disabled
-#pragma config WDTPS = 32768  // Watchdog Timer Postscale 1:32768
-#pragma config MCLRE = ON     // MCLR pin enabled
-#pragma config LPT1OSC = OFF  // Timer1 configured for higher power operation
-#pragma config PBADEN = OFF   // PORTB pins configured as digital I/O on reset
-#pragma config CCP2MX = PORTC // CCP2 input/output is multiplexed with RC1
-#pragma config STVREN = ON    // Stack overflow reset enabled
-#pragma config LVP = OFF      // Low voltage programming disabled
-#pragma config XINST = OFF    // Extended instruction set disabled
-#pragma config DEBUG = OFF    // Background debugger disabled
-#pragma config CP0 = OFF      // Code protection off
-#pragma config CP1 = OFF
-#pragma config CP2 = OFF
-#pragma config CPB = OFF  // Boot block code protection off
-#pragma config CPD = OFF  // Data EEPROM code protection off
-#pragma config WRT0 = OFF // Write protection off
-#pragma config WRT1 = OFF
-#pragma config WRT2 = OFF
-#pragma config WRTB = OFF  // Boot block write protection off
-#pragma config WRTC = OFF  // Configuration register write protection off
-#pragma config WRTD = OFF  // Data EEPROM write protection off
-#pragma config EBTR0 = OFF // Table read protection off
-#pragma config EBTR1 = OFF
-#pragma config EBTR2 = OFF
-#pragma config EBTRB = OFF // Boot block table read protection off
+// Function prototypes
+void uart_init(void);
+void uart_write(char c);
+void uart_print(const char *str);
+void uart_println(const char *str);
+void system_init(void);
+void lcd_init(void);
+void lcd_cmd(uint8_t cmd);
+void lcd_data(uint8_t data);
+void lcd_write_nibble(uint8_t nibble);
+void lcd_print(const char *str);
+void lcd_clear(void);
+void lcd_set_cursor(uint8_t row, uint8_t col);
+void beep(uint16_t duration_ms);
 
+// UART functions
 void uart_init(void)
 {
-    // Configure TX (RC6) as output, RX (RC7) as input
-    TRISCbits.TRISC6 = 0;
-    TRISCbits.TRISC7 = 1;
+    TRISCbits.TRISC6 = 0; // TX pin as output
+    TRISCbits.TRISC7 = 1; // RX pin as input
 
-    // 115200 baud at 32MHz
-    TXSTA = 0x24;   // TX enabled, BRGH=1 (high speed)
-    RCSTA = 0x90;   // Serial port enabled, continuous receive
-    BAUDCON = 0x08; // BRG16=1 (16-bit baud rate generator)
+    TXSTA = 0b00100100;   // TX enabled, high speed
+    RCSTA = 0b10010000;   // Serial port enabled, RX enabled
+    BAUDCON = 0b00001000; // 16-bit baud rate generator
+
+    SPBRG = 68; // For 115200 baud @ 32MHz
     SPBRGH = 0;
-    SPBRG = 68; // For 115200 baud at 32MHz
 }
 
 void uart_write(char c)
 {
-    while (!PIR1bits.TXIF)
+    while (!TXSTAbits.TRMT)
         ;
     TXREG = c;
 }
@@ -85,121 +67,75 @@ void uart_println(const char *str)
 // System initialization
 void system_init(void)
 {
-    // Use the EXACT sequence that worked before
-    OSCCON = 0x70;  // 8MHz internal oscillator FIRST
-    OSCTUNE = 0x40; // THEN enable 4x PLL
+    OSCCON = 0x70;  // 8MHz internal oscillator
+    OSCTUNE = 0x40; // Enable 4x PLL (bit 6 = 1)
 
-    // Wait for oscillator to stabilize
     while (!OSCCONbits.IOFS)
         ;
 
-    // Configure all pins as digital
-    ADCON1 = 0x0F;
+    ADCON1 = 0x0F; // All pins digital
 
-    // Initialize port directions
-    TRISA = 0x00;
-    TRISB = 0xFF;
-    TRISC = 0x00;
-    TRISCbits.TRISC7 = 1;
+    LATA = 0;
+    LATB = 0;
+    LATC = 0;
 
-    // Enable weak pull-ups on PORTB
-    INTCON2bits.RBPU = 0;
+    BUZZER_TRIS = 0;
+    BUZZER = 0;
 
-    // Clear all outputs
-    LATA = 0x00;
-    LATB = 0x00;
-    LATC = 0x00;
+    TRISBbits.TRISB1 = 1; // ENC_A input
+    TRISBbits.TRISB2 = 1; // ENC_B input
+    TRISBbits.TRISB6 = 1; // ENC_SW input
+    INTCON2bits.RBPU = 0; // Enable PORTB pull-ups
 }
 
-// LCD Control Functions
-void lcd_pulse_enable(void)
+// LCD functions
+void lcd_write_nibble(uint8_t nibble)
 {
+    if (nibble & 0x01)
+        LCD_D4 = 1;
+    else
+        LCD_D4 = 0;
+    if (nibble & 0x02)
+        LCD_D5 = 1;
+    else
+        LCD_D5 = 0;
+    if (nibble & 0x04)
+        LCD_D6 = 1;
+    else
+        LCD_D6 = 0;
+    if (nibble & 0x08)
+        LCD_D7 = 1;
+    else
+        LCD_D7 = 0;
+
     LCD_EN = 1;
     __delay_us(1);
     LCD_EN = 0;
-    __delay_us(100);
-}
-
-void lcd_write_nibble(uint8_t nibble)
-{
-    // Clear data bits
-    LATA &= 0xF0;
-    // Set new data (lower 4 bits)
-    LATA |= (nibble & 0x0F);
-    lcd_pulse_enable();
+    __delay_us(50);
 }
 
 void lcd_cmd(uint8_t cmd)
 {
-    LCD_RS = 0; // Command mode
+    LCD_RS = 0;
     lcd_write_nibble(cmd >> 4);
-    lcd_write_nibble(cmd);
-    __delay_ms(2);
+    lcd_write_nibble(cmd & 0x0F);
+
+    if (cmd == 0x01 || cmd == 0x02)
+    {
+        __delay_ms(2);
+    }
+    else
+    {
+        __delay_us(50);
+    }
 }
 
 void lcd_data(uint8_t data)
 {
-    LCD_RS = 1; // Data mode
+    LCD_RS = 1;
     lcd_write_nibble(data >> 4);
-    lcd_write_nibble(data);
+    lcd_write_nibble(data & 0x0F);
     __delay_us(50);
-}
-
-void lcd_init(void)
-{
-    // LCD power-on delay
-    __delay_ms(50);
-
-    // Initialize in 4-bit mode
-    LCD_RS = 0;
-    LCD_EN = 0;
-
-    // Send 0x03 three times
-    lcd_write_nibble(0x03);
-    __delay_ms(5);
-    lcd_write_nibble(0x03);
-    __delay_ms(1);
-    lcd_write_nibble(0x03);
-    __delay_ms(1);
-
-    // Switch to 4-bit mode
-    lcd_write_nibble(0x02);
-    __delay_ms(1);
-
-    // Function set: 4-bit, 2 lines, 5x8 font
-    lcd_cmd(0x28);
-
-    // Display on, cursor off, blink off
-    lcd_cmd(0x0C);
-
-    // Clear display
-    lcd_cmd(0x01);
-    __delay_ms(2);
-
-    // Entry mode: increment, no shift
-    lcd_cmd(0x06);
-
-    // Return home
-    lcd_cmd(0x02);
-    __delay_ms(2);
-}
-
-void lcd_clear(void)
-{
-    lcd_cmd(0x01);
-    __delay_ms(2);
-}
-
-void lcd_set_cursor(uint8_t row, uint8_t col)
-{
-    uint8_t pos = col;
-    if (row == 1)
-        pos += 0x40;
-    else if (row == 2)
-        pos += 0x14;
-    else if (row == 3)
-        pos += 0x54;
-    lcd_cmd(0x80 | pos);
 }
 
 void lcd_print(const char *str)
@@ -210,6 +146,63 @@ void lcd_print(const char *str)
     }
 }
 
+void lcd_clear(void)
+{
+    lcd_cmd(0x01);
+    __delay_ms(2);
+}
+
+void lcd_set_cursor(uint8_t row, uint8_t col)
+{
+    uint8_t address;
+    switch (row)
+    {
+    case 0:
+        address = 0x80;
+        break;
+    case 1:
+        address = 0xC0;
+        break;
+    case 2:
+        address = 0x94;
+        break;
+    case 3:
+        address = 0xD4;
+        break;
+    default:
+        address = 0x80;
+        break;
+    }
+    lcd_cmd(address + col);
+}
+
+void lcd_init(void)
+{
+    TRISA &= 0x30;
+    LATA = 0;
+
+    __delay_ms(50);
+
+    LCD_RS = 0;
+
+    lcd_write_nibble(0x03);
+    __delay_ms(5);
+    lcd_write_nibble(0x03);
+    __delay_us(150);
+    lcd_write_nibble(0x03);
+    __delay_us(150);
+
+    lcd_write_nibble(0x02);
+    __delay_us(150);
+
+    lcd_cmd(0x28);
+    lcd_cmd(0x0C);
+    lcd_cmd(0x01);
+    __delay_ms(2);
+    lcd_cmd(0x06);
+}
+
+// Buzzer function
 void beep(uint16_t duration_ms)
 {
     BUZZER = 1;
@@ -220,86 +213,67 @@ void beep(uint16_t duration_ms)
     BUZZER = 0;
 }
 
-// Main program
+// Main function
 void main(void)
 {
+    // Initialize hardware
     system_init();
+    eeprom_init(); // Load config from EEPROM
     uart_init();
-
-    uart_println("\r\n=== IRRISYS Starting ===");
-    uart_println("System init complete");
-
+    encoder_init();
+    menu_init();
     lcd_init();
 
+    uart_println("=== IRRISYS Menu System ===");
     uart_println("LCD Test: Writing TEST");
-    lcd_cmd(0x80);
-    lcd_data('T');
-    lcd_data('E');
-    lcd_data('S');
-    lcd_data('T');
 
-    encoder_init();
-    uart_println("Encoder init complete");
-
-    menu_init();
-    uart_println("Menu init complete");
-
-    uart_println("Writing welcome message");
     lcd_clear();
-    lcd_set_cursor(0, 3);
+    lcd_set_cursor(0, 0);
     lcd_print("IRRISYS v1.0");
-    lcd_set_cursor(1, 2);
-    lcd_print("Menu Test Mode");
+    lcd_set_cursor(1, 0);
+    lcd_print("Initializing...");
+
+    uart_println("Encoder init complete");
+    uart_println("Menu init complete");
+    uart_println("Writing welcome message");
+
+    beep(100);
+    __delay_ms(100);
+    beep(100);
 
     uart_println("Playing startup beeps");
-    beep(100);
-    __delay_ms(100);
-    beep(100);
-    __delay_ms(100);
-    beep(200);
-
-    __delay_ms(2000);
-
     uart_println("Starting OPTIONS menu");
-    lcd_clear();
-    uint8_t current_menu = 0;
-    menu_draw_options();
 
-    int16_t last_encoder = encoder_count;
-    uint16_t blink_timer = 0;
-    uint8_t was_editing = 0;
+    __delay_ms(1000);
 
+    // Set menu to INPUT mode and total items for INPUT menu
+    extern uint8_t current_menu;
+    current_menu = 1;      // 1 = INPUT menu
+    menu.total_items = 12; // INPUT menu has 12 items
+
+    menu_draw_input();
     uart_println("Entering main loop");
+
+    // Main loop variables
+    int16_t last_encoder = 0;
+    uint8_t last_button = 0;
+    static uint32_t blink_timer = 0;
 
     while (1)
     {
-        /*// Debug counter to help identify correct COM port
-        static uint16_t loop_counter = 0;
-        loop_counter++;
-        if (loop_counter >= 10000) // Print every 10000 loops
-        {
-            loop_counter = 0;
-            uart_println("Main loop running...");
-        }*/
-
         // Check encoder rotation
         if (encoder_count != last_encoder)
         {
             int16_t delta = encoder_count - last_encoder;
 
-            // Add encoder tick sound - commented out for better performance
-            // beep(1);
+            // Add encoder tick sound for all movements
             beep(1);
+
             char buf[40];
             sprintf(buf, "Encoder: %d, Delta: %d", encoder_count, delta);
             uart_println(buf);
 
-            // Add debug for edit mode
-            if (menu.in_edit_mode)
-            {
-                sprintf(buf, "Edit mode, item %d, value: %s", menu.current_line, input_menu[menu.current_line].value);
-                uart_println(buf);
-            }
+            last_encoder = encoder_count;
 
             menu_handle_encoder(delta);
 
@@ -312,90 +286,59 @@ void main(void)
             {
                 menu_draw_input();
             }
-
-            last_encoder = encoder_count;
         }
 
-        // Check button press
-        if (button_pressed)
+        // Check button events
+        if (button_event != last_button)
         {
-            button_pressed = 0;
-
-            char buf[40];
-            sprintf(buf, "Button event: %d", button_event);
-            uart_println(buf);
-
-            // Store edit mode state before handling button
-            was_editing = menu.in_edit_mode;
-
             if (button_event > 0)
             {
-                if (button_event == 1)
-                {
-                    beep(50);
-                }
-                else if (button_event == 2)
-                {
-                    beep(100);
-                }
-                else if (button_event == 3)
-                {
-                    beep(200);
-                }
+                char buf[30];
+                sprintf(buf, "Button event: %d", button_event);
+                uart_println(buf);
 
                 menu_handle_button(button_event);
 
-                // If we just exited edit mode, force a redraw
-                if (was_editing && !menu.in_edit_mode)
+                // Redraw after button action
+                if (current_menu == 0)
                 {
-                    if (current_menu == 1)
-                    {
-                        menu_draw_input();
-                    }
-                }
-
-                // Handle menu switching
-                if (button_event == 1 && current_menu == 0)
-                {
-                    uart_println("Switching to INPUT menu");
-                    current_menu = 1;
-                    menu_init();
-                    menu.total_items = 12;
-                    lcd_clear();
-                    menu_draw_input();
-                }
-                else if (button_event == 3)
-                {
-                    uart_println("Returning to OPTIONS menu");
-                    current_menu = 0;
-                    menu_init();
-                    menu.total_items = 5;
-                    lcd_clear();
                     menu_draw_options();
                 }
-
-                button_event = 0;
-            }
-        }
-
-        // Handle blinking for edit mode - only when in edit mode
-        if (menu.in_edit_mode)
-        {
-            blink_timer++;
-            if (blink_timer >= 50000) // Fast blinking
-            {
-                blink_timer = 0;
-                menu.blink_state = !menu.blink_state;
-                if (current_menu == 1)
+                else
                 {
                     menu_draw_input();
                 }
             }
+            last_button = button_event;
+            button_event = 0;
         }
-        else
-        {
-            blink_timer = 0; // Reset when not in edit mode
+
+        // Handle blinking in edit mode
+        blink_timer++;
+        if (blink_timer >= 50000)
+        { // Slow 2Hz blinking
+            blink_timer = 0;
+            if (menu.in_edit_mode)
+            {
+                menu.blink_state = !menu.blink_state;
+
+                // Only redraw in edit mode
+                if (current_menu == 0)
+                {
+                    menu_draw_options();
+                }
+                else
+                {
+                    menu_draw_input();
+                }
+            }
+            else
+            {
+                menu.blink_state = 1; // Always on when not editing
+            }
         }
+
+        // Prevent LCD corruption at high speed
+        __delay_us(200);
     }
-    __delay_us(200);
 }

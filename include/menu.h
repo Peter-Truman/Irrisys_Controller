@@ -1,6 +1,5 @@
 #ifndef MENU_H
 #define MENU_H
-
 #include <stdint.h>
 
 // Menu state structure - MUST be defined before using it
@@ -26,6 +25,11 @@ typedef struct
 // External menu state - NOW it can reference menu_state_t
 extern menu_state_t menu;
 extern menu_item_t input_menu[];
+
+// External variables that other files can access
+extern uint8_t enable_edit_flag;
+extern uint8_t sensor_edit_flag;
+extern uint8_t current_menu;
 
 // Function prototypes
 void menu_init(void);
