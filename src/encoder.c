@@ -1,5 +1,6 @@
 /**
  * IRRISYS - Interrupt-driven encoder and button handling
+ * Fixed version with proper button timing reset
  */
 
 #include "../include/config.h"
@@ -71,6 +72,7 @@ void __interrupt() isr(void)
                 {
                     // Button pressed - start timing
                     button_hold_ms = 0;
+                    button_event = 0; // Clear any previous events
                 }
                 else
                 {
@@ -87,7 +89,13 @@ void __interrupt() isr(void)
                     {
                         button_event = 1; // Short
                     }
+                    else
+                    {
+                        button_event = 0; // Too short, ignore
+                    }
+
                     button_pressed = 1;
+                    button_hold_ms = 0; // Reset hold time immediately
                 }
             }
         }
@@ -108,6 +116,12 @@ void encoder_init(void)
     // Configure Timer0 for 1ms interrupts
     T0CON = 0b11000100; // TMR0ON, 8-bit, prescaler 1:32
     TMR0L = 6;
+
+    // Initialize variables
+    encoder_count = 0;
+    button_pressed = 0;
+    button_hold_ms = 0;
+    button_event = 0;
 
     // Enable Timer0 interrupt
     INTCONbits.TMR0IF = 0;

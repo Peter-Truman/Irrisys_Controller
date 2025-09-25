@@ -16,6 +16,7 @@ static char original_value[10]; // Store original value for cancellation
 uint8_t enable_edit_flag = 1;   // 1=Enabled, 0=Disabled
 uint8_t sensor_edit_flag = 0;   // 0=Pressure, 1=Temp, 2=Flow
 uint8_t current_menu = 1;       // 0=OPTIONS, 1=INPUT
+uint8_t save_pending = 0;       // Add this global flag
 
 // Define options for each editable item
 typedef struct
@@ -334,8 +335,8 @@ void menu_handle_button(uint8_t press_type)
                 }
             }
 
-            // Save to EEPROM after beep (takes time)
-            save_current_config();
+            // Mark save as pending instead of doing it immediately
+            save_pending = 1;
         }
         else if (press_type == 2)
         {

@@ -12,6 +12,7 @@
 // External variables from encoder
 extern volatile uint16_t button_hold_ms;
 extern volatile uint8_t button_event;
+uint8_t save_pending = 0; // Flag for deferred EEPROM saves
 
 // Function prototypes
 void uart_init(void);
@@ -291,13 +292,17 @@ void main(void)
         // Check button events
         if (button_event != last_button)
         {
+            // Check button events
             if (button_event > 0)
-            {
+            { // Simplified check
+                uint8_t current_event = button_event;
+                button_event = 0; // Clear immediately
+
                 char buf[30];
-                sprintf(buf, "Button event: %d", button_event);
+                sprintf(buf, "Button event: %d", current_event);
                 uart_println(buf);
 
-                menu_handle_button(button_event);
+                menu_handle_button(current_event);
 
                 // Redraw after button action
                 if (current_menu == 0)
@@ -338,7 +343,14 @@ void main(void)
             }
         }
 
+        // Handle pending EEPROM saves when not in edit mode (MOVED OUTSIDE)
+        if (save_pending && !menu.in_edit_mode)
+        {
+            save_current_config();
+            save_pending = 0;
+        }
+
         // Prevent LCD corruption at high speed
-        __delay_us(200);
+        __delay_us(50);
     }
 }
