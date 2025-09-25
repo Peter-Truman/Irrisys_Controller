@@ -9,6 +9,8 @@
 #include <xc.h>
 #include <stdint.h>
 #include <stdbool.h>
+// UART function prototypes
+void uart_println(const char *str);
 
 // Configuration bits
 #pragma config OSC = INTIO67 // Internal oscillator, I/O on RA6 and RA7

@@ -247,12 +247,12 @@ void main(void)
 
     __delay_ms(1000);
 
-    // Set menu to INPUT mode and total items for INPUT menu
+    // Start with OPTIONS menu (default behavior)
     extern uint8_t current_menu;
-    current_menu = 1;      // 1 = INPUT menu
-    menu.total_items = 12; // INPUT menu has 12 items
+    current_menu = 0;     // 0 = OPTIONS menu
+    menu.total_items = 5; // OPTIONS menu has 5 items
 
-    menu_draw_input();
+    menu_draw_options(); // Draw OPTIONS menu instead
     uart_println("Entering main loop");
 
     // Main loop variables

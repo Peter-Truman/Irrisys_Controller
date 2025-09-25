@@ -306,7 +306,7 @@ void menu_handle_encoder(int16_t delta)
     }
 }
 
-// Handle button press - FLEXIBLE OPTION SYSTEM WITH IMMEDIATE FEEDBACK
+// Handle button press - COMPLETE MENU SYSTEM WITH OPTIONS NAVIGATION
 void menu_handle_button(uint8_t press_type)
 {
     if (menu.in_edit_mode)
@@ -335,8 +335,8 @@ void menu_handle_button(uint8_t press_type)
                 }
             }
 
-            // Mark save as pending instead of doing it immediately
-            save_pending = 1;
+            // Mark save as pending (commented out to avoid delay)
+            // save_pending = 1;
         }
         else if (press_type == 2)
         {
@@ -367,43 +367,104 @@ void menu_handle_button(uint8_t press_type)
     {
         if (press_type == 1)
         {
-            // Short press - enter edit mode (Enable and Sensor items)
-            if (input_menu[menu.current_line].editable && (menu.current_line == 0 || menu.current_line == 1))
+            // Short press - handle different menu types
+            if (current_menu == 0) // OPTIONS menu
             {
-                // Beep first for immediate feedback
-                beep(50);
+                // Handle OPTIONS menu selections
+                beep(50); // Immediate feedback
 
-                // Save original value and sync flags
-                strcpy(original_value, input_menu[menu.current_line].value);
-
-                if (menu.current_line == 0) // Enable item
+                switch (menu.current_line)
                 {
-                    enable_edit_flag = (value_enable[0] == 'E') ? 1 : 0;
-                }
-                else if (menu.current_line == 1) // Sensor item
-                {
-                    // Sync sensor flag with current value
-                    if (strcmp(value_sensor, "Pressure") == 0)
-                        sensor_edit_flag = 0;
-                    else if (strcmp(value_sensor, "Temp") == 0)
-                        sensor_edit_flag = 1;
-                    else
-                        sensor_edit_flag = 2; // Flow
-                }
+                case 0: // Main Menu
+                    uart_println("Switching to MAIN menu");
+                    // Stub for Main Menu - just beep and show message for now
+                    // TODO: Implement Main Menu with Hi Pressure, Low Pressure, etc.
+                    break;
 
-                menu.in_edit_mode = 1;
-                menu.blink_timer = 0;
-                menu.blink_state = 1;
+                case 1: // Setup Menu
+                    uart_println("Switching to INPUT menu");
+                    current_menu = 1;
+                    menu.total_items = 12; // INPUT menu has 12 items
+                    menu.current_line = 0; // Reset cursor to top
+                    menu.top_line = 0;     // Reset scroll position
+                    break;
+
+                case 2: // Utility Menu
+                    uart_println("Switching to UTILITY menu");
+                    // Stub for Utility Menu - just beep and show message for now
+                    // TODO: Implement Utility Menu with Set Clock, View Log, etc.
+                    break;
+
+                case 3: // About
+                    uart_println("About selected - not implemented");
+                    // TODO: Show version info, etc.
+                    break;
+
+                case 4: // Exit
+                    uart_println("Exit selected - returning to main screen");
+                    // TODO: Could add main display screen logic here
+                    break;
+
+                default:
+                    uart_println("Unknown OPTIONS selection");
+                    break;
+                }
             }
-            else
+            else if (current_menu == 1) // INPUT menu
             {
-                beep(50); // Just beep for non-editable items
+                // Handle INPUT menu selections
+                if (input_menu[menu.current_line].editable && (menu.current_line == 0 || menu.current_line == 1))
+                {
+                    // Beep first for immediate feedback
+                    beep(50);
+
+                    // Save original value and sync flags
+                    strcpy(original_value, input_menu[menu.current_line].value);
+
+                    if (menu.current_line == 0) // Enable item
+                    {
+                        enable_edit_flag = (value_enable[0] == 'E') ? 1 : 0;
+                    }
+                    else if (menu.current_line == 1) // Sensor item
+                    {
+                        // Sync sensor flag with current value
+                        if (strcmp(value_sensor, "Pressure") == 0)
+                            sensor_edit_flag = 0;
+                        else if (strcmp(value_sensor, "Temp") == 0)
+                            sensor_edit_flag = 1;
+                        else
+                            sensor_edit_flag = 2; // Flow
+                    }
+
+                    menu.in_edit_mode = 1;
+                    menu.blink_timer = 0;
+                    menu.blink_state = 1;
+                }
+                else if (menu.current_line == 11) // Back option
+                {
+                    // Back to OPTIONS menu
+                    beep(50);
+                    uart_println("Returning to OPTIONS menu");
+                    current_menu = 0;
+                    menu.total_items = 5;  // OPTIONS menu has 5 items
+                    menu.current_line = 1; // Return to Setup Menu position
+                    menu.top_line = 0;     // Reset scroll position
+                }
+                else
+                {
+                    beep(50); // Just beep for non-editable items
+                }
             }
         }
         else if (press_type == 3)
         {
-            // Very long press - exit to main screen
+            // Very long press - always return to OPTIONS menu
             beep(200);
+            uart_println("Very long press - returning to OPTIONS menu");
+            current_menu = 0;
+            menu.total_items = 5;
+            menu.current_line = 0;
+            menu.top_line = 0;
         }
     }
 }
