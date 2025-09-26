@@ -55,20 +55,75 @@ static char value_rlyslp[10] = "Pulse";
 static char value_display[10] = "Show";
 static char value_back[5] = "Back"; // Back option with proper text
 
-// Test values for INPUT menu
-menu_item_t input_menu[] = {
-    {"Enable", value_enable, 1},
-    {"Sensor", value_sensor, 1},
-    {"Scale 4mA", value_scale4, 1},
-    {"Scale 20mA", value_scale20, 1},
-    {"High BP", value_highbp, 1},
-    {"PLPBP", value_plpbp, 1},
-    {"SLPBP", value_slpbp, 1},
-    {"Rly High", value_rlyhigh, 1},
-    {"Rly PLP", value_rlyplp, 1},
-    {"Rly SLP", value_rlyslp, 1},
-    {"Display", value_display, 1},
-    {"Back", value_back, 0}};
+// Additional value buffers for dynamic menu items
+static char value_hi_pressure[10] = "150";   // PSI value
+static char value_low_pressure[10] = "50";   // PSI value
+static char value_high_temp[10] = "85";      // Temperature in C
+static char value_flow_type[10] = "Digital"; // Analog/Digital
+static char value_flow_units[10] = "%";      // % or LpS
+static char value_no_flow[10] = "Low";       // Low/High
+static char value_low_flow[10] = "30";       // Low flow threshold
+static char value_no_flow_bp[10] = "00:30";  // No flow bypass time
+static char value_low_flow_bp[10] = "00:30"; // Low flow bypass time
+static char value_high_tbp[10] = "01:00";    // High temp bypass
+
+// Dynamic input menu - will be populated based on sensor type
+menu_item_t input_menu[15]; // Max 15 items to cover all cases
+uint8_t current_input = 0;  // Which input (0-2) is being configured
+
+// Menu template for PRESSURE sensor
+const menu_item_t pressure_menu_template[] = {
+    {"Enable", NULL, 1},
+    {"Sensor", NULL, 1},
+    {"Scale 4mA", NULL, 1},
+    {"Scale 20mA", NULL, 1},
+    {"Hi Pressure", NULL, 1},
+    {"High BP", NULL, 1},
+    {"Low Pressure", NULL, 1},
+    {"PLPBP", NULL, 1},
+    {"SLPBP", NULL, 1},
+    {"Rly High", NULL, 1},
+    {"Rly Low", NULL, 1},
+    {"Rly SLP", NULL, 1},
+    {"Display", NULL, 1},
+    {"Back", NULL, 0}};
+
+// Menu template for TEMPERATURE sensor
+const menu_item_t temp_menu_template[] = {
+    {"Enable", NULL, 1},
+    {"Sensor", NULL, 1},
+    {"Scale 4mA", NULL, 1},
+    {"Scale 20mA", NULL, 1},
+    {"High Temp", NULL, 1},
+    {"High TBP", NULL, 1},
+    {"Rly High", NULL, 1},
+    {"Display", NULL, 1},
+    {"Back", NULL, 0}};
+
+// Menu template for FLOW sensor - Digital
+const menu_item_t flow_digital_template[] = {
+    {"Enable", NULL, 1},
+    {"Sensor", NULL, 1},
+    {"Type", NULL, 1},
+    {"No Flow", NULL, 1},
+    {"No Flow BP", NULL, 1},
+    {"Rly Low", NULL, 1},
+    {"Display", NULL, 1},
+    {"Back", NULL, 0}};
+
+// Menu template for FLOW sensor - Analog
+const menu_item_t flow_analog_template[] = {
+    {"Enable", NULL, 1},
+    {"Sensor", NULL, 1},
+    {"Type", NULL, 1},
+    {"Units", NULL, 1},
+    {"Scale 4mA", NULL, 1},
+    {"Scale 20mA", NULL, 1},
+    {"Low Flow", NULL, 1},
+    {"Low Flow BP", NULL, 1},
+    {"Rly Low", NULL, 1},
+    {"Display", NULL, 1},
+    {"Back", NULL, 0}};
 
 // Function declarations from header
 extern void lcd_set_cursor(uint8_t row, uint8_t col);
@@ -115,6 +170,81 @@ void menu_init(void)
     menu.blink_timer = 0;
 }
 
+// Rebuild input menu based on sensor type
+void rebuild_input_menu(uint8_t input_num)
+{
+    extern input_config_t input_config[3];
+    current_input = input_num;
+
+    // Get sensor type from EEPROM config
+    uint8_t sensor = input_config[input_num].sensor_type;
+
+    // Convert EEPROM values to strings for display
+    sprintf(value_enable, "%s", input_config[input_num].enable ? "Enabled" : "Disabled");
+
+    if (sensor == 0) // Pressure
+    {
+        strcpy(value_sensor, "Pressure");
+        sprintf(value_scale4, "%d", input_config[input_num].scale_4ma);
+        sprintf(value_scale20, "%d", input_config[input_num].scale_20ma);
+        sprintf(value_hi_pressure, "%d", input_config[input_num].high_setpoint);
+        sprintf(value_highbp, "%02d:%02d", input_config[input_num].high_bypass_time / 60,
+                input_config[input_num].high_bypass_time % 60);
+        sprintf(value_low_pressure, "%d", input_config[input_num].temp_low); // Using temp_low for low pressure
+        sprintf(value_plpbp, "%02d:%02d", input_config[input_num].plp_bypass_time / 60,
+                input_config[input_num].plp_bypass_time % 60);
+        sprintf(value_slpbp, "%02d:%02d", input_config[input_num].slp_bypass_time / 60,
+                input_config[input_num].slp_bypass_time % 60);
+
+        // Copy template
+        memcpy(input_menu, pressure_menu_template, sizeof(pressure_menu_template));
+
+        // Assign value pointers
+        input_menu[0].value = value_enable;
+        input_menu[1].value = value_sensor;
+        input_menu[2].value = value_scale4;
+        input_menu[3].value = value_scale20;
+        input_menu[4].value = value_hi_pressure;
+        input_menu[5].value = value_highbp;
+        input_menu[6].value = value_low_pressure;
+        input_menu[7].value = value_plpbp;
+        input_menu[8].value = value_slpbp;
+        input_menu[9].value = value_rlyhigh;
+        input_menu[10].value = value_rlyplp;
+        input_menu[11].value = value_rlyslp;
+        input_menu[12].value = value_display;
+        input_menu[13].value = value_back;
+
+        menu.total_items = 14;
+    }
+    else if (sensor == 1) // Temperature
+    {
+        strcpy(value_sensor, "Temp");
+        sprintf(value_scale4, "%d", input_config[input_num].scale_4ma);
+        sprintf(value_scale20, "%d", input_config[input_num].scale_20ma);
+        sprintf(value_high_temp, "%d", input_config[input_num].high_setpoint);
+        sprintf(value_high_tbp, "%02d:%02d", input_config[input_num].high_bypass_time / 60,
+                input_config[input_num].high_bypass_time % 60);
+
+        // Copy template
+        memcpy(input_menu, temp_menu_template, sizeof(temp_menu_template));
+
+        // Assign value pointers
+        input_menu[0].value = value_enable;
+        input_menu[1].value = value_sensor;
+        input_menu[2].value = value_scale4;
+        input_menu[3].value = value_scale20;
+        input_menu[4].value = value_high_temp;
+        input_menu[5].value = value_high_tbp;
+        input_menu[6].value = value_rlyhigh;
+        input_menu[7].value = value_display;
+        input_menu[8].value = value_back;
+
+        menu.total_items = 9;
+    }
+    // Flow sensor handling will be added later
+}
+
 // Draw OPTIONS menu with scrolling
 void menu_draw_options(void)
 {
@@ -144,9 +274,11 @@ void menu_draw_options(void)
 // Draw INPUT menu with values right-justified and brackets on VALUES
 void menu_draw_input(void)
 {
-    // Fixed title
+    // Dynamic title showing which input
     lcd_clear_line(0);
-    lcd_print_at(0, 0, "INPUT 1");
+    char title[10];
+    sprintf(title, "INPUT %d", current_input + 1);
+    lcd_print_at(0, 0, title);
 
     // Draw 3 visible items
     for (uint8_t i = 0; i < 3 && (menu.top_line + i) < 12; i++)
@@ -527,12 +659,14 @@ void menu_handle_button(uint8_t press_type)
                 }
                 else if (menu.current_line <= 2) // Input 1-3
                 {
-                    // Go to corresponding INPUT menu
-                    current_menu = 1; // INPUT menu
+                    // Rebuild menu for selected input
+                    rebuild_input_menu(menu.current_line); // 0=Input1, 1=Input2, 2=Input3
+
+                    // Go to INPUT menu
+                    current_menu = 1;
                     menu.current_line = 0;
                     menu.top_line = 0;
-                    menu.total_items = 12; // INPUT menu has 12 items
-                    // TODO: Load correct input config based on which input selected
+                    // total_items already set by rebuild_input_menu
                     menu_draw_input();
                 }
                 else if (menu.current_line == 3) // Clock
@@ -561,6 +695,8 @@ void menu_handle_button(uint8_t press_type)
 // Draw SETUP menu - NEW FUNCTION
 void menu_draw_setup(void)
 {
+    extern input_config_t input_config[3];
+
     // Fixed title
     lcd_clear_line(0);
     lcd_print_at(0, 0, "SETUP");
@@ -573,14 +709,8 @@ void menu_draw_setup(void)
         "Clock",
         "Back"};
 
-    // Sensor types for each input (right-justified display)
-    const char *sensor_types[] = {
-        "Pressure", // Input 1 default
-        "Temp",     // Input 2 default
-        "Flow",     // Input 3 default
-        "",         // Clock has no type
-        ""          // Back has no type
-    };
+    // Sensor types for each input (from EEPROM)
+    const char *sensor_type_names[] = {"Pressure", "Temp", "Flow"};
 
     // Draw 3 visible items (lines 1-3)
     for (uint8_t i = 0; i < 3 && (menu.top_line + i) < menu.total_items; i++)
@@ -601,11 +731,15 @@ void menu_draw_setup(void)
         }
 
         // Show sensor type right-justified for Input items
-        // Show sensor type right-justified to end at column 19
-        if (item_idx <= 2 && strlen(sensor_types[item_idx]) > 0)
+        if (item_idx <= 2) // Input 1-3
         {
-            uint8_t type_len = strlen(sensor_types[item_idx]);
-            lcd_print_at(i + 1, 20 - type_len, sensor_types[item_idx]);
+            uint8_t sensor_type = input_config[item_idx].sensor_type;
+            if (sensor_type <= 2) // Valid sensor type
+            {
+                const char *type_text = sensor_type_names[sensor_type];
+                uint8_t type_len = strlen(type_text);
+                lcd_print_at(i + 1, 20 - type_len, type_text);
+            }
         }
     }
 }
