@@ -259,6 +259,7 @@ void main(void)
     int16_t last_encoder = 0;
     uint8_t last_button = 0;
     static uint32_t blink_timer = 0;
+    static uint16_t encoder_activity_timer = 0; // Track encoder activity
 
     while (1)
     {
@@ -276,20 +277,38 @@ void main(void)
 
             last_encoder = encoder_count;
 
+            // Track encoder activity - reset timer on movement
+            encoder_activity_timer = 500; // Stay active for 500ms after last movement
+
+            // Force blink state ON during encoder movement for better visibility
+            if (menu.in_edit_mode)
+            {
+                menu.blink_state = 1;
+            }
+
             menu_handle_encoder(delta);
 
-            // Redraw current menu
-            if (current_menu == 0)
+            // Redraw current menu - optimized for edit mode
+            if (menu.in_edit_mode && current_menu == 1)
             {
-                menu_draw_options();
+                // Fast update - only update the edited value
+                menu_update_edit_value();
             }
-            else if (current_menu == 1)
+            else
             {
-                menu_draw_input();
-            }
-            else if (current_menu == 2)
-            {
-                menu_draw_setup();
+                // Full redraw for normal navigation
+                if (current_menu == 0)
+                {
+                    menu_draw_options();
+                }
+                else if (current_menu == 1)
+                {
+                    menu_draw_input();
+                }
+                else if (current_menu == 2)
+                {
+                    menu_draw_setup();
+                }
             }
         }
 
@@ -326,27 +345,29 @@ void main(void)
             button_event = 0;
         }
 
+        // Decrement encoder activity timer
+        if (encoder_activity_timer > 0)
+        {
+            encoder_activity_timer--;
+        }
+
         // Handle blinking in edit mode
         blink_timer++;
-        if (blink_timer >= 50000)
+        if (blink_timer >= 10000)
         { // Slow 2Hz blinking
             blink_timer = 0;
             if (menu.in_edit_mode)
             {
-                menu.blink_state = !menu.blink_state;
+                // Only blink if encoder is not active
+                if (encoder_activity_timer == 0)
+                {
+                    menu.blink_state = !menu.blink_state;
 
-                // Only redraw in edit mode
-                if (current_menu == 0)
-                {
-                    menu_draw_options();
-                }
-                else if (current_menu == 1)
-                {
-                    menu_draw_input();
-                }
-                else if (current_menu == 2)
-                {
-                    menu_draw_setup();
+                    // Update display for blink
+                    if (current_menu == 1)
+                    {
+                        menu_update_edit_value(); // Use fast update for blink
+                    }
                 }
             }
             else
@@ -356,11 +377,11 @@ void main(void)
         }
 
         // Handle pending EEPROM saves when not in edit mode (MOVED OUTSIDE)
-        if (save_pending && !menu.in_edit_mode)
-        {
-            save_current_config();
-            save_pending = 0;
-        }
+        //if (save_pending && !menu.in_edit_mode)
+        //{
+            // save_current_config();
+            //save_pending = 0;
+        //}
 
         // Prevent LCD corruption at high speed
         __delay_us(50);

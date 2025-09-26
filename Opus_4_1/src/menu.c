@@ -229,12 +229,84 @@ void menu_draw_input(void)
             strcpy(value_buf, input_menu[item_idx].value);
         }
 
-        // Right justify at column 19
+        // Right justify so last character ends at column 19
         uint8_t val_len = strlen(value_buf);
         if (val_len > 0 && strcmp(input_menu[item_idx].value, "") != 0)
         {
             lcd_print_at(i + 1, 20 - val_len, value_buf);
         }
+    }
+}
+
+// Update only the edited value - FAST UPDATE for edit mode
+void menu_update_edit_value(void)
+{
+    // Only update if we're in INPUT menu and edit mode
+    if (current_menu != 1 || !menu.in_edit_mode)
+        return;
+
+    // Find which line on screen has the edited item
+    uint8_t screen_line = menu.current_line - menu.top_line;
+    if (screen_line >= 3)
+        return; // Not visible
+
+    // Get the item being edited
+    uint8_t item_idx = menu.current_line;
+
+    // Build the value string with parentheses
+    char value_buf[15];
+    const item_options_t *opts = get_item_options(item_idx);
+
+    if (opts != NULL)
+    {
+        uint8_t flag_value = (item_idx == 0) ? enable_edit_flag : sensor_edit_flag;
+        if (flag_value < opts->option_count)
+        {
+            if (menu.blink_state)
+            {
+                // Show the value with parentheses
+                sprintf(value_buf, "(%s)", opts->options[flag_value]);
+            }
+            else
+            {
+                // Show just parentheses with spaces (blink off)
+                uint8_t val_len = strlen(opts->options[flag_value]);
+                sprintf(value_buf, "(");
+                for (uint8_t j = 0; j < val_len; j++)
+                    strcat(value_buf, " ");
+                strcat(value_buf, ")");
+            }
+        }
+        else
+        {
+            sprintf(value_buf, "(Error)");
+        }
+    }
+    else
+    {
+        if (menu.blink_state)
+        {
+            sprintf(value_buf, "(%s)", input_menu[item_idx].value);
+        }
+        else
+        {
+            uint8_t val_len = strlen(input_menu[item_idx].value);
+            sprintf(value_buf, "(");
+            for (uint8_t j = 0; j < val_len; j++)
+                strcat(value_buf, " ");
+            strcat(value_buf, ")");
+        }
+    }
+
+    // Clear the entire value area to handle different lengths
+    lcd_set_cursor(screen_line + 1, 10); // Start clearing from column 10
+    lcd_print("          ");             // 10 spaces to clear any remnants
+
+    // Right justify so last char of VALUE is at column 19, bracket at 20
+    uint8_t val_len = strlen(value_buf);
+    if (val_len > 0)
+    {
+        lcd_print_at(screen_line + 1, 20 - val_len, value_buf);
     }
 }
 
@@ -310,7 +382,7 @@ void menu_handle_encoder(int16_t delta)
 void menu_handle_button(uint8_t press_type)
 {
     extern uint8_t save_pending;
-    
+
     if (menu.in_edit_mode)
     {
         if (press_type == 1) // Short press - confirm edit
@@ -320,28 +392,28 @@ void menu_handle_button(uint8_t press_type)
             if (opts != NULL)
             {
                 uint8_t *edit_flag = (menu.current_line == 0) ? &enable_edit_flag : &sensor_edit_flag;
-                
+
                 // Update the menu item value
                 strcpy(input_menu[menu.current_line].value, opts->options[*edit_flag]);
-                
+
                 // Mark for EEPROM save (deferred)
                 save_pending = 1;
             }
-            
+
             menu.in_edit_mode = 0;
-            beep(50);  // Confirmation beep
+            beep(50); // Confirmation beep
         }
         else if (press_type == 2) // Long press - cancel edit
         {
             // Restore original value
             strcpy(input_menu[menu.current_line].value, original_value);
-            
+
             // Restore the flag to match the original value
             const item_options_t *opts = get_item_options(menu.current_line);
             if (opts != NULL)
             {
                 uint8_t *edit_flag = (menu.current_line == 0) ? &enable_edit_flag : &sensor_edit_flag;
-                
+
                 // Find which option matches the original value
                 for (uint8_t i = 0; i < opts->option_count; i++)
                 {
@@ -352,11 +424,11 @@ void menu_handle_button(uint8_t press_type)
                     }
                 }
             }
-            
+
             menu.in_edit_mode = 0;
             beep(100);
             __delay_ms(50);
-            beep(100);  // Double beep for cancel
+            beep(100); // Double beep for cancel
         }
     }
     else // Not in edit mode
@@ -366,31 +438,38 @@ void menu_handle_button(uint8_t press_type)
             if (current_menu == 0) // OPTIONS menu
             {
                 beep(50);
-                
+
                 switch (menu.current_line)
                 {
                 case 0: // Main Menu
                     // Stub for Main Menu
                     break;
-                    
-                case 1: // Setup Menu - Go to SETUP menu
-                    current_menu = 2;  // 2 = SETUP menu
+
+                case 1:               // Setup Menu - Go to SETUP menu
+                    current_menu = 2; // 2 = SETUP menu
                     menu.current_line = 0;
                     menu.top_line = 0;
-                    menu.total_items = 5;  // 5 items in SETUP menu
+                    menu.total_items = 5; // 5 items in SETUP menu
                     menu_draw_setup();
                     break;
-                    
+
                 case 2: // Utility Menu
                     // Stub for Utility Menu
                     break;
-                    
+
                 case 3: // About
                     // Stub for About
                     break;
-                    
+
                 case 4: // Exit
-                    // Stub for Exit
+                    // Save any pending changes to EEPROM before exiting
+
+                    if (save_pending)
+                    {
+                        save_current_config();
+                        save_pending = 0;
+                    }
+                    // TODO: Return to main screen
                     break;
                 }
             }
@@ -400,23 +479,23 @@ void menu_handle_button(uint8_t press_type)
                 {
                     beep(50);
                     // Go back to SETUP menu
-                    current_menu = 2;  // Go to SETUP menu
+                    current_menu = 2; // Go to SETUP menu
                     menu.current_line = 0;
-                    menu.top_line = 0; 
-                    menu.total_items = 5;  // SETUP menu has 5 items
+                    menu.top_line = 0;
+                    menu.total_items = 5; // SETUP menu has 5 items
                     menu_draw_setup();
                 }
                 else if (input_menu[menu.current_line].editable)
                 {
                     // Store original value for potential cancellation
                     strcpy(original_value, input_menu[menu.current_line].value);
-                    
+
                     // Get the correct flag value for this item
                     const item_options_t *opts = get_item_options(menu.current_line);
                     if (opts != NULL)
                     {
                         uint8_t *edit_flag = (menu.current_line == 0) ? &enable_edit_flag : &sensor_edit_flag;
-                        
+
                         // Find which option matches the current value
                         for (uint8_t i = 0; i < opts->option_count; i++)
                         {
@@ -427,32 +506,32 @@ void menu_handle_button(uint8_t press_type)
                             }
                         }
                     }
-                    
+
                     menu.in_edit_mode = 1;
-                    menu.blink_state = 1;  // Start with value visible
-                    beep(50);  // Immediate feedback
+                    menu.blink_state = 1; // Start with value visible
+                    beep(50);             // Immediate feedback
                 }
             }
             else if (current_menu == 2) // SETUP menu
             {
                 beep(50);
-                
+
                 if (menu.current_line == 4) // Back option
                 {
                     // Go back to OPTIONS menu
                     current_menu = 0;
                     menu.current_line = 0;
                     menu.top_line = 0;
-                    menu.total_items = 5;  // OPTIONS menu has 5 items
+                    menu.total_items = 5; // OPTIONS menu has 5 items
                     menu_draw_options();
                 }
                 else if (menu.current_line <= 2) // Input 1-3
                 {
                     // Go to corresponding INPUT menu
-                    current_menu = 1;  // INPUT menu
+                    current_menu = 1; // INPUT menu
                     menu.current_line = 0;
                     menu.top_line = 0;
-                    menu.total_items = 12;  // INPUT menu has 12 items
+                    menu.total_items = 12; // INPUT menu has 12 items
                     // TODO: Load correct input config based on which input selected
                     menu_draw_input();
                 }
@@ -466,7 +545,7 @@ void menu_handle_button(uint8_t press_type)
         {
             beep(100);
             __delay_ms(50);
-            beep(100);  // Double beep
+            beep(100); // Double beep
         }
         else if (press_type == 3) // Very long press
         {
@@ -474,7 +553,7 @@ void menu_handle_button(uint8_t press_type)
             __delay_ms(50);
             beep(100);
             __delay_ms(50);
-            beep(100);  // Triple beep
+            beep(100); // Triple beep
         }
     }
 }
@@ -485,31 +564,30 @@ void menu_draw_setup(void)
     // Fixed title
     lcd_clear_line(0);
     lcd_print_at(0, 0, "SETUP");
-    
+
     // SETUP menu items with sensor types shown
     const char *setup_items[] = {
         "Input 1",
-        "Input 2", 
+        "Input 2",
         "Input 3",
         "Clock",
-        "Back"
-    };
-    
+        "Back"};
+
     // Sensor types for each input (right-justified display)
     const char *sensor_types[] = {
-        "Pressure",  // Input 1 default
-        "Temp",      // Input 2 default
-        "Flow",      // Input 3 default
-        "",          // Clock has no type
-        ""           // Back has no type
+        "Pressure", // Input 1 default
+        "Temp",     // Input 2 default
+        "Flow",     // Input 3 default
+        "",         // Clock has no type
+        ""          // Back has no type
     };
-    
+
     // Draw 3 visible items (lines 1-3)
     for (uint8_t i = 0; i < 3 && (menu.top_line + i) < menu.total_items; i++)
     {
         uint8_t item_idx = menu.top_line + i;
         lcd_clear_line(i + 1);
-        
+
         // Add cursor brackets if this is selected line
         if (item_idx == menu.current_line)
         {
@@ -521,8 +599,9 @@ void menu_draw_setup(void)
         {
             lcd_print_at(i + 1, 1, setup_items[item_idx]);
         }
-        
+
         // Show sensor type right-justified for Input items
+        // Show sensor type right-justified to end at column 19
         if (item_idx <= 2 && strlen(sensor_types[item_idx]) > 0)
         {
             uint8_t type_len = strlen(sensor_types[item_idx]);
