@@ -1,0 +1,140 @@
+# IRRISYS Development Continuity Guide
+
+## HOW TO START NEXT CHAT
+
+### What to Upload:
+1. **This file** (IRRISYS_TOOLCHAIN.md)
+2. **Current code ZIP** (Irrisys_Controller-master.zip)
+3. **State exactly what works and what you want to add**
+
+### Opening Prompt Template:
+```
+I'm continuing development on my IRRISYS irrigation controller.
+Attached: IRRISYS_TOOLCHAIN.md and current codebase ZIP.
+
+WORKING: [e.g., UART debug, menu navigation, encoder reading]
+NOT WORKING: [e.g., LCD display, value editing]
+NEXT TASK: [e.g., Get LCD displaying menu items]
+
+DO NOT rewrite working code. Build upon the existing codebase.
+```
+
+## VERIFIED WORKING CONFIGURATION
+
+### Hardware - PIC18F2525
+- **Oscillator**: INTERNAL 8MHz + 4x PLL = 32MHz
+- **Config pragma**: `OSC = INTIO67` ✓ WORKING
+- **Clock**: `#define _XTAL_FREQ 32000000` ✓ CORRECT
+
+### Pin Assignments (VERIFIED WORKING)
+```
+LCD (PORTA): RS=RA6, EN=RA7, D4-D7=RA0-RA3
+Encoder (PORTB): A=RB1, B=RB2, Button=RB6
+Buzzer: RC2
+UART: TX=RC6 @115200 baud (NOT 9600!)
+```
+
+### Build System (VERIFIED WORKING)
+```batch
+Build command: "%XC8_PATH%" --chip=18F2525 src\main.c src\encoder.c src\menu.c -osrc\main -Iinclude
+Programmer: "%MEPROG_PATH%" /DPIC"18F2525" "src\main.hex"
+```
+**NOTE**: NO lcd.c file - LCD functions are in main.c
+
+### File Structure (DO NOT CHANGE)
+```
+Irrisys_Controller/
+├── include/
+│   ├── config.h    # Hardware definitions
+│   ├── menu.h      # Menu structures  
+│   └── encoder.h   # Encoder definitions
+├── src/
+│   ├── main.c      # Main + LCD functions (NO SEPARATE lcd.c!)
+│   ├── menu.c      # Menu implementation
+│   └── encoder.c   # Encoder with Timer0 ISR
+└── tools/
+    └── build.bat   # Build script
+```
+
+## CRITICAL RULES FOR AI ASSISTANTS
+
+### Rule 1: NEVER BREAK WORKING CODE
+- Read the ZIP file first
+- Understand what's already working
+- Only ADD or MODIFY specific functions requested
+- Do not restructure without permission
+
+### Rule 2: RESPECT EXISTING ARCHITECTURE
+- LCD functions stay in main.c
+- UART is 115200 baud, not 9600
+- Internal oscillator at 32MHz
+- LAT registers for outputs, PORT for inputs
+
+### Rule 3: BUILD INCREMENTALLY
+- One feature at a time
+- Test each addition before moving on
+- Keep debug UART messages
+
+### Rule 4: CURRENT STATE TRACKING
+
+#### What Works (as of last session):
+- [✓] Compilation with XC8 v2.46
+- [✓] Programming with MELabs U2
+- [✓] UART debug output at 115200
+- [✓] Menu structure initialized
+- [✓] Encoder interrupt reading
+- [✓] Basic timer setup
+
+#### What Needs Work:
+- [ ] LCD not displaying (hardware issue?)
+- [ ] Buzzer not beeping
+- [ ] Menu navigation display
+- [ ] Value editing in menu
+- [ ] EEPROM storage
+
+## DEBUG CHECKLIST
+
+If continuing development and something isn't working:
+
+1. **Check UART Output First**
+   - Set terminal to 115200 baud
+   - Look for debug messages
+   - Confirms PIC is running
+
+2. **Verify Hardware**
+   - MCLR pulled high (10k)
+   - Power supply stable 5V
+   - Ground connections good
+   - Crystal not needed (internal osc)
+
+3. **Common Issues**
+   - Wrong baud rate (must be 115200)
+   - LCD needs LAT not PORT registers
+   - RA4 is input only on some PICs
+
+## NEXT DEVELOPMENT PHASE
+
+Priority tasks in order:
+1. Fix LCD display (verify hardware connections)
+2. Get menu showing on LCD
+3. Implement value editing
+4. Add EEPROM save/load
+5. Add ADC for sensors
+6. Implement protection logic
+
+## HANDOVER NOTES
+
+For next session AI assistant:
+- User has working UART debug but no LCD/buzzer output yet
+- Code compiles and programs successfully
+- Menu system is structured but not visible on LCD
+- Likely hardware connection issue with LCD or power
+
+## VERSION TRACKING
+
+- Last working commit: Sept 17, 2025
+- Toolchain: XC8 v2.46 + MELabs U2 + VSCode
+- Known good hex size: ~6-10KB typical
+
+---
+END OF CONTINUITY GUIDE
