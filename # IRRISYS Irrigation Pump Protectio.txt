@@ -194,7 +194,9 @@ INPUT [1/2/3] - Pressure] Input 1 is set for Pressure by default
 ├── Sensor         [Pressure/Temp/Flow] - Pressure by default
 ├── Scale 4mA      [Numeric value]
 ├── Scale 20mA     [Numeric value]
+├── High Pressure  [Pressure in PSI]
 ├── High BP        [Time Value] - time in Seconds. Shown as mm:ss
+├── Low Pressure   [Pressure in PSI]
 ├── PLPBP			 [Time Value] - time in Seconds. Shown as mm:ss
 ├── SLPBP			 [Time Value] - time in Seconds. Shown as mm:ss
 ├── Rly High       [Protection mode] - Latch / Pulse / Not Used (Latch by default)

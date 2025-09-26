@@ -78,7 +78,7 @@ const menu_item_t pressure_menu_template[] = {
     {"Scale 4mA", NULL, 1},
     {"Scale 20mA", NULL, 1},
     {"Hi Pressure", NULL, 1},
-    {"High BP", NULL, 1},
+    {"High PBP", NULL, 1}, // Changed from "High BP" to "High PBP"
     {"Low Pressure", NULL, 1},
     {"PLPBP", NULL, 1},
     {"SLPBP", NULL, 1},
@@ -195,6 +195,14 @@ void rebuild_input_menu(uint8_t input_num)
                 input_config[input_num].plp_bypass_time % 60);
         sprintf(value_slpbp, "%02d:%02d", input_config[input_num].slp_bypass_time / 60,
                 input_config[input_num].slp_bypass_time % 60);
+        // Set relay mode strings
+        strcpy(value_rlyhigh, input_config[input_num].relay_high_mode == 0 ? "Latch" : input_config[input_num].relay_high_mode == 1 ? "Pulse"
+                                                                                                                                    : "Not Used");
+        strcpy(value_rlyplp, input_config[input_num].relay_plp_mode == 0 ? "Latch" : input_config[input_num].relay_plp_mode == 1 ? "Pulse"
+                                                                                                                                 : "Not Used");
+        strcpy(value_rlyslp, input_config[input_num].relay_slp_mode == 0 ? "Latch" : input_config[input_num].relay_slp_mode == 1 ? "Pulse"
+                                                                                                                                 : "Not Used");
+        strcpy(value_display, input_config[input_num].display_enabled ? "Show" : "Hide");
 
         // Copy template
         memcpy(input_menu, pressure_menu_template, sizeof(pressure_menu_template));
@@ -701,7 +709,7 @@ void menu_draw_setup(void)
     lcd_clear_line(0);
     lcd_print_at(0, 0, "SETUP");
 
-    // SETUP menu items with sensor types shown
+    // SETUP menu items
     const char *setup_items[] = {
         "Input 1",
         "Input 2",
@@ -709,7 +717,7 @@ void menu_draw_setup(void)
         "Clock",
         "Back"};
 
-    // Sensor types for each input (from EEPROM)
+    // Sensor type names
     const char *sensor_type_names[] = {"Pressure", "Temp", "Flow"};
 
     // Draw 3 visible items (lines 1-3)
@@ -730,14 +738,15 @@ void menu_draw_setup(void)
             lcd_print_at(i + 1, 1, setup_items[item_idx]);
         }
 
-        // Show sensor type right-justified for Input items
-        if (item_idx <= 2) // Input 1-3
+        // Show sensor type right-justified for Input items only
+        if (item_idx <= 2) // Only for Input 1-3
         {
             uint8_t sensor_type = input_config[item_idx].sensor_type;
-            if (sensor_type <= 2) // Valid sensor type
+            if (sensor_type <= 2) // Valid sensor type (0=Pressure, 1=Temp, 2=Flow)
             {
                 const char *type_text = sensor_type_names[sensor_type];
                 uint8_t type_len = strlen(type_text);
+                // Position so text ends at column 19, column 20 reserved
                 lcd_print_at(i + 1, 20 - type_len, type_text);
             }
         }
