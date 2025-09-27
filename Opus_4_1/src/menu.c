@@ -297,38 +297,42 @@ void menu_draw_input(void)
         // Left side - label (no brackets)
         lcd_print_at(i + 1, 0, input_menu[item_idx].label);
 
-        // Right side - value with brackets if this line is selected
+        // Build and display the value (right-justified)
         char value_buf[15];
+        // Build the value string (WITHOUT brackets/parentheses)
+        char value_buf[15];
+        uint8_t show_brackets = 0; // 0=none, 1=square brackets, 2=parentheses
 
         if (item_idx == menu.current_line)
         {
             if (menu.in_edit_mode)
             {
-                // Edit mode - parentheses stay solid, only value blinks
+                show_brackets = 2; // Use parentheses in edit mode
+                // Edit mode - only value blinks
                 if (menu.blink_state)
                 {
-                    // Show text with solid parentheses
+                    // Show text (without parentheses)
                     const item_options_t *opts = get_item_options(item_idx);
                     if (opts != NULL)
                     {
                         uint8_t flag_value = (item_idx == 0) ? enable_edit_flag : sensor_edit_flag;
                         if (flag_value < opts->option_count)
                         {
-                            sprintf(value_buf, "(%s)", opts->options[flag_value]);
+                            strcpy(value_buf, opts->options[flag_value]);
                         }
                         else
                         {
-                            sprintf(value_buf, "(Error)");
+                            strcpy(value_buf, "Error");
                         }
                     }
                     else
                     {
-                        sprintf(value_buf, "(%s)", input_menu[item_idx].value);
+                        strcpy(value_buf, input_menu[item_idx].value);
                     }
                 }
                 else
                 {
-                    // Show just parentheses with spaces inside (text disappears)
+                    // Blink off - show spaces
                     const item_options_t *opts = get_item_options(item_idx);
                     if (opts != NULL)
                     {
@@ -336,48 +340,63 @@ void menu_draw_input(void)
                         if (flag_value < opts->option_count)
                         {
                             uint8_t val_len = strlen(opts->options[flag_value]);
-                            sprintf(value_buf, "(");
                             for (uint8_t j = 0; j < val_len; j++)
-                                strcat(value_buf, " ");
-                            strcat(value_buf, ")");
+                                value_buf[j] = ' ';
+                            value_buf[val_len] = '\0';
                         }
                         else
                         {
-                            sprintf(value_buf, "(     )");
+                            strcpy(value_buf, "     ");
                         }
                     }
                     else
                     {
                         uint8_t val_len = strlen(input_menu[item_idx].value);
-                        char blank[10] = "(";
                         for (uint8_t j = 0; j < val_len; j++)
-                            strcat(blank, " ");
-                        strcat(blank, ")");
-                        strcpy(value_buf, blank);
+                            value_buf[j] = ' ';
+                        value_buf[val_len] = '\0';
                     }
                 }
             }
             else
             {
-                // Selected but not editing - show brackets
-                sprintf(value_buf, "[%s]", input_menu[item_idx].value);
+                // Selected but not editing - show with square brackets
+                show_brackets = 1;
+                strcpy(value_buf, input_menu[item_idx].value);
             }
         }
         else
         {
-            // Not selected - just show value
+            // Not selected - just show value, no brackets
+            show_brackets = 0;
             strcpy(value_buf, input_menu[item_idx].value);
         }
 
-        // Right justify so last character ends at column 19
+        // Display the value with proper positioning
         uint8_t val_len = strlen(value_buf);
         if (val_len > 0 && strcmp(input_menu[item_idx].value, "") != 0)
         {
-            lcd_print_at(i + 1, 20 - val_len, value_buf);
+            if (show_brackets == 0)
+            {
+                // No brackets - value ends at column 19
+                lcd_print_at(i + 1, 19 - val_len, value_buf);
+            }
+            else
+            {
+                // With brackets - print everything in one sequence
+                uint8_t start_pos = 19 - val_len - 1; // Where opening bracket goes
+                lcd_set_cursor(i + 1, start_pos);
+
+                // Print opening bracket
+                lcd_print(show_brackets == 1 ? "[" : "(");
+                // Print value immediately after
+                lcd_print(value_buf);
+                // Print closing bracket immediately after
+                lcd_print(show_brackets == 1 ? "]" : ")");
+            }
         }
     }
 }
-
 // Update only the edited value - FAST UPDATE for edit mode
 void menu_update_edit_value(void)
 {
@@ -393,7 +412,7 @@ void menu_update_edit_value(void)
     // Get the item being edited
     uint8_t item_idx = menu.current_line;
 
-    // Build the value string with parentheses
+    // Build the value string (without parentheses)
     char value_buf[15];
     const item_options_t *opts = get_item_options(item_idx);
 
@@ -404,37 +423,38 @@ void menu_update_edit_value(void)
         {
             if (menu.blink_state)
             {
-                // Show the value with parentheses
-                sprintf(value_buf, "(%s)", opts->options[flag_value]);
+                // Show the value
+                strcpy(value_buf, opts->options[flag_value]);
             }
             else
             {
-                // Show just parentheses with spaces (blink off)
+                // Show spaces (blink off)
                 uint8_t val_len = strlen(opts->options[flag_value]);
-                sprintf(value_buf, "(");
                 for (uint8_t j = 0; j < val_len; j++)
-                    strcat(value_buf, " ");
-                strcat(value_buf, ")");
+                    value_buf[j] = ' ';
+                value_buf[val_len] = '\0';
             }
         }
         else
         {
-            sprintf(value_buf, "(Error)");
+            if (menu.blink_state)
+                strcpy(value_buf, "Error");
+            else
+                strcpy(value_buf, "     "); // 5 spaces
         }
     }
     else
     {
         if (menu.blink_state)
         {
-            sprintf(value_buf, "(%s)", input_menu[item_idx].value);
+            strcpy(value_buf, input_menu[item_idx].value);
         }
         else
         {
             uint8_t val_len = strlen(input_menu[item_idx].value);
-            sprintf(value_buf, "(");
             for (uint8_t j = 0; j < val_len; j++)
-                strcat(value_buf, " ");
-            strcat(value_buf, ")");
+                value_buf[j] = ' ';
+            value_buf[val_len] = '\0';
         }
     }
 
@@ -442,11 +462,20 @@ void menu_update_edit_value(void)
     lcd_set_cursor(screen_line + 1, 10); // Start clearing from column 10
     lcd_print("          ");             // 10 spaces to clear any remnants
 
-    // Right justify so last char of VALUE is at column 19, bracket at 20
+    // Display with parentheses - move left by 1 to make room for closing paren
     uint8_t val_len = strlen(value_buf);
     if (val_len > 0)
     {
-        lcd_print_at(screen_line + 1, 20 - val_len, value_buf);
+        // Move everything left by 1 more position
+        uint8_t start_pos = 18 - val_len; // One position further left (was 19-val_len-1)
+        lcd_set_cursor(screen_line + 1, start_pos);
+
+        // Print opening parenthesis
+        lcd_print("(");
+        // Print value immediately after (will end at column 19)
+        lcd_print(value_buf);
+        // Print closing parenthesis immediately after (at column 20)
+        lcd_print(")");
     }
 }
 
