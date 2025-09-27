@@ -12,6 +12,10 @@
 // External variables from encoder
 extern volatile uint16_t button_hold_ms;
 extern volatile uint8_t button_event;
+// Function declarations for numeric editing
+extern void handle_numeric_rotation(int8_t direction);
+extern void menu_update_numeric_value(void);
+
 uint8_t save_pending = 0; // Flag for deferred EEPROM saves
 
 // Function prototypes
@@ -286,13 +290,33 @@ void main(void)
                 menu.blink_state = 1;
             }
 
-            menu_handle_encoder(delta);
+            // Check if we're editing a numeric field
+            if (menu.in_edit_mode && current_menu == 1 &&
+                (menu.current_line == 2 || menu.current_line == 3))
+            {
+                // Handle numeric rotation for Scale 4mA or Scale 20mA
+                handle_numeric_rotation(delta);
+            }
+            else
+            {
+                // Use existing encoder handler for everything else
+                menu_handle_encoder(delta);
+            }
 
             // Redraw current menu - optimized for edit mode
             if (menu.in_edit_mode && current_menu == 1)
             {
-                // Fast update - only update the edited value
-                menu_update_edit_value();
+                // Check what type of field we're editing
+                if (menu.current_line == 2 || menu.current_line == 3)
+                {
+                    // Fast update for numeric value
+                    menu_update_numeric_value();
+                }
+                else
+                {
+                    // Fast update for option value (existing)
+                    menu_update_edit_value();
+                }
             }
             else
             {
@@ -377,10 +401,10 @@ void main(void)
         }
 
         // Handle pending EEPROM saves when not in edit mode (MOVED OUTSIDE)
-        //if (save_pending && !menu.in_edit_mode)
+        // if (save_pending && !menu.in_edit_mode)
         //{
-            // save_current_config();
-            //save_pending = 0;
+        // save_current_config();
+        // save_pending = 0;
         //}
 
         // Prevent LCD corruption at high speed

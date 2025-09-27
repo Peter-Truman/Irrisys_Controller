@@ -9,6 +9,33 @@
 #include "../include/eeprom.h"
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
+
+// External function declarations from menu.c
+extern void menu_init(void);
+extern void menu_draw_options(void);
+extern void menu_draw_input(void);
+extern void menu_draw_setup(void); // THIS IS THE CRITICAL ONE
+extern void menu_update_edit_value(void);
+extern void menu_handle_encoder(int16_t delta);
+extern void menu_handle_button(uint8_t press_type);
+extern void handle_numeric_rotation(int8_t direction);
+extern void menu_update_numeric_value(void);
+extern void rebuild_input_menu(uint8_t input_num);
+
+// Function declarations from other modules
+extern void lcd_set_cursor(uint8_t row, uint8_t col);
+extern void lcd_print(const char *str);
+extern void beep(uint16_t duration_ms);
+extern void save_current_config(void);
+extern void uart_println(const char *str);
+
+// External variables from menu.c
+extern menu_state_t menu;
+extern uint8_t current_menu;
+extern uint8_t enable_edit_flag;
+extern uint8_t sensor_edit_flag;
+extern menu_item_t input_menu[];
 
 // Menu state - make it accessible
 menu_state_t menu;
@@ -16,6 +43,10 @@ static char original_value[10]; // Store original value for cancellation
 uint8_t enable_edit_flag = 1;   // 1=Enabled, 0=Disabled
 uint8_t sensor_edit_flag = 0;   // 0=Pressure, 1=Temp, 2=Flow
 uint8_t current_menu = 0;       // 0=OPTIONS, 1=INPUT, 2=SETUP
+
+// Numeric values for Scale 4mA and Scale 20mA (NEW)
+int16_t scale_4ma = 0;    // Range: -500 to +500
+int16_t scale_20ma = 100; // Range: -500 to +500 (default 100 for testing)
 
 // Define options for each editable item
 typedef struct
@@ -125,13 +156,6 @@ const menu_item_t flow_analog_template[] = {
     {"Display", NULL, 1},
     {"Back", NULL, 0}};
 
-// Function declarations from header
-extern void lcd_set_cursor(uint8_t row, uint8_t col);
-extern void lcd_print(const char *str);
-extern void beep(uint16_t duration_ms);
-extern void save_current_config(void);
-extern void uart_println(const char *str);
-
 // LCD helper - print at specific position
 void lcd_print_at(uint8_t row, uint8_t col, const char *str)
 {
@@ -167,7 +191,7 @@ void menu_init(void)
     menu.total_items = 5; // OPTIONS menu items
     menu.in_edit_mode = 0;
     menu.blink_state = 0;
-    menu.blink_timer = 0;
+    menu.blink_counter = 0;
 }
 
 // Rebuild input menu based on sensor type
@@ -185,8 +209,8 @@ void rebuild_input_menu(uint8_t input_num)
     if (sensor == 0) // Pressure
     {
         strcpy(value_sensor, "Pressure");
-        sprintf(value_scale4, "%d", input_config[input_num].scale_4ma);
-        sprintf(value_scale20, "%d", input_config[input_num].scale_20ma);
+        sprintf(value_scale4, "%+04d", input_config[input_num].scale_4ma);   // CHANGED
+        sprintf(value_scale20, "%+04d", input_config[input_num].scale_20ma); // CHANGED
         sprintf(value_hi_pressure, "%d", input_config[input_num].high_setpoint);
         sprintf(value_highbp, "%02d:%02d", input_config[input_num].high_bypass_time / 60,
                 input_config[input_num].high_bypass_time % 60);
@@ -228,8 +252,8 @@ void rebuild_input_menu(uint8_t input_num)
     else if (sensor == 1) // Temperature
     {
         strcpy(value_sensor, "Temp");
-        sprintf(value_scale4, "%d", input_config[input_num].scale_4ma);
-        sprintf(value_scale20, "%d", input_config[input_num].scale_20ma);
+        sprintf(value_scale4, "%+04d", input_config[input_num].scale_4ma);   // CHANGED
+        sprintf(value_scale20, "%+04d", input_config[input_num].scale_20ma); // CHANGED
         sprintf(value_high_temp, "%d", input_config[input_num].high_setpoint);
         sprintf(value_high_tbp, "%02d:%02d", input_config[input_num].high_bypass_time / 60,
                 input_config[input_num].high_bypass_time % 60);
@@ -276,6 +300,151 @@ void menu_draw_options(void)
         {
             lcd_print_at(i + 1, 1, options_menu[menu.top_line + i]);
         }
+    }
+}
+
+// Initialize numeric editor for Scale values
+void init_numeric_editor(int16_t value)
+{
+    // Store original for cancel
+    menu.original_value = value;
+
+    // Break down into components
+    menu.sign_negative = (value < 0) ? 1 : 0;
+    uint16_t abs_value = abs(value);
+    menu.digit_100 = abs_value / 100;
+    menu.digit_10 = (abs_value / 10) % 10;
+    menu.digit_1 = abs_value % 10;
+
+    // Start editing at sign
+    menu.edit_digit = 0;
+}
+
+// Get current numeric value being edited
+int16_t get_current_numeric_value(void)
+{
+    int16_t value = menu.digit_100 * 100 + menu.digit_10 * 10 + menu.digit_1;
+    if (menu.sign_negative)
+        value = -value;
+    return value;
+}
+
+// Handle rotation for numeric editing
+void handle_numeric_rotation(int8_t direction)
+{
+    switch (menu.edit_digit)
+    {
+    case 0:                 // Sign
+        if (direction != 0) // Any rotation toggles sign
+            menu.sign_negative = !menu.sign_negative;
+        break;
+
+    case 1: // Hundreds (0-5)
+        if (direction > 0 && menu.digit_100 < 5)
+            menu.digit_100++;
+        else if (direction < 0 && menu.digit_100 > 0)
+            menu.digit_100--;
+        break;
+
+    case 2: // Tens (0-9, but limited if hundreds = 5)
+    {
+        uint8_t max_tens = (menu.digit_100 == 5) ? 0 : 9;
+        if (direction > 0 && menu.digit_10 < max_tens)
+            menu.digit_10++;
+        else if (direction < 0 && menu.digit_10 > 0)
+            menu.digit_10--;
+    }
+    break;
+
+    case 3: // Units (0-9, but limited if value would exceed 500)
+    {
+        uint8_t max_units = 9;
+        if (menu.digit_100 == 5 && menu.digit_10 == 0)
+            max_units = 0; // Already at 500, can't go higher
+
+        if (direction > 0 && menu.digit_1 < max_units)
+            menu.digit_1++;
+        else if (direction < 0 && menu.digit_1 > 0)
+            menu.digit_1--;
+    }
+    break;
+    }
+}
+
+// Update only the numeric value during editing - FAST UPDATE
+void menu_update_numeric_value(void)
+{
+    // Only update if we're in INPUT menu and edit mode
+    if (current_menu != 1 || !menu.in_edit_mode)
+        return;
+
+    // Find which line on screen has the edited item
+    uint8_t screen_line = menu.current_line - menu.top_line;
+    if (screen_line >= 3)
+        return; // Not visible
+
+    // Get the item being edited
+    uint8_t item_idx = menu.current_line;
+
+    // Only handle Scale 4mA and Scale 20mA
+    if (item_idx != 2 && item_idx != 3)
+        return;
+
+    // Build the value string with current digit blinking
+    char value_buf[6]; // +000 plus null terminator
+    char temp[2] = {0, 0};
+
+    // Sign (blinks if being edited)
+    if (menu.edit_digit == 0 && !menu.blink_state)
+        strcpy(value_buf, " "); // Hide sign when blinking
+    else
+        strcpy(value_buf, menu.sign_negative ? "-" : "+");
+
+    // Hundreds digit (blinks if being edited)
+    if (menu.edit_digit == 1 && !menu.blink_state)
+        strcat(value_buf, " ");
+    else
+    {
+        temp[0] = '0' + menu.digit_100;
+        strcat(value_buf, temp);
+    }
+
+    // Tens digit (blinks if being edited)
+    if (menu.edit_digit == 2 && !menu.blink_state)
+        strcat(value_buf, " ");
+    else
+    {
+        temp[0] = '0' + menu.digit_10;
+        strcat(value_buf, temp);
+    }
+
+    // Units digit (blinks if being edited)
+    if (menu.edit_digit == 3 && !menu.blink_state)
+        strcat(value_buf, " ");
+    else
+    {
+        temp[0] = '0' + menu.digit_1;
+        strcat(value_buf, temp);
+    }
+
+    // Clear the entire value area to handle different lengths
+    lcd_set_cursor(screen_line + 1, 10); // Start clearing from column 10
+    lcd_print("          ");             // 10 spaces to clear any remnants
+
+    // Display with parentheses - USING WORKING POSITIONING FROM BEFORE
+    uint8_t val_len = strlen(value_buf); // Should always be 4
+    if (val_len > 0)
+    {
+        // Use EXACTLY the same positioning as edit mode (DO NOT CHANGE)
+        uint8_t start_pos = 18 - val_len; // THIS IS CORRECT - DO NOT CHANGE
+        lcd_set_cursor(screen_line + 1, start_pos);
+
+        // Print opening parenthesis
+        lcd_print("(");
+        // Print value immediately after (will end at column 19)
+        lcd_print(value_buf);
+        // Print closing parenthesis immediately after (at column 20)
+        lcd_print(")");
     }
 }
 
@@ -556,48 +725,102 @@ void menu_handle_button(uint8_t press_type)
     {
         if (press_type == 1) // Short press - confirm edit
         {
-            // Apply the value based on which item we're editing
-            const item_options_t *opts = get_item_options(menu.current_line);
-            if (opts != NULL)
+            // Check what type of item we're editing
+            if (menu.current_line == 0 || menu.current_line == 1) // Enable or Sensor
             {
-                uint8_t *edit_flag = (menu.current_line == 0) ? &enable_edit_flag : &sensor_edit_flag;
+                // Apply the value based on which item we're editing
+                const item_options_t *opts = get_item_options(menu.current_line);
+                if (opts != NULL)
+                {
+                    uint8_t *edit_flag = (menu.current_line == 0) ? &enable_edit_flag : &sensor_edit_flag;
 
-                // Update the menu item value
-                strcpy(input_menu[menu.current_line].value, opts->options[*edit_flag]);
+                    // Update the menu item value
+                    strcpy(input_menu[menu.current_line].value, opts->options[*edit_flag]);
 
-                // Mark for EEPROM save (deferred)
-                save_pending = 1;
+                    // Mark for EEPROM save (deferred)
+                    save_pending = 1;
+                }
+
+                menu.in_edit_mode = 0;
+                beep(50);          // Confirmation beep
+                menu_draw_input(); // Redraw menu
             }
+            else if (menu.current_line == 2 || menu.current_line == 3) // Scale 4mA or Scale 20mA
+            {
+                // Move to next digit
+                menu.edit_digit++;
+                beep(50);
 
-            menu.in_edit_mode = 0;
-            beep(50); // Confirmation beep
+                if (menu.edit_digit > 3) // Done editing all digits
+                {
+                    // Save the value
+                    int16_t new_value = get_current_numeric_value();
+                    if (menu.current_line == 2)
+                    {
+                        input_config[current_input].scale_4ma = new_value;
+                        sprintf(input_menu[2].value, "%+04d", new_value);
+                    }
+                    else
+                    {
+                        input_config[current_input].scale_20ma = new_value;
+                        sprintf(input_menu[3].value, "%+04d", new_value);
+                    }
+
+                    // Mark for EEPROM save
+                    save_pending = 1;
+
+                    // Exit edit mode
+                    menu.in_edit_mode = 0;
+                    menu_draw_input();
+                }
+                // If not done, stay in edit mode for next digit
+            }
         }
         else if (press_type == 2) // Long press - cancel edit
         {
-            // Restore original value
-            strcpy(input_menu[menu.current_line].value, original_value);
-
-            // Restore the flag to match the original value
-            const item_options_t *opts = get_item_options(menu.current_line);
-            if (opts != NULL)
+            if (menu.current_line == 0 || menu.current_line == 1) // Enable or Sensor
             {
-                uint8_t *edit_flag = (menu.current_line == 0) ? &enable_edit_flag : &sensor_edit_flag;
+                // Restore original value
+                strcpy(input_menu[menu.current_line].value, original_value);
 
-                // Find which option matches the original value
-                for (uint8_t i = 0; i < opts->option_count; i++)
+                // Restore the flag to match the original value
+                const item_options_t *opts = get_item_options(menu.current_line);
+                if (opts != NULL)
                 {
-                    if (strcmp(original_value, opts->options[i]) == 0)
+                    uint8_t *edit_flag = (menu.current_line == 0) ? &enable_edit_flag : &sensor_edit_flag;
+
+                    // Find which option matches the original value
+                    for (uint8_t i = 0; i < opts->option_count; i++)
                     {
-                        *edit_flag = i;
-                        break;
+                        if (strcmp(original_value, opts->options[i]) == 0)
+                        {
+                            *edit_flag = i;
+                            break;
+                        }
                     }
+                }
+            }
+            else if (menu.current_line == 2 || menu.current_line == 3) // Scale 4mA or Scale 20mA
+            {
+                // Restore original numeric value
+                int16_t orig = menu.original_value;
+                if (menu.current_line == 2)
+                {
+                    input_config[current_input].scale_4ma = orig;
+                    sprintf(input_menu[2].value, "%+04d", orig);
+                }
+                else
+                {
+                    input_config[current_input].scale_20ma = orig;
+                    sprintf(input_menu[3].value, "%+04d", orig);
                 }
             }
 
             menu.in_edit_mode = 0;
             beep(100);
             __delay_ms(50);
-            beep(100); // Double beep for cancel
+            beep(100);         // Double beep for cancel
+            menu_draw_input(); // Redraw menu
         }
     }
     else // Not in edit mode
@@ -656,29 +879,43 @@ void menu_handle_button(uint8_t press_type)
                 }
                 else if (input_menu[menu.current_line].editable)
                 {
-                    // Store original value for potential cancellation
-                    strcpy(original_value, input_menu[menu.current_line].value);
-
-                    // Get the correct flag value for this item
-                    const item_options_t *opts = get_item_options(menu.current_line);
-                    if (opts != NULL)
+                    // Check if it's a numeric field
+                    if (menu.current_line == 2 || menu.current_line == 3) // Scale 4mA or Scale 20mA
                     {
-                        uint8_t *edit_flag = (menu.current_line == 0) ? &enable_edit_flag : &sensor_edit_flag;
+                        // Initialize numeric editor
+                        int16_t current_val = (menu.current_line == 2) ? input_config[current_input].scale_4ma : input_config[current_input].scale_20ma;
 
-                        // Find which option matches the current value
-                        for (uint8_t i = 0; i < opts->option_count; i++)
+                        init_numeric_editor(current_val);
+                        menu.in_edit_mode = 1;
+                        menu.blink_state = 1; // Start with value visible
+                        beep(50);
+                    }
+                    else // Enable or Sensor (existing code)
+                    {
+                        // Store original value for potential cancellation
+                        strcpy(original_value, input_menu[menu.current_line].value);
+
+                        // Get the correct flag value for this item
+                        const item_options_t *opts = get_item_options(menu.current_line);
+                        if (opts != NULL)
                         {
-                            if (strcmp(input_menu[menu.current_line].value, opts->options[i]) == 0)
+                            uint8_t *edit_flag = (menu.current_line == 0) ? &enable_edit_flag : &sensor_edit_flag;
+
+                            // Find which option matches the current value
+                            for (uint8_t i = 0; i < opts->option_count; i++)
                             {
-                                *edit_flag = i;
-                                break;
+                                if (strcmp(input_menu[menu.current_line].value, opts->options[i]) == 0)
+                                {
+                                    *edit_flag = i;
+                                    break;
+                                }
                             }
                         }
-                    }
 
-                    menu.in_edit_mode = 1;
-                    menu.blink_state = 1; // Start with value visible
-                    beep(50);             // Immediate feedback
+                        menu.in_edit_mode = 1;
+                        menu.blink_state = 1; // Start with value visible
+                        beep(50);             // Immediate feedback
+                    }
                 }
             }
             else if (current_menu == 2) // SETUP menu
@@ -728,8 +965,7 @@ void menu_handle_button(uint8_t press_type)
         }
     }
 }
-
-// Draw SETUP menu - NEW FUNCTION
+// Draw SETUP menu
 void menu_draw_setup(void)
 {
     extern input_config_t input_config[3];
