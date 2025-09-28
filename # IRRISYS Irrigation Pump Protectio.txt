@@ -3,7 +3,7 @@
 
 ### System Overview
 **Platform:** PIC18F2525 microcontroller  
-**Language:** Positron BASIC  
+**Language:** XC8, IDE=VSCode  
 **Purpose:** Industrial irrigation pump protection system with multi-sensor monitoring and relay control
 
 ### Core Functionality
@@ -26,6 +26,7 @@ Each input can be configured for different sensor types with automatic relay con
 ### Sensor Types Supported
 1. **Pressure Sensors** (Analog only, 4-20mA)
 - Configurable 4mA and 20mA scaling points
+- Various set points (Pressure, Temp and Flow Analogue, Flow Digital)
 - Various timers - including
 - High Pressure Bypass (High BP). Maximum time in seconds the system will tolerate an over pressure condition.
 - Primary low pressure bypass (PLPBP). Maximum time in seconds the system will tolerate an initial under pressure condition (Line fill time)
@@ -51,22 +52,24 @@ Each input can be configured for different sensor types with automatic relay con
 - Low: Relay activates on low fault condition (e.g. low pressure)
 - High: Relay activates on high condition  (e.g. high temperature)
 
-Relays output can be set to the following modes
--Latch
--Pulse
+Relay output can be set to the following modes
+-Latch (closes and stays closed until the fault is cleared by button press)
+-Pulse (closes and stays closed for the period defined in another menu)
 -No Action
 
 any mode can be selected for any condition.
 e.g. High pressure fault (over pressure) would be usually be set to Latch - since this would stop the pump and inhibit any restart - this condition could only be reset / cleared by physically pressing the button on the controller.
-End Runtime would normally be set to Pulse - since this would stop the pump but would subsequently release the relay in order to allow remote restart for the next run.
+End Runtime would normally be set to Pulse - since this would stop the pump but would subsequently release the relay once the pump running signal is lost in order to allow remote restart for the next run.
  
 ---
 
 ## Software Architecture
 
-Note - the LCD is 45 x 20 chr - this is a hard constraint
+Note - the LCD is 45 x 20 chr - this is a hard constraint (Columns are numbered 1-20)
 
 ### Menu System Structure
+
+There are different formats for different menus
 
 The overall principle for menus is:
 The top line of any menu is the menu title. eg. OPTIONS - this tile is fixed and does not scroll
@@ -108,9 +111,9 @@ The Sensor selected for each input is shown right justified on the same line as 
 
 Eg.
 Line 1 SETUP (fixed - no scroll)
-Line 2 [Input 1]	Pressure 
-Line 3  Input 2		Temp
-Line 4  Input 3		Flow
+Line 2 [1]	        Pressure 
+Line 3  2		Temp
+Line 4  3		Flow
 Line 5  Clock
 Line 6  Back
 
@@ -118,16 +121,29 @@ Rotating the RE CW or CC moves the cursors '[ ]' as before - short press selects
 
 The Main menu, Input menu and Utility menu operates slightly differently - there are more line items in this menu and most items have an associated variable that will need to be edited. This is the LIST mode.
 The list mode scrolls through each line item until the item of interest is select (short press)
-The list mode shows each item let justified - but shows its associated variable right justified - enclosed with the square brackets '[ ]'
+The list mode shows each item left justified - but shows its associated variable / string right justified.
+
+**CRITICAL LCD DISPLAY IMPLEMENTATION RULES:**
+- The LCD has 20 columns numbered 1-20
+- Column 20 is RESERVED for the closing cursor character (']' in list mode, ')' in edit mode)
+- The actual VALUE text must ALWAYS end at column 19
+- Cursor brackets/parentheses must be printed SEPARATELY from the value text - NEVER include them in the value string
+- Opening bracket '[' or '(' is printed immediately before the value - clear any previous '[' or '(' left over from shorter strings displayed previously.
+- Closing bracket ']' or ')' is printed at column 20
+- **Implementation:** Build value strings WITHOUT brackets, then print brackets as separate characters at correct positions
+- **List mode (selected):** Print '[' at column (20-len-2), value, then ']' at column 20
+- **Edit mode:** Print '(' at column (20-len-2), value (blinking), then ')' at column 20
+- **Not selected:** Print value only, ending at column 19 (no brackets)
+
 Eg.
 INPUT x (Fixed, non scrolling - configure input X)
-Enable		[Enabled] (options are shown in the chart below - note that column 20 is reserved for the cursor. Therefore each variable should be justified so the word ends in column 19)
-Sensor		 Pressure]
-Scale 4ma	 000
-Scale 20ma	 000
+Enable		[Enabled]  (Text "Enabled" ends at col 19, ']' at col 20)
+Sensor		[Pressure] (Text "Pressure" ends at col 19, ']' at col 20)
+Scale 4ma	      000  (No brackets when not selected)
+Scale 20ma	      000  (No brackets when not selected)
 
 and so on
-At the RE is rotated CW and CC the square bracket cursors move up and down until the user selects which item to edit (short press) 
+As the RE is rotated CW and CC the square bracket cursors move up and down until the user selects which item to edit (short press) 
 In this case - we move from list mode to edit mode - this is and inline editor so we change the [ ] to ( ) and flash the value enclosed (see list below) - RE scrolls through the options in the same location - the rest of the screen remains undisturbed.
 
 When in Edit more - a long press of the button (>1.5 seconds) will return to list mode without making any changes.
@@ -143,7 +159,7 @@ or (+000) - positive value
 
 The last option in the list is  'Back' - selecting this will cancel this menu and return to the previous screen
 The Exit option in the OPTIONS menu will cancel menus altogether and return to the main screen.
-There is a menu timeout variable (default 30 seconds) that will double beep and exit all menus and return to the main screen 
+There is a menu timeout variable (default 30 seconds) that will double beep and exit all menus and return to the main screen - any changes should be written to eeprom when returning to the main screen - menu timeout will cancel changes and revert to the value on entering the menu before they are written to the eeprom  
 All menus must be non blocking in order to facilitate system functions (not yet written)
 
 
@@ -153,7 +169,7 @@ Below is a table indication the list items for each menu type, default settings 
 
 ├── Main menu      	→ Setup everyday parameters / easy access to selected setup data
 ├── Setup Menu     	→ Configure the system
-├── Utility Menu	→ Date and Time, System logs etc.
+├── Utility Menu		→ Date and Time, System logs etc.
 ├── About          	→ Version info
 └── Exit           	→ Return to the main screen
 ```
@@ -175,9 +191,9 @@ Below is a table indication the list items for each menu type, default settings 
 ```
 SETUP
 
-├── Input 1        → Configure sensor for Input 1
-├── Input 2        → Configure sensor for Input 2
-├── Input 3        → Configure sensor for Input 3
+├── 1        		 → Configure sensor for Input 1
+├── 2        		 → Configure sensor for Input 2
+├── 3        		 → Configure sensor for Input 3
 ├── Clock          → Time related settings
 └── Back           → Return to OPTIONS MENU
 
@@ -228,7 +244,7 @@ INPUT [1/2/3] - Flow] Input 3 is set for Flow (Digital mode) by default
 ├── No Flow        [Low/High]
 ├── No Flow BP     [Time Value] - time in Seconds. Shown as mm:ss
 ├── Rly Low        [Protection mode] - Latch / Pulse / Not Used (Latch by default)
-├── Display        [Show/Hide] - show or hide on the main screen└── Back			  → Return to SETUP menu
+├── Display        [Show/Hide] - show or hide on the main screenâ""── Back			  → Return to SETUP menu
 ```
 INPUT [1/2/3] - Flow (Analogue)
 ├── Enable         [Enabled / Disabled]

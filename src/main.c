@@ -14,6 +14,10 @@ extern volatile uint16_t button_hold_ms;
 extern volatile uint8_t button_event;
 uint8_t save_pending = 0; // Flag for deferred EEPROM saves
 
+// External function declarations for numeric editing
+extern void handle_numeric_rotation(int8_t direction);
+extern void menu_update_numeric_value(void);
+
 // Function prototypes
 void uart_init(void);
 void uart_write(char c);
@@ -259,6 +263,7 @@ void main(void)
     int16_t last_encoder = 0;
     uint8_t last_button = 0;
     static uint32_t blink_timer = 0;
+    static uint16_t encoder_activity_timer = 0; // Track encoder activity
 
     while (1)
     {
@@ -276,16 +281,57 @@ void main(void)
 
             last_encoder = encoder_count;
 
-            menu_handle_encoder(delta);
+            // Track encoder activity - reset timer on movement
+            encoder_activity_timer = 500; // Stay active for 500ms after last movement
 
-            // Redraw current menu
-            if (current_menu == 0)
+            // Force blink state ON during encoder movement for better visibility
+            if (menu.in_edit_mode)
             {
-                menu_draw_options();
+                menu.blink_state = 1;
+            }
+
+            // Check if we're editing a numeric field
+            if (menu.in_edit_mode && current_menu == 1 &&
+                (menu.current_line == 2 || menu.current_line == 3))
+            {
+                // Handle numeric rotation for Scale 4mA or Scale 20mA
+                handle_numeric_rotation(delta);
             }
             else
             {
-                menu_draw_input();
+                // Use existing encoder handler for everything else
+                menu_handle_encoder(delta);
+            }
+
+            if (menu.in_edit_mode && current_menu == 1)
+            {
+                // Check what type of field we're editing
+                if (menu.current_line == 2 || menu.current_line == 3)
+                {
+                    // Fast update for numeric value
+                    menu_update_numeric_value();
+                }
+                else
+                {
+                    // Fast update for option value (existing)
+                    menu_update_edit_value();
+                }
+            }
+            else
+            {
+                // Full redraw for normal navigation
+                if (current_menu == 0)
+                {
+                    menu_draw_options();
+                }
+                else if (current_menu == 1)
+                {
+                    menu_draw_input();
+                }
+                else if (current_menu == 2)
+                {
+                    menu_draw_setup();
+                }
             }
         }
 
@@ -309,32 +355,53 @@ void main(void)
                 {
                     menu_draw_options();
                 }
-                else
+                else if (current_menu == 1)
                 {
                     menu_draw_input();
+                }
+                else if (current_menu == 2)
+                {
+                    menu_draw_setup();
                 }
             }
             last_button = button_event;
             button_event = 0;
         }
 
+        // Decrement encoder activity timer
+        if (encoder_activity_timer > 0)
+        {
+            encoder_activity_timer--;
+        }
+
         // Handle blinking in edit mode
         blink_timer++;
-        if (blink_timer >= 50000)
+        if (blink_timer >= 10000)
         { // Slow 2Hz blinking
             blink_timer = 0;
             if (menu.in_edit_mode)
             {
-                menu.blink_state = !menu.blink_state;
+                // Only blink if encoder is not active
+                if (encoder_activity_timer == 0)
+                {
+                    menu.blink_state = !menu.blink_state;
 
-                // Only redraw in edit mode
-                if (current_menu == 0)
-                {
-                    menu_draw_options();
-                }
-                else
-                {
-                    menu_draw_input();
+                    // Update display for blink
+                    // Update display for blink
+                    if (current_menu == 1)
+                    {
+                        // Check what type of field we're editing
+                        if (menu.current_line == 2 || menu.current_line == 3)
+                        {
+                            // Fast update for numeric value
+                            menu_update_numeric_value();
+                        }
+                        else
+                        {
+                            // Fast update for option value
+                            menu_update_edit_value();
+                        }
+                    }
                 }
             }
             else
@@ -344,11 +411,11 @@ void main(void)
         }
 
         // Handle pending EEPROM saves when not in edit mode (MOVED OUTSIDE)
-        if (save_pending && !menu.in_edit_mode)
-        {
-            save_current_config();
-            save_pending = 0;
-        }
+        // if (save_pending && !menu.in_edit_mode)
+        //{
+        // save_current_config();
+        // save_pending = 0;
+        //}
 
         // Prevent LCD corruption at high speed
         __delay_us(50);
