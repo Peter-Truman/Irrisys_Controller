@@ -159,6 +159,7 @@ const menu_item_t flow_analog_template[] = {
 // LCD helper - print at specific position
 void lcd_print_at(uint8_t row, uint8_t col, const char *str)
 {
+    uart_println("lcd_print_at called"); // ADD THIS
     lcd_set_cursor(row, col);
     lcd_print(str);
 }
@@ -166,6 +167,7 @@ void lcd_print_at(uint8_t row, uint8_t col, const char *str)
 // Clear a single line
 void lcd_clear_line(uint8_t row)
 {
+    uart_println("lcd_clear_line called"); // ADD THIS
     lcd_set_cursor(row, 0);
     lcd_print("                    "); // 20 spaces
 }
@@ -390,62 +392,63 @@ void menu_update_numeric_value(void)
     if (item_idx != 2 && item_idx != 3)
         return;
 
-    // Build the value string with current digit blinking
-    char value_buf[6]; // +000 plus null terminator
-    char temp[2] = {0, 0};
+    // Build the complete value string
+    char value_buf[6] = {0}; // +000 plus null terminator
 
-    // Sign (blinks if being edited)
+    // Sign position
     if (menu.edit_digit == 0 && !menu.blink_state)
-        strcpy(value_buf, " "); // Hide sign when blinking
+    {
+        value_buf[0] = ' '; // Blank when editing sign and blink off
+    }
     else
-        strcpy(value_buf, menu.sign_negative ? "-" : "+");
+    {
+        value_buf[0] = menu.sign_negative ? '-' : '+'; // Show current sign
+    }
 
-    // Hundreds digit (blinks if being edited)
+    // Hundreds position
     if (menu.edit_digit == 1 && !menu.blink_state)
-        strcat(value_buf, " ");
+    {
+        value_buf[1] = ' '; // Blank when editing hundreds and blink off
+    }
     else
     {
-        temp[0] = '0' + menu.digit_100;
-        strcat(value_buf, temp);
+        value_buf[1] = '0' + menu.digit_100; // Show current hundreds
     }
 
-    // Tens digit (blinks if being edited)
+    // Tens position
     if (menu.edit_digit == 2 && !menu.blink_state)
-        strcat(value_buf, " ");
+    {
+        value_buf[2] = ' '; // Blank when editing tens and blink off
+    }
     else
     {
-        temp[0] = '0' + menu.digit_10;
-        strcat(value_buf, temp);
+        value_buf[2] = '0' + menu.digit_10; // Show current tens
     }
 
-    // Units digit (blinks if being edited)
+    // Units position
     if (menu.edit_digit == 3 && !menu.blink_state)
-        strcat(value_buf, " ");
+    {
+        value_buf[3] = ' '; // Blank when editing units and blink off
+    }
     else
     {
-        temp[0] = '0' + menu.digit_1;
-        strcat(value_buf, temp);
+        value_buf[3] = '0' + menu.digit_1; // Show current units
     }
 
-    // Clear the entire value area to handle different lengths
-    lcd_set_cursor(screen_line + 1, 10); // Start clearing from column 10
-    lcd_print("          ");             // 10 spaces to clear any remnants
+    value_buf[4] = '\0'; // Null terminator
 
-    // Display with parentheses - USING WORKING POSITIONING FROM BEFORE
-    uint8_t val_len = strlen(value_buf); // Should always be 4
-    if (val_len > 0)
-    {
-        // Use EXACTLY the same positioning as edit mode (DO NOT CHANGE)
-        uint8_t start_pos = 18 - val_len; // THIS IS CORRECT - DO NOT CHANGE
-        lcd_set_cursor(screen_line + 1, start_pos);
+    // Position for the value display (same as working edit mode positioning)
+    uint8_t start_pos = 14; // For 4-character value: 14 + 4 = 18, leaves room for ) at 19 (column 20)
 
-        // Print opening parenthesis
-        lcd_print("(");
-        // Print value immediately after (will end at column 19)
-        lcd_print(value_buf);
-        // Print closing parenthesis immediately after (at column 20)
-        lcd_print(")");
-    }
+    // Clear old value first (but not the parentheses)
+    lcd_set_cursor(screen_line + 1, start_pos + 1);
+    lcd_print("    "); // Clear 4 character positions
+
+    // Redraw with current state
+    lcd_set_cursor(screen_line + 1, start_pos);
+    lcd_print("(");
+    lcd_print(value_buf);
+    lcd_print(")");
 }
 
 // Draw INPUT menu with values right-justified and brackets on VALUES
@@ -469,7 +472,7 @@ void menu_draw_input(void)
         // Build and display the value (right-justified)
         char value_buf[15];
         // Build the value string (WITHOUT brackets/parentheses)
-        char value_buf[15];
+        // char value_buf[15];
         uint8_t show_brackets = 0; // 0=none, 1=square brackets, 2=parentheses
 
         if (item_idx == menu.current_line)
@@ -477,53 +480,63 @@ void menu_draw_input(void)
             if (menu.in_edit_mode)
             {
                 show_brackets = 2; // Use parentheses in edit mode
-                // Edit mode - only value blinks
-                if (menu.blink_state)
+
+                // Check if this is a numeric field
+                if (item_idx == 2 || item_idx == 3) // Scale 4mA or Scale 20mA
                 {
-                    // Show text (without parentheses)
-                    const item_options_t *opts = get_item_options(item_idx);
-                    if (opts != NULL)
+                    // For numeric fields, DON'T blink here - let menu_update_numeric_value handle it
+                    strcpy(value_buf, input_menu[item_idx].value);
+                }
+                else // Enable or Sensor - use existing blink logic
+                {
+                    // Edit mode - only value blinks
+                    if (menu.blink_state)
                     {
-                        uint8_t flag_value = (item_idx == 0) ? enable_edit_flag : sensor_edit_flag;
-                        if (flag_value < opts->option_count)
+                        // Show text (without parentheses)
+                        const item_options_t *opts = get_item_options(item_idx);
+                        if (opts != NULL)
                         {
-                            strcpy(value_buf, opts->options[flag_value]);
+                            uint8_t flag_value = (item_idx == 0) ? enable_edit_flag : sensor_edit_flag;
+                            if (flag_value < opts->option_count)
+                            {
+                                strcpy(value_buf, opts->options[flag_value]);
+                            }
+                            else
+                            {
+                                strcpy(value_buf, "Error");
+                            }
                         }
                         else
                         {
-                            strcpy(value_buf, "Error");
+                            strcpy(value_buf, input_menu[item_idx].value);
                         }
                     }
                     else
                     {
-                        strcpy(value_buf, input_menu[item_idx].value);
-                    }
-                }
-                else
-                {
-                    // Blink off - show spaces
-                    const item_options_t *opts = get_item_options(item_idx);
-                    if (opts != NULL)
-                    {
-                        uint8_t flag_value = (item_idx == 0) ? enable_edit_flag : sensor_edit_flag;
-                        if (flag_value < opts->option_count)
+                        // Blink off - show spaces
+                        const item_options_t *opts = get_item_options(item_idx);
+                        if (opts != NULL)
                         {
-                            uint8_t val_len = strlen(opts->options[flag_value]);
+                            uint8_t flag_value = (item_idx == 0) ? enable_edit_flag : sensor_edit_flag;
+                            if (flag_value < opts->option_count)
+                            {
+                                uint8_t val_len = strlen(opts->options[flag_value]);
+                                for (uint8_t j = 0; j < val_len; j++)
+                                    value_buf[j] = ' ';
+                                value_buf[val_len] = '\0';
+                            }
+                            else
+                            {
+                                strcpy(value_buf, "     ");
+                            }
+                        }
+                        else
+                        {
+                            uint8_t val_len = strlen(input_menu[item_idx].value);
                             for (uint8_t j = 0; j < val_len; j++)
                                 value_buf[j] = ' ';
                             value_buf[val_len] = '\0';
                         }
-                        else
-                        {
-                            strcpy(value_buf, "     ");
-                        }
-                    }
-                    else
-                    {
-                        uint8_t val_len = strlen(input_menu[item_idx].value);
-                        for (uint8_t j = 0; j < val_len; j++)
-                            value_buf[j] = ' ';
-                        value_buf[val_len] = '\0';
                     }
                 }
             }
@@ -545,27 +558,38 @@ void menu_draw_input(void)
         uint8_t val_len = strlen(value_buf);
         if (val_len > 0 && strcmp(input_menu[item_idx].value, "") != 0)
         {
-            if (show_brackets == 0)
+            // Skip drawing if we're editing a numeric field - let menu_update_numeric_value handle it
+            if (menu.in_edit_mode && (item_idx == 2 || item_idx == 3))
             {
-                // No brackets - value ends at column 19
-                lcd_print_at(i + 1, 19 - val_len, value_buf);
+                // Don't draw anything here for numeric fields in edit mode
+                // menu_update_numeric_value() will handle the display
             }
             else
             {
-                // With brackets - print everything in one sequence
-                uint8_t start_pos = 19 - val_len - 1; // Where opening bracket goes
-                lcd_set_cursor(i + 1, start_pos);
+                // Normal drawing for non-numeric or non-edit mode
+                if (show_brackets == 0)
+                {
+                    // No brackets - value ends at column 19
+                    lcd_print_at(i + 1, 19 - val_len, value_buf);
+                }
+                else
+                {
+                    // With brackets - print everything in one sequence
+                    uint8_t start_pos = 19 - val_len - 1; // Where opening bracket goes
+                    lcd_set_cursor(i + 1, start_pos);
 
-                // Print opening bracket
-                lcd_print(show_brackets == 1 ? "[" : "(");
-                // Print value immediately after
-                lcd_print(value_buf);
-                // Print closing bracket immediately after
-                lcd_print(show_brackets == 1 ? "]" : ")");
+                    // Print opening bracket
+                    lcd_print(show_brackets == 1 ? "[" : "(");
+                    // Print value immediately after
+                    lcd_print(value_buf);
+                    // Print closing bracket immediately after
+                    lcd_print(show_brackets == 1 ? "]" : ")");
+                }
             }
         }
     }
 }
+
 // Update only the edited value - FAST UPDATE for edit mode
 void menu_update_edit_value(void)
 {
@@ -889,6 +913,9 @@ void menu_handle_button(uint8_t press_type)
                         menu.in_edit_mode = 1;
                         menu.blink_state = 1; // Start with value visible
                         beep(50);
+
+                        // ADD THIS DEBUG
+                        uart_println("Entered numeric edit mode");
                     }
                     else // Enable or Sensor (existing code)
                     {
