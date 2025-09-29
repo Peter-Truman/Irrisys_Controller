@@ -1,0 +1,10 @@
+[33m9629b78[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mworking-version[m[33m, [m[1;31morigin/working-version[m[33m)[m Merge branch 'working-version' of https://github.com/Peter-Truman/Irrisys_Controller into working-version
+[33me647181[m Editing Sined Variables is complete and working
+[33mcd6d5d2[m Restructure: Move code to root, remove subdirectory
+[33m5ef5929[m Signed edit works (only the sign done so far)
+[33mbb22933[m[33m ([m[1;32mbackup-numeric-edits[m[33m)[m General setup menu formating complete - starting on signd values
+[33mef6ebee[m Progress-But format issues with the menus
+[33m2a64c0b[m Progressing dynamic menu list - not right yet
+[33mf8f5af1[m HMI runs fine now - Enable, Sensor are done
+[33mb02409f[m Start new with opus 4.1 260925
+[33m844e588[m End of work with the Opeus 4.0 model - start with 4.1

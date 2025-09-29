@@ -79,16 +79,16 @@ const menu_item_t pressure_menu_template[] = {
     {"Scale 4mA", NULL, 1},
     {"Scale 20mA", NULL, 1},
     {"Hi Pressure", NULL, 1},
-    {"High PBP", NULL, 1}, // Changed from "High BP" to "High PBP"
+    {"High PBP", NULL, 1},
     {"Low Pressure", NULL, 1},
     {"PLPBP", NULL, 1},
     {"SLPBP", NULL, 1},
     {"Rly High", NULL, 1},
     {"Rly Low", NULL, 1},
     {"Rly SLP", NULL, 1},
-    {"Display", NULL, 1},
-    {"Back", NULL, 0}};
-
+    {"Display", NULL, 1}, // Index 12 - THIS SHOULD BE "Display"
+    {"Back", NULL, 0}     // Index 13 - THIS SHOULD BE "Back"
+};
 // Menu template for TEMPERATURE sensor
 const menu_item_t temp_menu_template[] = {
     {"Enable", NULL, 1},
@@ -225,6 +225,20 @@ void rebuild_input_menu(uint8_t input_num)
         input_menu[13].value = value_back;
 
         menu.total_items = 14;
+
+        // DEBUG: Verify total items
+        char buf[30];
+        sprintf(buf, "Total items set to: %d", menu.total_items);
+        uart_println(buf);
+
+        // DEBUG: Check what's actually in the menu
+        uart_println("Menu items after rebuild:");
+        for (uint8_t i = 12; i < 14; i++)
+        {
+            char buf[50];
+            sprintf(buf, "Item %d: %s", i, input_menu[i].label);
+            uart_println(buf);
+        }
     }
     else if (sensor == 1) // Temperature
     {
@@ -304,6 +318,7 @@ void handle_numeric_rotation(int8_t direction)
             else
                 menu.digit_100--;
         }
+        // REMOVE THE AUTO-RESET - don't force tens/units to 0 here
         break;
 
     case 2: // Tens (0-9) with rollover, but limited if hundreds = 5
@@ -329,26 +344,26 @@ void handle_numeric_rotation(int8_t direction)
     }
     break;
 
-    case 3: // Units (0-9) with rollover, but limited if at 500
+    case 3: // Units (0-9) with rollover, but limited if at 50x
     {
-        uint8_t max_units = 9;
+        // If we're at 50x, units must be 0
         if (menu.digit_100 == 5 && menu.digit_10 == 0)
-            max_units = 0; // Already at 500, can't change
+        {
+            menu.digit_1 = 0; // Force to 0, no change allowed
+            break;            // Don't allow any change
+        }
 
+        // Otherwise normal 0-9 with rollover
         if (direction > 0)
         {
-            if (max_units == 0)
-                break; // Can't change if at 500
             menu.digit_1++;
-            if (menu.digit_1 > max_units)
+            if (menu.digit_1 > 9)
                 menu.digit_1 = 0; // Roll over to 0
         }
         else if (direction < 0)
         {
-            if (max_units == 0)
-                break; // Can't change if at 500
             if (menu.digit_1 == 0)
-                menu.digit_1 = max_units; // Roll under to max
+                menu.digit_1 = 9; // Roll under to 9
             else
                 menu.digit_1--;
         }
@@ -438,7 +453,7 @@ void menu_draw_input(void)
     lcd_print_at(0, 0, title);
 
     // Draw 3 visible items
-    for (uint8_t i = 0; i < 3 && (menu.top_line + i) < 12; i++)
+    for (uint8_t i = 0; i < 3 && (menu.top_line + i) < menu.total_items; i++)
     {
         uint8_t item_idx = menu.top_line + i;
         lcd_clear_line(i + 1);
@@ -446,9 +461,15 @@ void menu_draw_input(void)
         // Left side - label (no brackets)
         lcd_print_at(i + 1, 0, input_menu[item_idx].label);
 
+        // DEBUG: See what's being drawn
+        if (item_idx >= 11)
+        {
+            char buf[50];
+            sprintf(buf, "Drawing idx %d: %s", item_idx, input_menu[item_idx].label);
+            uart_println(buf);
+        }
+
         // Build and display the value (right-justified)
-        char value_buf[15];
-        // Build the value string (WITHOUT brackets/parentheses)
         char value_buf[15];
         uint8_t show_brackets = 0; // 0=none, 1=square brackets, 2=parentheses
 
@@ -696,6 +717,12 @@ void menu_handle_encoder(int16_t delta)
         // Counter-clockwise - move up
         if (menu.current_line > 0)
         {
+
+            // DEBUG: Hit the limit
+            char buf[50];
+            sprintf(buf, "At limit: line=%d, total=%d", menu.current_line, menu.total_items);
+            uart_println(buf);
+
             menu.current_line--;
 
             // Adjust scroll if needed
@@ -740,6 +767,13 @@ void menu_handle_button(uint8_t press_type)
                 // Advance to next digit
                 menu.edit_digit++;
                 beep(50); // Confirmation beep
+
+                // ADD THIS: If we just confirmed hundreds=5, reset tens and units
+                if (menu.edit_digit == 2 && menu.digit_100 == 5) // Just moved to tens, hundreds is 5
+                {
+                    menu.digit_10 = 0;
+                    menu.digit_1 = 0;
+                }
 
                 if (menu.edit_digit > 3) // Finished all digits
                 {
@@ -816,7 +850,7 @@ void menu_handle_button(uint8_t press_type)
             }
             else if (current_menu == 1) // INPUT menu
             {
-                if (menu.current_line == 11) // Back option
+                if (menu.current_line == 13) // Back option
                 {
                     beep(50);
                     // Go back to SETUP menu
