@@ -7,6 +7,9 @@
 input_config_t input_config[3];
 system_config_t system_config;
 
+// Menu timeout in seconds (will be loaded from EEPROM)
+uint16_t menu_timeout_seconds = 30; // Default value if EEPROM invalid
+
 // Factory defaults constant
 const input_config_t factory_defaults[3] = {
     // Input 1 - Default to Pressure
@@ -198,6 +201,16 @@ void eeprom_init(void)
 
     // Sync menu variables with loaded config
     sync_menu_variables();
+    // ... existing EEPROM loading code ...
+
+    // Load menu timeout value
+    menu_timeout_seconds = system_config.menu_timeout * 2; // Convert from 2-second increments
+
+    // Validate the timeout value (10-510 seconds range)
+    if (menu_timeout_seconds < 10 || menu_timeout_seconds > 510)
+    {
+        menu_timeout_seconds = 30; // Use default if out of range
+    }
 }
 
 void save_current_config(void)
