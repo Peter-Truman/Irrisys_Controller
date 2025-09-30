@@ -256,3 +256,17 @@ void sync_menu_variables(void)
     enable_edit_flag = input_config[0].enable;
     sensor_edit_flag = input_config[0].sensor_type;
 }
+// Getter function for menu timeout - safe to call from anywhere
+uint8_t get_menu_timeout_seconds(void)
+{
+    // Return timeout value, with bounds checking
+    if (system_config.menu_timeout < 5)
+    {
+        return 30; // Default 30 seconds if value too low
+    }
+    if (system_config.menu_timeout > 120)
+    {
+        return 30; // Default 30 seconds if value too high
+    }
+    return system_config.menu_timeout;
+}

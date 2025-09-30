@@ -249,11 +249,9 @@ void main(void)
     // Set the menu timeout reload value
     extern volatile uint16_t menu_timeout_reload;
 
-    // For now, use a fixed 30-second timeout
-    // We'll fix the EEPROM linkage later
-    menu_timeout_reload = 15000; // 30 seconds * 500 = 15000
-
-    // Don't try to access menu_timeout_seconds - it causes crashes
+    // Get timeout from EEPROM via getter function
+    extern uint8_t get_menu_timeout_seconds(void);
+    menu_timeout_reload = (uint16_t)get_menu_timeout_seconds() * 500;
 
     uart_init();
     encoder_init();

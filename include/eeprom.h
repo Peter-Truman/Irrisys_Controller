@@ -80,6 +80,8 @@ void factory_reset(void);
 void load_factory_defaults(void);
 void sync_menu_variables(void);
 
+uint8_t get_menu_timeout_seconds(void);
+
 // External variables that other files can access
 extern input_config_t input_config[3];
 extern system_config_t system_config;
