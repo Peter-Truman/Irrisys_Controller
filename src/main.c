@@ -2,6 +2,7 @@
  * IRRISYS - Menu System with EEPROM Integration
  * Working stable version with 32MHz operation
  */
+// Moved to new chat 1430
 
 #include "../include/config.h"
 #include "../include/encoder.h"
@@ -12,11 +13,20 @@
 // External variables from encoder
 extern volatile uint16_t button_hold_ms;
 extern volatile uint8_t button_event;
+// Function declarations for numeric editing
+extern void handle_numeric_rotation(int8_t direction);
+extern void menu_update_numeric_value(void);
+
 uint8_t save_pending = 0; // Flag for deferred EEPROM saves
+// Debug flag from ISR extern volatile uint8_t timeout_debug_flag;
+extern volatile uint8_t timeout_debug_flag;
+extern uint8_t current_input; // From menu.c
 
 // External function declarations for numeric editing
 extern void handle_numeric_rotation(int8_t direction);
 extern void menu_update_numeric_value(void);
+
+extern volatile uint8_t long_press_beep_flag; // From encoder ISR
 
 // Function prototypes
 void uart_init(void);
@@ -183,13 +193,21 @@ void lcd_set_cursor(uint8_t row, uint8_t col)
 
 void lcd_init(void)
 {
-    TRISA &= 0x30;
-    LATA = 0;
+    // Set TRIS exactly as Positron does
+    TRISA = 0x10; // %00010000
+    TRISB = 0x46; // %01000110
+    TRISC = 0x00; // %00000000
+
+    // Clear all ports
+    PORTA = 0;
+    PORTB = 0;
+    PORTC = 0;
 
     __delay_ms(50);
 
     LCD_RS = 0;
 
+    // Force 8-bit mode three times
     lcd_write_nibble(0x03);
     __delay_ms(5);
     lcd_write_nibble(0x03);
@@ -197,14 +215,17 @@ void lcd_init(void)
     lcd_write_nibble(0x03);
     __delay_us(150);
 
+    // Switch to 4-bit
     lcd_write_nibble(0x02);
     __delay_us(150);
 
+    // Function set: 4-bit, 2 lines, 5x8
     lcd_cmd(0x28);
-    lcd_cmd(0x0C);
-    lcd_cmd(0x01);
+    lcd_cmd(0x08); // Display OFF - THIS IS KEY
+    lcd_cmd(0x01); // Clear
     __delay_ms(2);
-    lcd_cmd(0x06);
+    lcd_cmd(0x06); // Entry mode
+    lcd_cmd(0x0C); // Display ON, cursor off
 }
 
 // Buzzer function
@@ -224,6 +245,16 @@ void main(void)
     // Initialize hardware
     system_init();
     eeprom_init(); // Load config from EEPROM
+
+    // Set the menu timeout reload value
+    extern volatile uint16_t menu_timeout_reload;
+
+    // For now, use a fixed 30-second timeout
+    // We'll fix the EEPROM linkage later
+    menu_timeout_reload = 15000; // 30 seconds * 500 = 15000
+
+    // Don't try to access menu_timeout_seconds - it causes crashes
+
     uart_init();
     encoder_init();
     menu_init();
@@ -335,38 +366,113 @@ void main(void)
             }
         }
 
-        // Check button events
+        /// Check button events
         if (button_event != last_button)
         {
-            // Check button events
             if (button_event > 0)
-            { // Simplified check
+            {
                 uint8_t current_event = button_event;
-                button_event = 0; // Clear immediately
+                button_event = 0;
 
                 char buf[30];
                 sprintf(buf, "Button event: %d", current_event);
                 uart_println(buf);
 
-                menu_handle_button(current_event);
+                // ADD: Handle long press FIRST
+                if (current_event == 2) // Long press
+                {
+                    uart_println("Long press detected");
 
-                // Redraw after button action
-                if (current_menu == 0)
-                {
-                    menu_draw_options();
+                    // Check if in edit mode
+                    if (menu.in_edit_mode)
+                    {
+                        // Cancel edit without saving
+                        menu.in_edit_mode = 0;
+                        menu.blink_state = 1;
+                        menu.edit_digit = 0;
+
+                        // Reset flags
+                        extern input_config_t input_config[3];
+                        enable_edit_flag = input_config[current_input].enable;
+                        sensor_edit_flag = input_config[current_input].sensor_type;
+
+                        uart_println("Edit cancelled");
+
+                        // Redraw
+                        if (current_menu == 1)
+                            menu_draw_input();
+                    }
+                    else
+                    {
+                        // Not in edit - navigate back
+                        // Not in edit - navigate back
+                        if (current_menu == 0) // OPTIONS -> Main
+                        {
+                            current_menu = 255; // Just set the menu state
+                            uart_println("Long press - exit to main");
+                        }
+                        else if (current_menu == 1) // INPUT -> SETUP
+                        {
+                            current_menu = 2;
+                            menu.current_line = 0;
+                            menu.top_line = 0;
+                            menu.total_items = 5;
+                            menu_draw_setup();
+                        }
+                        else if (current_menu == 2) // SETUP -> OPTIONS
+                        {
+                            current_menu = 0;
+                            menu.current_line = 0;
+                            menu.top_line = 0;
+                            menu.total_items = 5;
+                            menu_draw_options();
+                        }
+                    }
                 }
-                else if (current_menu == 1)
+                // Check if we're on main screen (for short press)
+                else if (current_menu == 255)
                 {
-                    menu_draw_input();
+                    if (current_event == 1) // Short press
+                    {
+                        current_menu = 0; // Enter OPTIONS menu
+                        menu.current_line = 0;
+                        menu.top_line = 0;
+                        menu.total_items = 5;
+                        menu_draw_options();
+                        beep(50);
+                    }
                 }
-                else if (current_menu == 2)
+                else
                 {
-                    menu_draw_setup();
+                    // In a menu - pass to menu handler
+                    menu_handle_button(current_event);
+
+                    // Redraw after button action
+                    if (current_menu == 0)
+                        menu_draw_options();
+                    else if (current_menu == 1)
+                        menu_draw_input();
+                    else if (current_menu == 2)
+                        menu_draw_setup();
                 }
             }
             last_button = button_event;
             button_event = 0;
         }
+
+        // Check if we just returned to main screen
+        static uint8_t last_menu_state = 0;
+        if (current_menu == 255 && last_menu_state != 255)
+        {
+            // Just entered main screen - redraw it
+            lcd_clear();
+            lcd_set_cursor(0, 0);
+            lcd_print("MAIN SCREEN");
+            lcd_set_cursor(1, 0);
+            lcd_print("Ready");
+            uart_println("Main screen displayed");
+        }
+        last_menu_state = current_menu;
 
         // Decrement encoder activity timer
         if (encoder_activity_timer > 0)
@@ -409,6 +515,55 @@ void main(void)
                 menu.blink_state = 1; // Always on when not editing
             }
         }
+
+        // Check timeout debug flag from ISR
+        if (timeout_debug_flag)
+        {
+            // ... your existing debug code ...
+        }
+
+        // ADD THIS: Actually handle the timeout!
+        extern volatile uint8_t menu_timeout_flag;
+        extern volatile uint16_t menu_timeout_timer;
+
+        if (current_menu < 3) // In a menu (0=OPTIONS, 1=INPUT, 2=SETUP)
+        {
+            if (menu_timeout_flag == 0) // Timeout occurred
+            {
+                uart_println("TIMEOUT - Exiting to main screen");
+
+                // Double beep
+                beep(100);
+                __delay_ms(50);
+                beep(100);
+
+                // Exit to main screen
+                current_menu = 255;
+                menu.in_edit_mode = 0;
+                menu.current_line = 0;
+                menu.top_line = 0;
+
+                // Clear display
+                lcd_clear();
+                lcd_set_cursor(0, 0);
+                lcd_print("MAIN SCREEN");
+                lcd_set_cursor(1, 0);
+                lcd_print("Timeout");
+
+                // Reset the flag and timer
+                menu_timeout_flag = 1;
+                menu_timeout_timer = 0;
+            }
+        }
+
+        // Check for long press beep
+        if (long_press_beep_flag)
+        {
+            long_press_beep_flag = 0;
+            beep(500); // Half second beep as feedback
+            uart_println("Long press threshold reached - beep");
+        }
+        // Handle pending EEPROM saves...
 
         // Handle pending EEPROM saves when not in edit mode (MOVED OUTSIDE)
         // if (save_pending && !menu.in_edit_mode)

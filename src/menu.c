@@ -79,16 +79,16 @@ const menu_item_t pressure_menu_template[] = {
     {"Scale 4mA", NULL, 1},
     {"Scale 20mA", NULL, 1},
     {"Hi Pressure", NULL, 1},
-    {"High PBP", NULL, 1}, // Changed from "High BP" to "High PBP"
+    {"High PBP", NULL, 1},
     {"Low Pressure", NULL, 1},
     {"PLPBP", NULL, 1},
     {"SLPBP", NULL, 1},
     {"Rly High", NULL, 1},
     {"Rly Low", NULL, 1},
     {"Rly SLP", NULL, 1},
-    {"Display", NULL, 1},
-    {"Back", NULL, 0}};
-
+    {"Display", NULL, 1}, // Index 12 - THIS SHOULD BE "Display"
+    {"Back", NULL, 0}     // Index 13 - THIS SHOULD BE "Back"
+};
 // Menu template for TEMPERATURE sensor
 const menu_item_t temp_menu_template[] = {
     {"Enable", NULL, 1},
@@ -225,6 +225,20 @@ void rebuild_input_menu(uint8_t input_num)
         input_menu[13].value = value_back;
 
         menu.total_items = 14;
+
+        // DEBUG: Verify total items
+        char buf[30];
+        sprintf(buf, "Total items set to: %d", menu.total_items);
+        uart_println(buf);
+
+        // DEBUG: Check what's actually in the menu
+        uart_println("Menu items after rebuild:");
+        for (uint8_t i = 12; i < 14; i++)
+        {
+            char buf[50];
+            sprintf(buf, "Item %d: %s", i, input_menu[i].label);
+            uart_println(buf);
+        }
     }
     else if (sensor == 1) // Temperature
     {
@@ -290,33 +304,69 @@ void handle_numeric_rotation(int8_t direction)
             menu.sign_negative = !menu.sign_negative;
         break;
 
-    case 1: // Hundreds (0-5)
-        if (direction > 0 && menu.digit_100 < 5)
+    case 1: // Hundreds (0-5) with rollover
+        if (direction > 0)
+        {
             menu.digit_100++;
-        else if (direction < 0 && menu.digit_100 > 0)
-            menu.digit_100--;
+            if (menu.digit_100 > 5)
+                menu.digit_100 = 0; // Roll over to 0
+        }
+        else if (direction < 0)
+        {
+            if (menu.digit_100 == 0)
+                menu.digit_100 = 5; // Roll under to 5
+            else
+                menu.digit_100--;
+        }
+        // REMOVE THE AUTO-RESET - don't force tens/units to 0 here
         break;
 
-    case 2: // Tens (0-9, but limited if hundreds = 5)
+    case 2: // Tens (0-9) with rollover, but limited if hundreds = 5
     {
         uint8_t max_tens = (menu.digit_100 == 5) ? 0 : 9;
-        if (direction > 0 && menu.digit_10 < max_tens)
+        if (direction > 0)
+        {
+            if (max_tens == 0)
+                break; // Can't change if at 500
             menu.digit_10++;
-        else if (direction < 0 && menu.digit_10 > 0)
-            menu.digit_10--;
+            if (menu.digit_10 > max_tens)
+                menu.digit_10 = 0; // Roll over to 0
+        }
+        else if (direction < 0)
+        {
+            if (max_tens == 0)
+                break; // Can't change if at 500
+            if (menu.digit_10 == 0)
+                menu.digit_10 = max_tens; // Roll under to max
+            else
+                menu.digit_10--;
+        }
     }
     break;
 
-    case 3: // Units (0-9, but limited if value would exceed 500)
+    case 3: // Units (0-9) with rollover, but limited if at 50x
     {
-        uint8_t max_units = 9;
+        // If we're at 50x, units must be 0
         if (menu.digit_100 == 5 && menu.digit_10 == 0)
-            max_units = 0; // Already at 500, can't go higher
+        {
+            menu.digit_1 = 0; // Force to 0, no change allowed
+            break;            // Don't allow any change
+        }
 
-        if (direction > 0 && menu.digit_1 < max_units)
+        // Otherwise normal 0-9 with rollover
+        if (direction > 0)
+        {
             menu.digit_1++;
-        else if (direction < 0 && menu.digit_1 > 0)
-            menu.digit_1--;
+            if (menu.digit_1 > 9)
+                menu.digit_1 = 0; // Roll over to 0
+        }
+        else if (direction < 0)
+        {
+            if (menu.digit_1 == 0)
+                menu.digit_1 = 9; // Roll under to 9
+            else
+                menu.digit_1--;
+        }
     }
     break;
     }
@@ -403,7 +453,7 @@ void menu_draw_input(void)
     lcd_print_at(0, 0, title);
 
     // Draw 3 visible items
-    for (uint8_t i = 0; i < 3 && (menu.top_line + i) < 12; i++)
+    for (uint8_t i = 0; i < 3 && (menu.top_line + i) < menu.total_items; i++)
     {
         uint8_t item_idx = menu.top_line + i;
         lcd_clear_line(i + 1);
@@ -411,9 +461,15 @@ void menu_draw_input(void)
         // Left side - label (no brackets)
         lcd_print_at(i + 1, 0, input_menu[item_idx].label);
 
+        // DEBUG: See what's being drawn
+        if (item_idx >= 11)
+        {
+            char buf[50];
+            sprintf(buf, "Drawing idx %d: %s", item_idx, input_menu[item_idx].label);
+            uart_println(buf);
+        }
+
         // Build and display the value (right-justified)
-        char value_buf[15];
-        // Build the value string (WITHOUT brackets/parentheses)
         char value_buf[15];
         uint8_t show_brackets = 0; // 0=none, 1=square brackets, 2=parentheses
 
@@ -661,6 +717,12 @@ void menu_handle_encoder(int16_t delta)
         // Counter-clockwise - move up
         if (menu.current_line > 0)
         {
+
+            // DEBUG: Hit the limit
+            char buf[50];
+            sprintf(buf, "At limit: line=%d, total=%d", menu.current_line, menu.total_items);
+            uart_println(buf);
+
             menu.current_line--;
 
             // Adjust scroll if needed
@@ -681,48 +743,67 @@ void menu_handle_button(uint8_t press_type)
     {
         if (press_type == 1) // Short press - confirm edit
         {
-            // Apply the value based on which item we're editing
-            const item_options_t *opts = get_item_options(menu.current_line);
-            if (opts != NULL)
+            // Check if we're editing Enable or Sensor (option fields)
+            if (menu.current_line == 0 || menu.current_line == 1)
             {
-                uint8_t *edit_flag = (menu.current_line == 0) ? &enable_edit_flag : &sensor_edit_flag;
-
-                // Update the menu item value
-                strcpy(input_menu[menu.current_line].value, opts->options[*edit_flag]);
-
-                // Mark for EEPROM save (deferred)
-                save_pending = 1;
-            }
-
-            menu.in_edit_mode = 0;
-            beep(50); // Confirmation beep
-        }
-        else if (press_type == 2) // Long press - cancel edit
-        {
-            // Restore original value
-            strcpy(input_menu[menu.current_line].value, original_value);
-
-            // Restore the flag to match the original value
-            const item_options_t *opts = get_item_options(menu.current_line);
-            if (opts != NULL)
-            {
-                uint8_t *edit_flag = (menu.current_line == 0) ? &enable_edit_flag : &sensor_edit_flag;
-
-                // Find which option matches the original value
-                for (uint8_t i = 0; i < opts->option_count; i++)
+                // Apply the value based on which item we're editing
+                const item_options_t *opts = get_item_options(menu.current_line);
+                if (opts != NULL)
                 {
-                    if (strcmp(original_value, opts->options[i]) == 0)
-                    {
-                        *edit_flag = i;
-                        break;
-                    }
-                }
-            }
+                    uint8_t *edit_flag = (menu.current_line == 0) ? &enable_edit_flag : &sensor_edit_flag;
 
-            menu.in_edit_mode = 0;
-            beep(100);
-            __delay_ms(50);
-            beep(100); // Double beep for cancel
+                    // Update the menu item value
+                    strcpy(input_menu[menu.current_line].value, opts->options[*edit_flag]);
+
+                    // Mark for EEPROM save (deferred)
+                    save_pending = 1;
+                }
+
+                menu.in_edit_mode = 0;
+                beep(50); // Confirmation beep
+            }
+            else if (menu.current_line == 2 || menu.current_line == 3) // Scale 4mA or Scale 20mA
+            {
+                // Advance to next digit
+                menu.edit_digit++;
+                beep(50); // Confirmation beep
+
+                // ADD THIS: If we just confirmed hundreds=5, reset tens and units
+                if (menu.edit_digit == 2 && menu.digit_100 == 5) // Just moved to tens, hundreds is 5
+                {
+                    menu.digit_10 = 0;
+                    menu.digit_1 = 0;
+                }
+
+                if (menu.edit_digit > 3) // Finished all digits
+                {
+                    // Save the new value
+                    extern input_config_t input_config[3];
+                    int16_t new_value = get_current_numeric_value();
+
+                    // Update the configuration
+                    if (menu.current_line == 2)
+                    {
+                        input_config[current_input].scale_4ma = new_value;
+                        sprintf(input_menu[2].value, "%+04d", new_value);
+                    }
+                    else
+                    {
+                        input_config[current_input].scale_20ma = new_value;
+                        sprintf(input_menu[3].value, "%+04d", new_value);
+                    }
+
+                    // Mark for EEPROM save
+                    save_pending = 1;
+
+                    // Exit edit mode
+                    menu.in_edit_mode = 0;
+
+                    // Force a redraw in main loop instead of calling directly
+                    // This avoids stack issues
+                }
+                // If not done, stay in edit mode for next digit
+            }
         }
     }
     else // Not in edit mode
@@ -757,19 +838,18 @@ void menu_handle_button(uint8_t press_type)
 
                 case 4: // Exit
                     // Save any pending changes to EEPROM before exiting
-
                     if (save_pending)
                     {
                         save_current_config();
                         save_pending = 0;
                     }
-                    // TODO: Return to main screen
+                    current_menu = 255; // ADD THIS LINE - Return to main screen
                     break;
                 }
             }
             else if (current_menu == 1) // INPUT menu
             {
-                if (menu.current_line == 11) // Back option
+                if (menu.current_line == 13) // Back option
                 {
                     beep(50);
                     // Go back to SETUP menu
