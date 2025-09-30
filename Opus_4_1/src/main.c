@@ -15,10 +15,13 @@ extern volatile uint8_t button_event;
 uint8_t save_pending = 0; // Flag for deferred EEPROM saves
 // Debug flag from ISR extern volatile uint8_t timeout_debug_flag;
 extern volatile uint8_t timeout_debug_flag;
+extern uint8_t current_input; // From menu.c
 
 // External function declarations for numeric editing
 extern void handle_numeric_rotation(int8_t direction);
 extern void menu_update_numeric_value(void);
+
+extern volatile uint8_t long_press_beep_flag; // From encoder ISR
 
 // Function prototypes
 void uart_init(void);
@@ -358,52 +361,113 @@ void main(void)
             }
         }
 
-        // Check button events
+        /// Check button events
         if (button_event != last_button)
         {
-            // Check button events
             if (button_event > 0)
-            { // Simplified check
+            {
                 uint8_t current_event = button_event;
-                button_event = 0; // Clear immediately
-
-                // Check if we're on main screen
-                if (current_menu == 255)
-                {
-                    // Main screen - button press enters OPTIONS menu
-                    if (current_event == 1) // Short press  <-- THIS IS WHERE
-                    {
-                        current_menu = 0; // Enter OPTIONS menu
-                        menu.current_line = 0;
-                        menu.top_line = 0;
-                        menu.total_items = 5;
-                        // ... rest of code
-                    }
-                }
+                button_event = 0;
 
                 char buf[30];
                 sprintf(buf, "Button event: %d", current_event);
                 uart_println(buf);
 
-                menu_handle_button(current_event);
+                // ADD: Handle long press FIRST
+                if (current_event == 2) // Long press
+                {
+                    uart_println("Long press detected");
 
-                // Redraw after button action
-                if (current_menu == 0)
-                {
-                    menu_draw_options();
+                    // Check if in edit mode
+                    if (menu.in_edit_mode)
+                    {
+                        // Cancel edit without saving
+                        menu.in_edit_mode = 0;
+                        menu.blink_state = 1;
+                        menu.edit_digit = 0;
+
+                        // Reset flags
+                        extern input_config_t input_config[3];
+                        enable_edit_flag = input_config[current_input].enable;
+                        sensor_edit_flag = input_config[current_input].sensor_type;
+
+                        uart_println("Edit cancelled");
+
+                        // Redraw
+                        if (current_menu == 1)
+                            menu_draw_input();
+                    }
+                    else
+                    {
+                        // Not in edit - navigate back
+                        // Not in edit - navigate back
+                        if (current_menu == 0) // OPTIONS -> Main
+                        {
+                            current_menu = 255; // Just set the menu state
+                            uart_println("Long press - exit to main");
+                        }
+                        else if (current_menu == 1) // INPUT -> SETUP
+                        {
+                            current_menu = 2;
+                            menu.current_line = 0;
+                            menu.top_line = 0;
+                            menu.total_items = 5;
+                            menu_draw_setup();
+                        }
+                        else if (current_menu == 2) // SETUP -> OPTIONS
+                        {
+                            current_menu = 0;
+                            menu.current_line = 0;
+                            menu.top_line = 0;
+                            menu.total_items = 5;
+                            menu_draw_options();
+                        }
+                    }
                 }
-                else if (current_menu == 1)
+                // Check if we're on main screen (for short press)
+                else if (current_menu == 255)
                 {
-                    menu_draw_input();
+                    if (current_event == 1) // Short press
+                    {
+                        current_menu = 0; // Enter OPTIONS menu
+                        menu.current_line = 0;
+                        menu.top_line = 0;
+                        menu.total_items = 5;
+                        menu_draw_options();
+                        beep(50);
+                    }
                 }
-                else if (current_menu == 2)
+                else
                 {
-                    menu_draw_setup();
+                    // In a menu - pass to menu handler
+                    menu_handle_button(current_event);
+
+                    // Redraw after button action
+                    if (current_menu == 0)
+                        menu_draw_options();
+                    else if (current_menu == 1)
+                        menu_draw_input();
+                    else if (current_menu == 2)
+                        menu_draw_setup();
                 }
             }
             last_button = button_event;
             button_event = 0;
         }
+
+        // Check if we just returned to main screen
+        static uint8_t last_menu_state = 0;
+        if (current_menu == 255 && last_menu_state != 255)
+        {
+            // Just entered main screen - redraw it
+            lcd_clear();
+            lcd_set_cursor(0, 0);
+            lcd_print("MAIN SCREEN");
+            lcd_set_cursor(1, 0);
+            lcd_print("Ready");
+            uart_println("Main screen displayed");
+        }
+        last_menu_state = current_menu;
 
         // Decrement encoder activity timer
         if (encoder_activity_timer > 0)
@@ -487,6 +551,13 @@ void main(void)
             }
         }
 
+        // Check for long press beep
+        if (long_press_beep_flag)
+        {
+            long_press_beep_flag = 0;
+            beep(500); // Half second beep as feedback
+            uart_println("Long press threshold reached - beep");
+        }
         // Handle pending EEPROM saves...
 
         // Handle pending EEPROM saves when not in edit mode (MOVED OUTSIDE)

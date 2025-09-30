@@ -18,6 +18,9 @@ volatile uint8_t ms_counter = 0;           // Count milliseconds for 2ms timing
 volatile uint16_t menu_timeout_reload = 0; // Store the reload value (set from main)
 // Debug flag for timeout (defined here, used in main)
 volatile uint8_t timeout_debug_flag = 0;
+
+volatile uint8_t long_press_beep_flag = 0; // Signal main loop to beep
+
 // ISR state variables
 static uint8_t enc_state = 0;
 static int8_t enc_accumulator = 0;
@@ -129,15 +132,11 @@ void __interrupt() isr(void)
                     // Button released - determine press type
                     if (button_hold_ms >= 1800)
                     {
-                        button_event = 3; // Very long
-                    }
-                    else if (button_hold_ms >= 900)
-                    {
-                        button_event = 2; // Long
+                        button_event = 2; // Long press at 1800ms
                     }
                     else if (button_hold_ms >= 50)
                     {
-                        button_event = 1; // Short
+                        button_event = 1; // Short press
                     }
                     else
                     {
@@ -156,6 +155,12 @@ void __interrupt() isr(void)
             if (btn == 0 && button_hold_ms < 65535)
             {
                 button_hold_ms++;
+
+                // Set flag for immediate beep at 1800ms
+                if (button_hold_ms == 1800)
+                {
+                    long_press_beep_flag = 1; // Tell main to beep
+                }
             }
         }
     }

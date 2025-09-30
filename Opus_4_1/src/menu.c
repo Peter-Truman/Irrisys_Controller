@@ -838,13 +838,12 @@ void menu_handle_button(uint8_t press_type)
 
                 case 4: // Exit
                     // Save any pending changes to EEPROM before exiting
-
                     if (save_pending)
                     {
                         save_current_config();
                         save_pending = 0;
                     }
-                    // TODO: Return to main screen
+                    current_menu = 255; // ADD THIS LINE - Return to main screen
                     break;
                 }
             }
