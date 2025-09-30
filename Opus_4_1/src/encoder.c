@@ -11,7 +11,13 @@ volatile int16_t encoder_count = 0;
 volatile uint8_t button_pressed = 0;
 volatile uint16_t button_hold_ms = 0;
 volatile uint8_t button_event = 0;
-
+// Menu timeout management
+volatile uint16_t menu_timeout_timer = 0;  // Countdown timer (in 2ms units)
+volatile uint8_t menu_timeout_flag = 1;    // 1=OK, 0=timeout occurred
+volatile uint8_t ms_counter = 0;           // Count milliseconds for 2ms timing
+volatile uint16_t menu_timeout_reload = 0; // Store the reload value (set from main)
+// Debug flag for timeout (defined here, used in main)
+volatile uint8_t timeout_debug_flag = 0;
 // ISR state variables
 static uint8_t enc_state = 0;
 static int8_t enc_accumulator = 0;
@@ -34,6 +40,29 @@ void __interrupt() isr(void)
         TMR0L = 6;
         INTCONbits.TMR0IF = 0;
 
+        // Menu timeout countdown (every 2ms)
+        ms_counter++;
+        if (ms_counter >= 2)
+        {
+            ms_counter = 0;
+            if (menu_timeout_timer > 0)
+            {
+                menu_timeout_timer--;
+
+                // DEBUG: Show timeout countdown every second (500 * 2ms = 1 second)
+                if (menu_timeout_timer % 500 == 0)
+                {
+                    // Set a debug flag to print in main (can't print from ISR)
+                    timeout_debug_flag = 1;
+                }
+
+                if (menu_timeout_timer == 0)
+                {
+                    menu_timeout_flag = 0; // Signal timeout occurred
+                }
+            }
+        }
+
         // Read encoder state
         uint8_t new_state = ((ENC_A << 1) | ENC_B) & 0x03;
         uint8_t combined = (enc_state << 2) | new_state;
@@ -48,11 +77,25 @@ void __interrupt() isr(void)
             {
                 encoder_count++;
                 enc_accumulator = 0;
+
+                // Reset timeout on encoder movement
+                if (menu_timeout_reload > 0)
+                {
+                    menu_timeout_timer = menu_timeout_reload;
+                    menu_timeout_flag = 1;
+                }
             }
             else if (enc_accumulator <= -4)
             {
                 encoder_count--;
                 enc_accumulator = 0;
+
+                // Reset timeout on encoder movement
+                if (menu_timeout_reload > 0)
+                {
+                    menu_timeout_timer = menu_timeout_reload;
+                    menu_timeout_flag = 1;
+                }
             }
         }
 
@@ -73,6 +116,13 @@ void __interrupt() isr(void)
                     // Button pressed - start timing
                     button_hold_ms = 0;
                     button_event = 0; // Clear any previous events
+
+                    // Reset timeout on button press
+                    if (menu_timeout_reload > 0)
+                    {
+                        menu_timeout_timer = menu_timeout_reload;
+                        menu_timeout_flag = 1;
+                    }
                 }
                 else
                 {
@@ -130,4 +180,12 @@ void encoder_init(void)
 
     // Initialize encoder state
     enc_state = ((ENC_A << 1) | ENC_B) & 0x03;
+}
+
+// Function to reset timeout (callable from ISR)
+void reset_menu_timeout(void)
+{
+    // Use a local constant or make timeout_seconds atomic
+    menu_timeout_timer = 30 * 500; // Default 30 seconds * 500 = 2ms units
+    menu_timeout_flag = 1;
 }

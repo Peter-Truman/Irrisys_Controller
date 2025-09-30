@@ -13,6 +13,8 @@
 extern volatile uint16_t button_hold_ms;
 extern volatile uint8_t button_event;
 uint8_t save_pending = 0; // Flag for deferred EEPROM saves
+// Debug flag from ISR extern volatile uint8_t timeout_debug_flag;
+extern volatile uint8_t timeout_debug_flag;
 
 // External function declarations for numeric editing
 extern void handle_numeric_rotation(int8_t direction);
@@ -183,13 +185,21 @@ void lcd_set_cursor(uint8_t row, uint8_t col)
 
 void lcd_init(void)
 {
-    TRISA &= 0x30;
-    LATA = 0;
+    // Set TRIS exactly as Positron does
+    TRISA = 0x10; // %00010000
+    TRISB = 0x46; // %01000110
+    TRISC = 0x00; // %00000000
+
+    // Clear all ports
+    PORTA = 0;
+    PORTB = 0;
+    PORTC = 0;
 
     __delay_ms(50);
 
     LCD_RS = 0;
 
+    // Force 8-bit mode three times
     lcd_write_nibble(0x03);
     __delay_ms(5);
     lcd_write_nibble(0x03);
@@ -197,14 +207,17 @@ void lcd_init(void)
     lcd_write_nibble(0x03);
     __delay_us(150);
 
+    // Switch to 4-bit
     lcd_write_nibble(0x02);
     __delay_us(150);
 
+    // Function set: 4-bit, 2 lines, 5x8
     lcd_cmd(0x28);
-    lcd_cmd(0x0C);
-    lcd_cmd(0x01);
+    lcd_cmd(0x08); // Display OFF - THIS IS KEY
+    lcd_cmd(0x01); // Clear
     __delay_ms(2);
-    lcd_cmd(0x06);
+    lcd_cmd(0x06); // Entry mode
+    lcd_cmd(0x0C); // Display ON, cursor off
 }
 
 // Buzzer function
@@ -224,6 +237,16 @@ void main(void)
     // Initialize hardware
     system_init();
     eeprom_init(); // Load config from EEPROM
+
+    // Set the menu timeout reload value
+    extern volatile uint16_t menu_timeout_reload;
+
+    // For now, use a fixed 30-second timeout
+    // We'll fix the EEPROM linkage later
+    menu_timeout_reload = 15000; // 30 seconds * 500 = 15000
+
+    // Don't try to access menu_timeout_seconds - it causes crashes
+
     uart_init();
     encoder_init();
     menu_init();
@@ -344,6 +367,20 @@ void main(void)
                 uint8_t current_event = button_event;
                 button_event = 0; // Clear immediately
 
+                // Check if we're on main screen
+                if (current_menu == 255)
+                {
+                    // Main screen - button press enters OPTIONS menu
+                    if (current_event == 1) // Short press  <-- THIS IS WHERE
+                    {
+                        current_menu = 0; // Enter OPTIONS menu
+                        menu.current_line = 0;
+                        menu.top_line = 0;
+                        menu.total_items = 5;
+                        // ... rest of code
+                    }
+                }
+
                 char buf[30];
                 sprintf(buf, "Button event: %d", current_event);
                 uart_println(buf);
@@ -409,6 +446,48 @@ void main(void)
                 menu.blink_state = 1; // Always on when not editing
             }
         }
+
+        // Check timeout debug flag from ISR
+        if (timeout_debug_flag)
+        {
+            // ... your existing debug code ...
+        }
+
+        // ADD THIS: Actually handle the timeout!
+        extern volatile uint8_t menu_timeout_flag;
+        extern volatile uint16_t menu_timeout_timer;
+
+        if (current_menu < 3) // In a menu (0=OPTIONS, 1=INPUT, 2=SETUP)
+        {
+            if (menu_timeout_flag == 0) // Timeout occurred
+            {
+                uart_println("TIMEOUT - Exiting to main screen");
+
+                // Double beep
+                beep(100);
+                __delay_ms(50);
+                beep(100);
+
+                // Exit to main screen
+                current_menu = 255;
+                menu.in_edit_mode = 0;
+                menu.current_line = 0;
+                menu.top_line = 0;
+
+                // Clear display
+                lcd_clear();
+                lcd_set_cursor(0, 0);
+                lcd_print("MAIN SCREEN");
+                lcd_set_cursor(1, 0);
+                lcd_print("Timeout");
+
+                // Reset the flag and timer
+                menu_timeout_flag = 1;
+                menu_timeout_timer = 0;
+            }
+        }
+
+        // Handle pending EEPROM saves...
 
         // Handle pending EEPROM saves when not in edit mode (MOVED OUTSIDE)
         // if (save_pending && !menu.in_edit_mode)
