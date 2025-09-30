@@ -2,6 +2,7 @@
  * IRRISYS - Menu System with EEPROM Integration
  * Working stable version with 32MHz operation
  */
+// Moved to new chat 1430
 
 #include "../include/config.h"
 #include "../include/encoder.h"
