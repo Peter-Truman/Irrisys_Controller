@@ -18,6 +18,7 @@ typedef struct
     uint8_t digit_10;       // Tens digit (0-9)
     uint8_t digit_1;        // Units digit (0-9)
     int16_t original_value; // Store original value for cancel
+    uint8_t edit_unsigned;   // 1=unsigned (no sign), 0=signed
 } menu_state_t;
 
 // Menu item structure

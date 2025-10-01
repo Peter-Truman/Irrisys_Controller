@@ -321,7 +321,7 @@ void main(void)
 
             // Check if we're editing a numeric field
             if (menu.in_edit_mode && current_menu == 1 &&
-                (menu.current_line == 2 || menu.current_line == 3))
+                (menu.current_line == 2 || menu.current_line == 3 || menu.current_line == 4 || menu.current_line == 6))
             {
                 // Handle numeric rotation for Scale 4mA or Scale 20mA
                 handle_numeric_rotation(delta);
@@ -335,7 +335,7 @@ void main(void)
             if (menu.in_edit_mode && current_menu == 1)
             {
                 // Check what type of field we're editing
-                if (menu.current_line == 2 || menu.current_line == 3)
+                if (menu.current_line == 2 || menu.current_line == 3 || menu.current_line == 4 || menu.current_line == 6)
                 {
                     // Fast update for numeric value
                     menu_update_numeric_value();
@@ -495,7 +495,7 @@ void main(void)
                     if (current_menu == 1)
                     {
                         // Check what type of field we're editing
-                        if (menu.current_line == 2 || menu.current_line == 3)
+                        if (menu.current_line == 2 || menu.current_line == 3 || menu.current_line == 4 || menu.current_line == 6)
                         {
                             // Fast update for numeric value
                             menu_update_numeric_value();

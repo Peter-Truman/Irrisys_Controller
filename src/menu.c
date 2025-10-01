@@ -271,18 +271,27 @@ void rebuild_input_menu(uint8_t input_num)
 // Initialize numeric editor for Scale values
 void init_numeric_editor(int16_t value)
 {
-    // Store original for cancel
+    // Set flag for unsigned fields (Hi Pressure, Low Pressure)
+    menu.edit_unsigned = (menu.current_line == 4 || menu.current_line == 6) ? 1 : 0;
+
+    // Store original value
     menu.original_value = value;
 
-    // Break down into components
-    menu.sign_negative = (value < 0) ? 1 : 0;
-    uint16_t abs_value = abs(value);
-    menu.digit_100 = abs_value / 100;
-    menu.digit_10 = (abs_value / 10) % 10;
-    menu.digit_1 = abs_value % 10;
+    // For unsigned, ensure positive
+    if (menu.edit_unsigned && value < 0)
+        value = 0;
 
-    // Start editing at sign
-    menu.edit_digit = 0;
+    // Extract sign (always + for unsigned)
+    menu.sign_negative = (menu.edit_unsigned) ? 0 : (value < 0 ? 1 : 0);
+
+    // Extract digits from absolute value
+    uint16_t abs_val = (value < 0) ? -value : value;
+    menu.digit_100 = (abs_val / 100) % 10;
+    menu.digit_10 = (abs_val / 10) % 10;
+    menu.digit_1 = abs_val % 10;
+
+    // Start position
+    menu.edit_digit = menu.edit_unsigned ? 1 : 0; // Skip sign for unsigned
 }
 
 // Get current numeric value being edited
@@ -296,12 +305,27 @@ int16_t get_current_numeric_value(void)
 
 // Handle rotation for numeric editing
 void handle_numeric_rotation(int8_t direction)
-{
+{                                                   // <-- Opening brace must be HERE, right after the function signature
+    uart_println("handle_numeric_rotation called"); // Debug line INSIDE the function
+
+    // Add debug info
+    char buf[50];
+    sprintf(buf, "edit_digit: %d, unsigned: %d", menu.edit_digit, menu.edit_unsigned);
+    uart_println(buf);
+
+    // Skip sign position for unsigned fields
+    if (menu.edit_unsigned && menu.edit_digit == 0)
+    {
+        menu.edit_digit = 1; // Jump to hundreds
+    }
+
     switch (menu.edit_digit)
     {
-    case 0:                 // Sign
-        if (direction != 0) // Any rotation toggles sign
+    case 0: // Sign (only for signed fields)
+        if (!menu.edit_unsigned && direction != 0)
+        {
             menu.sign_negative = !menu.sign_negative;
+        }
         break;
 
     case 1: // Hundreds (0-5) with rollover
@@ -375,7 +399,6 @@ void handle_numeric_rotation(int8_t direction)
 // Update only the numeric value during editing - FAST UPDATE
 void menu_update_numeric_value(void)
 {
-
     // DEBUG: Check if this function is being called
     extern void uart_println(const char *str);
     uart_println("menu_update_numeric_value called");
@@ -392,26 +415,44 @@ void menu_update_numeric_value(void)
     // Get the item being edited
     uint8_t item_idx = menu.current_line;
 
-    // Only handle Scale 4mA and Scale 20mA
-    if (item_idx != 2 && item_idx != 3)
+    // Handle Scale 4mA, Scale 20mA, Hi Pressure, Low Pressure
+    if (item_idx != 2 && item_idx != 3 && item_idx != 4 && item_idx != 6)
         return;
 
     // Build the complete value string
-    char value_buf[5] = {0}; // +000 plus null terminator
+    char value_buf[6] = {0}; // Maximum size needed
 
-    // Build each character based on edit position and blink state
-    value_buf[0] = (menu.edit_digit == 0 && !menu.blink_state) ? ' ' : (menu.sign_negative ? '-' : '+');
-    value_buf[1] = (menu.edit_digit == 1 && !menu.blink_state) ? ' ' : ('0' + menu.digit_100);
-    value_buf[2] = (menu.edit_digit == 2 && !menu.blink_state) ? ' ' : ('0' + menu.digit_10);
-    value_buf[3] = (menu.edit_digit == 3 && !menu.blink_state) ? ' ' : ('0' + menu.digit_1);
-    value_buf[4] = '\0';
+    if (menu.edit_unsigned)
+    {
+        // Add debug
+        char debug[50];
+        sprintf(debug, "edit_digit=%d, blink=%d", menu.edit_digit, menu.blink_state);
+        uart_println(debug);
+
+        // Unsigned: just 3 digits, no sign
+        value_buf[0] = (menu.edit_digit == 1 && !menu.blink_state) ? ' ' : ('0' + menu.digit_100);
+        value_buf[1] = (menu.edit_digit == 2 && !menu.blink_state) ? ' ' : ('0' + menu.digit_10);
+        value_buf[2] = (menu.edit_digit == 3 && !menu.blink_state) ? ' ' : ('0' + menu.digit_1);
+        value_buf[3] = '\0';
+    }
+    else
+    {
+        // Signed: +/- then 3 digits
+        value_buf[0] = (menu.edit_digit == 0 && !menu.blink_state) ? ' ' : (menu.sign_negative ? '-' : '+');
+        value_buf[1] = (menu.edit_digit == 1 && !menu.blink_state) ? ' ' : ('0' + menu.digit_100);
+        value_buf[2] = (menu.edit_digit == 2 && !menu.blink_state) ? ' ' : ('0' + menu.digit_10);
+        value_buf[3] = (menu.edit_digit == 3 && !menu.blink_state) ? ' ' : ('0' + menu.digit_1);
+        value_buf[4] = '\0';
+    }
 
     // Clear value area and redraw
-    lcd_set_cursor(screen_line + 1, 14);
+    uint8_t start_col = menu.edit_unsigned ? 15 : 14;
+
+    lcd_set_cursor(screen_line + 1, start_col);
     lcd_print("      "); // Clear 6 positions
 
     // Position and print with parentheses
-    lcd_set_cursor(screen_line + 1, 14);
+    lcd_set_cursor(screen_line + 1, start_col);
     lcd_print("(");
     lcd_print(value_buf);
     lcd_print(")");
@@ -762,7 +803,7 @@ void menu_handle_button(uint8_t press_type)
                 menu.in_edit_mode = 0;
                 beep(50); // Confirmation beep
             }
-            else if (menu.current_line == 2 || menu.current_line == 3) // Scale 4mA or Scale 20mA
+            if (menu.current_line == 2 || menu.current_line == 3 || menu.current_line == 4 || menu.current_line == 6)
             {
                 // Advance to next digit
                 menu.edit_digit++;
@@ -787,10 +828,20 @@ void menu_handle_button(uint8_t press_type)
                         input_config[current_input].scale_4ma = new_value;
                         sprintf(input_menu[2].value, "%+04d", new_value);
                     }
-                    else
+                    else if (menu.current_line == 3)
                     {
                         input_config[current_input].scale_20ma = new_value;
                         sprintf(input_menu[3].value, "%+04d", new_value);
+                    }
+                    else if (menu.current_line == 4)
+                    {
+                        input_config[current_input].high_setpoint = (uint16_t)new_value;
+                        sprintf(input_menu[4].value, "%03d", new_value); // Pad to 3 digits with leading zeros
+                    }
+                    else if (menu.current_line == 6)
+                    {
+                        // TODO: Save to low_pressure_setpoint when added to structure
+                        sprintf(input_menu[6].value, "%03d", new_value); // Pad to 3 digits with leading zeros
                     }
 
                     // Mark for EEPROM save
@@ -862,11 +913,21 @@ void menu_handle_button(uint8_t press_type)
                 else if (input_menu[menu.current_line].editable)
                 {
                     // Check if it's a numeric field
-                    if (menu.current_line == 2 || menu.current_line == 3) // Scale 4mA or Scale 20mA
+                    if (menu.current_line == 2 || menu.current_line == 3 || menu.current_line == 4 || menu.current_line == 6)
                     {
                         // Initialize numeric editor
                         extern input_config_t input_config[3];
-                        int16_t current_val = (menu.current_line == 2) ? input_config[current_input].scale_4ma : input_config[current_input].scale_20ma;
+                        int16_t current_val;
+
+                        if (menu.current_line == 2)
+                            current_val = input_config[current_input].scale_4ma;
+                        else if (menu.current_line == 3)
+                            current_val = input_config[current_input].scale_20ma;
+                        else if (menu.current_line == 4)
+                            current_val = (int16_t)input_config[current_input].high_setpoint;
+                        else if (menu.current_line == 6)
+                            current_val = 50; // TODO: Add low_pressure_setpoint to structure
+                                              // current_val = (int16_t)input_config[current_input].low_pressure_setpoint;
 
                         init_numeric_editor(current_val);
                         menu.in_edit_mode = 1;
