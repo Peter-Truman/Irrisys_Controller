@@ -188,15 +188,14 @@ void rebuild_input_menu(uint8_t input_num)
         strcpy(value_sensor, "Pressure");
         sprintf(value_scale4, "%+04d", input_config[input_num].scale_4ma);
         sprintf(value_scale20, "%+04d", input_config[input_num].scale_20ma);
-        sprintf(value_hi_pressure, "%d", input_config[input_num].high_setpoint);
+        sprintf(value_hi_pressure, "%03d", input_config[input_num].high_setpoint);
         sprintf(value_highbp, "%02d:%02d", input_config[input_num].high_bypass_time / 60,
                 input_config[input_num].high_bypass_time % 60);
-        sprintf(value_low_pressure, "%d", input_config[input_num].temp_low); // Using temp_low for low pressure
+        sprintf(value_low_pressure, "%03d", 50);
         sprintf(value_plpbp, "%02d:%02d", input_config[input_num].plp_bypass_time / 60,
                 input_config[input_num].plp_bypass_time % 60);
         sprintf(value_slpbp, "%02d:%02d", input_config[input_num].slp_bypass_time / 60,
                 input_config[input_num].slp_bypass_time % 60);
-        // Set relay mode strings
         strcpy(value_rlyhigh, input_config[input_num].relay_high_mode == 0 ? "Latch" : input_config[input_num].relay_high_mode == 1 ? "Pulse"
                                                                                                                                     : "Not Used");
         strcpy(value_rlyplp, input_config[input_num].relay_plp_mode == 0 ? "Latch" : input_config[input_num].relay_plp_mode == 1 ? "Pulse"
@@ -208,7 +207,7 @@ void rebuild_input_menu(uint8_t input_num)
         // Copy template
         memcpy(input_menu, pressure_menu_template, sizeof(pressure_menu_template));
 
-        // Assign value pointers
+        // Assign value pointers for pressure
         input_menu[0].value = value_enable;
         input_menu[1].value = value_sensor;
         input_menu[2].value = value_scale4;
@@ -225,20 +224,6 @@ void rebuild_input_menu(uint8_t input_num)
         input_menu[13].value = value_back;
 
         menu.total_items = 14;
-
-        // DEBUG: Verify total items
-        char buf[30];
-        sprintf(buf, "Total items set to: %d", menu.total_items);
-        uart_println(buf);
-
-        // DEBUG: Check what's actually in the menu
-        uart_println("Menu items after rebuild:");
-        for (uint8_t i = 12; i < 14; i++)
-        {
-            char buf[50];
-            sprintf(buf, "Item %d: %s", i, input_menu[i].label);
-            uart_println(buf);
-        }
     }
     else if (sensor == 1) // Temperature
     {
@@ -252,7 +237,7 @@ void rebuild_input_menu(uint8_t input_num)
         // Copy template
         memcpy(input_menu, temp_menu_template, sizeof(temp_menu_template));
 
-        // Assign value pointers
+        // Assign value pointers for temperature
         input_menu[0].value = value_enable;
         input_menu[1].value = value_sensor;
         input_menu[2].value = value_scale4;
@@ -266,8 +251,21 @@ void rebuild_input_menu(uint8_t input_num)
         menu.total_items = 9;
     }
     // Flow sensor handling will be added later
-}
 
+    // DEBUG: Verify total items
+    char buf[30];
+    sprintf(buf, "Total items set to: %d", menu.total_items);
+    uart_println(buf);
+
+    // DEBUG: Check what's actually in the menu
+    uart_println("Menu items after rebuild:");
+    for (uint8_t i = 12; i < 14; i++)
+    {
+        char buf[50];
+        sprintf(buf, "Item %d: %s", i, input_menu[i].label);
+        uart_println(buf);
+    }
+} // End of rebuild_input_menu function
 // Initialize numeric editor for Scale values
 void init_numeric_editor(int16_t value)
 {
