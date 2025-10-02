@@ -16,8 +16,11 @@ extern volatile uint8_t button_event;
 // Function declarations for numeric editing
 extern void handle_numeric_rotation(int8_t direction);
 extern void menu_update_numeric_value(void);
+extern void handle_time_rotation(int8_t direction); // ADD THIS
+extern void menu_update_time_value(void);           // ADD THIS
 
-uint8_t save_pending = 0; // Flag for deferred EEPROM saves
+extern uint8_t is_time_field(uint8_t line); // ADD THIS
+uint8_t save_pending = 0;                   // Flag for deferred EEPROM saves
 // Debug flag from ISR extern volatile uint8_t timeout_debug_flag;
 extern volatile uint8_t timeout_debug_flag;
 extern uint8_t current_input; // From menu.c
@@ -319,26 +322,45 @@ void main(void)
                 menu.blink_state = 1;
             }
 
-            // Check if we're editing a numeric field
-            if (menu.in_edit_mode && current_menu == 1 &&
-                (menu.current_line == 2 || menu.current_line == 3 || menu.current_line == 4 || menu.current_line == 6))
+            // Check if we're editing a field
+            if (menu.in_edit_mode && current_menu == 1)
             {
-                // Handle numeric rotation for Scale 4mA or Scale 20mA
-                handle_numeric_rotation(delta);
+                if (is_numeric_field(menu.current_line))
+                {
+                    // Handle numeric rotation
+                    handle_numeric_rotation(delta);
+                }
+                else if (is_time_field(menu.current_line))
+                {
+                    // Handle time rotation
+                    handle_time_rotation(delta);
+                    menu_update_time_value(); // ADD THIS - force immediate update
+                }
+                else
+                {
+                    // Handle other editable fields (Enable, Sensor, etc)
+                    menu_handle_encoder(delta);
+                }
             }
             else
             {
-                // Use existing encoder handler for everything else
+                // Use existing encoder handler for menu navigation
                 menu_handle_encoder(delta);
             }
 
+            // Redraw current menu - optimized for edit mode
             if (menu.in_edit_mode && current_menu == 1)
             {
                 // Check what type of field we're editing
-                if (menu.current_line == 2 || menu.current_line == 3 || menu.current_line == 4 || menu.current_line == 6)
+                if (is_numeric_field(menu.current_line))
                 {
                     // Fast update for numeric value
                     menu_update_numeric_value();
+                }
+                else if (is_time_field(menu.current_line))
+                {
+                    // Fast update for time value
+                    menu_update_time_value();
                 }
                 else
                 {
@@ -495,10 +517,15 @@ void main(void)
                     if (current_menu == 1)
                     {
                         // Check what type of field we're editing
-                        if (menu.current_line == 2 || menu.current_line == 3 || menu.current_line == 4 || menu.current_line == 6)
+                        if (is_numeric_field(menu.current_line))
                         {
                             // Fast update for numeric value
                             menu_update_numeric_value();
+                        }
+                        else if (is_time_field(menu.current_line)) // ADD THIS
+                        {
+                            // Fast update for time value
+                            menu_update_time_value();
                         }
                         else
                         {

@@ -132,6 +132,194 @@ extern void lcd_print(const char *str);
 extern void beep(uint16_t duration_ms);
 extern void save_current_config(void);
 extern void uart_println(const char *str);
+void handle_time_rotation(int8_t direction);
+
+// Helper function to identify numeric fields
+uint8_t is_numeric_field(uint8_t line)
+{
+    return (line == 2 || line == 3 || line == 4 || line == 6);
+}
+
+// Helper function to identify time fields
+uint8_t is_time_field(uint8_t line)
+{
+    // High BP, PLPBP, SLPBP (lines 5, 7, 8 in pressure menu)
+    // High TBP (line 5 in temp menu)
+    return (line == 5 || line == 7 || line == 8);
+}
+
+// Initialize time editor for HH:MM or MM:SS editing
+// Initialize time editor for HH:MM or MM:SS editing
+void init_time_editor(uint16_t value_seconds, uint8_t mode)
+{
+    // Mode: 0=MM:SS, 1=HH:MM, 2=HH:MM with 24hr limit
+    menu.edit_time_mode = mode;
+    menu.time_original = value_seconds;
+
+    // Convert seconds to XX:YY based on mode
+    if (mode == 0) // MM:SS
+    {
+        menu.time_xx = value_seconds / 60; // Minutes (0-99)
+        menu.time_yy = value_seconds % 60; // Seconds (0-59)
+    }
+    else // HH:MM
+    {
+        menu.time_xx = value_seconds / 3600;        // Hours (0-99 or 0-23)
+        menu.time_yy = (value_seconds % 3600) / 60; // Minutes (0-59) - FIX THIS LINE
+    }
+
+    // Start editing at first digit (tens of XX)
+    menu.time_edit_digit = 0;
+
+    // DEBUG: Print conversion results
+    char buf[60];
+    sprintf(buf, "Time init: secs=%d -> XX=%d, YY=%d",
+            value_seconds, menu.time_xx, menu.time_yy);
+    uart_println(buf);
+}
+
+// Handle rotation for time editing - correct version
+void handle_time_rotation(int8_t direction)
+{
+    uart_println("handle_time_rotation called!"); // ADD THIS
+
+    char buf[50];
+    sprintf(buf, "Rotate start: XX=%d, YY=%d, dir=%d, digit=%d",
+            menu.time_xx, menu.time_yy, direction, menu.time_edit_digit);
+    uart_println(buf);
+
+    if (menu.time_edit_digit == 0) // Editing XX field
+    {
+        if (direction > 0)
+        {
+            menu.time_xx++;
+            if (menu.edit_time_mode == 2 && menu.time_xx > 23) // 24hr limit
+                menu.time_xx = 0;
+            else if (menu.time_xx > 99)
+                menu.time_xx = 0;
+        }
+        else
+        {
+            if (menu.time_xx == 0)
+            {
+                menu.time_xx = (menu.edit_time_mode == 2) ? 23 : 99;
+            }
+            else
+            {
+                menu.time_xx--;
+            }
+        }
+    }
+    else if (menu.time_edit_digit == 1) // Editing YY field
+    {
+        if (direction > 0)
+        {
+            menu.time_yy++;
+            if (menu.time_yy > 59)
+                menu.time_yy = 0;
+        }
+        else
+        {
+            if (menu.time_yy == 0)
+                menu.time_yy = 59;
+            else
+                menu.time_yy--;
+        }
+    }
+
+    sprintf(buf, "Rotate end: XX=%d, YY=%d", menu.time_xx, menu.time_yy); // ADD THIS
+    uart_println(buf);
+}
+
+// Update time value display during editing
+void menu_update_time_value(void)
+{
+    // Only update if in INPUT menu and edit mode
+    if (current_menu != 1 || !menu.in_edit_mode)
+        return;
+
+    // Find which line on screen
+    uint8_t screen_line = menu.current_line - menu.top_line;
+    if (screen_line >= 3)
+        return; // Not visible
+
+    // Get the item being edited
+    uint8_t item_idx = menu.current_line;
+
+    // Only handle time fields
+    if (!is_time_field(item_idx))
+        return;
+
+    // Build display string XX:YY with field flashing
+    char value_buf[6];
+
+    // DEBUG: Show what we're building
+    char debug_before[50];
+    sprintf(debug_before, "Building display: digit=%d, blink=%d, XX=%d, YY=%d",
+            menu.time_edit_digit, menu.blink_state, menu.time_xx, menu.time_yy);
+    uart_println(debug_before);
+
+    // Edit position 0: flash both XX digits together
+    if (menu.time_edit_digit == 0 && !menu.blink_state)
+    {
+        value_buf[0] = ' ';
+        value_buf[1] = ' ';
+    }
+    else
+    {
+        value_buf[0] = '0' + menu.time_xx / 10;
+        value_buf[1] = '0' + menu.time_xx % 10;
+    }
+
+    // Colon always visible
+    value_buf[2] = ':';
+
+    // Edit position 1: flash both YY digits together
+    if (menu.time_edit_digit == 1 && !menu.blink_state)
+    {
+        value_buf[3] = ' ';
+        value_buf[4] = ' ';
+    }
+    else
+    {
+        value_buf[3] = '0' + menu.time_yy / 10;
+        value_buf[4] = '0' + menu.time_yy % 10;
+    }
+
+    value_buf[5] = '\0';
+
+    // DEBUG: Show final string
+    char debug_after[50];
+    sprintf(debug_after, "Final display string: (%s)", value_buf);
+    uart_println(debug_after);
+
+    // DEBUG: Show what we're displaying
+    char debug[50];
+    if (!menu.blink_state && menu.time_edit_digit == 0)
+    {
+        sprintf(debug, "LCD: (  :%02d) [XX blanked]", menu.time_yy);
+    }
+    else if (!menu.blink_state && menu.time_edit_digit == 1)
+    {
+        sprintf(debug, "LCD: (%02d:  ) [YY blanked]", menu.time_xx);
+    }
+    else
+    {
+        sprintf(debug, "LCD: (%02d:%02d) [solid]", menu.time_xx, menu.time_yy);
+    }
+    uart_println(debug);
+
+    // Display at correct position
+    uint8_t start_col = 13; // Adjust as needed for your display
+
+    lcd_set_cursor(screen_line + 1, start_col);
+    lcd_print("       "); // Clear area
+
+    lcd_set_cursor(screen_line + 1, start_col);
+    lcd_print("(");
+    lcd_print(value_buf);
+    lcd_print(")");
+}
 
 // LCD helper - print at specific position
 void lcd_print_at(uint8_t row, uint8_t col, const char *str)
@@ -414,7 +602,7 @@ void menu_update_numeric_value(void)
     uint8_t item_idx = menu.current_line;
 
     // Handle Scale 4mA, Scale 20mA, Hi Pressure, Low Pressure
-    if (item_idx != 2 && item_idx != 3 && item_idx != 4 && item_idx != 6)
+    if (!is_numeric_field(item_idx))
         return;
 
     // Build the complete value string
@@ -586,7 +774,7 @@ void menu_draw_input(void)
         if (val_len > 0 && strcmp(input_menu[item_idx].value, "") != 0)
         {
             // Skip drawing if we're editing a numeric field - let menu_update_numeric_value handle it
-            if (menu.in_edit_mode && (item_idx == 2 || item_idx == 3) && (item_idx == menu.current_line))
+            if (menu.in_edit_mode && is_numeric_field(item_idx) && (item_idx == menu.current_line))
             {
                 // Don't draw anything here for numeric fields in edit mode
                 uart_println("Skipping numeric draw in menu_draw_input");
@@ -801,7 +989,50 @@ void menu_handle_button(uint8_t press_type)
                 menu.in_edit_mode = 0;
                 beep(50); // Confirmation beep
             }
-            if (menu.current_line == 2 || menu.current_line == 3 || menu.current_line == 4 || menu.current_line == 6)
+            else if (is_time_field(menu.current_line)) // Time fields
+            {
+                // Advance to next field or save
+                menu.time_edit_digit++;
+                menu.blink_state = 1; // ADD THIS - force solid display when switching fields
+                beep(50);
+
+                // Debug
+                char buf[50];
+                sprintf(buf, "Time button: digit now=%d", menu.time_edit_digit);
+                uart_println(buf);
+
+                // Force immediate display update
+                menu_update_time_value(); // ADD THIS - update display right away
+
+                if (menu.time_edit_digit > 1) // Done editing (only 0 and 1 positions)
+                {
+                    // Calculate total seconds
+                    uint16_t new_seconds;
+                    if (menu.edit_time_mode == 0) // MM:SS
+                        new_seconds = menu.time_xx * 60 + menu.time_yy;
+                    else // HH:MM
+                        new_seconds = menu.time_xx * 3600 + menu.time_yy * 60;
+
+                    // Save to appropriate field
+                    if (menu.current_line == 5)
+                        input_config[current_input].high_bypass_time = new_seconds;
+                    else if (menu.current_line == 7)
+                        input_config[current_input].plp_bypass_time = new_seconds;
+                    else if (menu.current_line == 8)
+                        input_config[current_input].slp_bypass_time = new_seconds;
+
+                    // Update display string
+                    sprintf(input_menu[menu.current_line].value, "%02d:%02d",
+                            menu.time_xx, menu.time_yy);
+
+                    // Exit edit mode
+                    menu.in_edit_mode = 0;
+                    save_pending = 1;
+
+                    uart_println("Time edit complete - saved");
+                }
+            }
+            else if (is_numeric_field(menu.current_line)) // Numeric fields
             {
                 // Advance to next digit
                 menu.edit_digit++;
@@ -834,12 +1065,12 @@ void menu_handle_button(uint8_t press_type)
                     else if (menu.current_line == 4)
                     {
                         input_config[current_input].high_setpoint = (uint16_t)new_value;
-                        sprintf(input_menu[4].value, "%03d", new_value); // Pad to 3 digits with leading zeros
+                        sprintf(input_menu[4].value, "%03d", new_value);
                     }
                     else if (menu.current_line == 6)
                     {
                         // TODO: Save to low_pressure_setpoint when added to structure
-                        sprintf(input_menu[6].value, "%03d", new_value); // Pad to 3 digits with leading zeros
+                        sprintf(input_menu[6].value, "%03d", new_value);
                     }
 
                     // Mark for EEPROM save
@@ -847,11 +1078,7 @@ void menu_handle_button(uint8_t press_type)
 
                     // Exit edit mode
                     menu.in_edit_mode = 0;
-
-                    // Force a redraw in main loop instead of calling directly
-                    // This avoids stack issues
                 }
-                // If not done, stay in edit mode for next digit
             }
         }
     }
@@ -911,7 +1138,7 @@ void menu_handle_button(uint8_t press_type)
                 else if (input_menu[menu.current_line].editable)
                 {
                     // Check if it's a numeric field
-                    if (menu.current_line == 2 || menu.current_line == 3 || menu.current_line == 4 || menu.current_line == 6)
+                    if (is_numeric_field(menu.current_line))
                     {
                         // Initialize numeric editor
                         extern input_config_t input_config[3];
@@ -925,14 +1152,37 @@ void menu_handle_button(uint8_t press_type)
                             current_val = (int16_t)input_config[current_input].high_setpoint;
                         else if (menu.current_line == 6)
                             current_val = 50; // TODO: Add low_pressure_setpoint to structure
-                                              // current_val = (int16_t)input_config[current_input].low_pressure_setpoint;
 
                         init_numeric_editor(current_val);
                         menu.in_edit_mode = 1;
                         menu.blink_state = 1; // Start with value visible
                         beep(50);
                     }
-                    else // Enable or Sensor - existing code
+                    else if (is_time_field(menu.current_line)) // Time field handling
+                    {
+                        // Initialize time editor
+                        extern input_config_t input_config[3];
+                        uint16_t current_val = 0;
+
+                        // Get the current value in seconds based on which field
+                        if (menu.current_line == 5) // High BP or High TBP
+                            current_val = input_config[current_input].high_bypass_time;
+                        else if (menu.current_line == 7) // PLPBP
+                            current_val = input_config[current_input].plp_bypass_time;
+                        else if (menu.current_line == 8) // SLPBP
+                            current_val = input_config[current_input].slp_bypass_time;
+
+                        // DEBUG: Print what we're sending to init
+                        char buf[50];
+                        sprintf(buf, "Init time editor: seconds=%d, line=%d", current_val, menu.current_line);
+                        uart_println(buf);
+
+                        init_time_editor(current_val, 0); // Mode 0 for MM:SS
+                        menu.in_edit_mode = 1;
+                        menu.blink_state = 1;
+                        beep(50);
+                    }
+                    else // Enable or Sensor - option field handling
                     {
                         // Store original value for potential cancellation
                         strcpy(original_value, input_menu[menu.current_line].value);

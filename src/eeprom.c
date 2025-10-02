@@ -19,7 +19,7 @@ const input_config_t factory_defaults[3] = {
      0,
      {0, 0, 0, 0, 0}, // 4mA=4, 20mA=20 (signed)
      150,
-     300,
+     2,
      30,
      5,
      0,
@@ -78,7 +78,7 @@ const input_config_t factory_defaults[3] = {
 
 // System defaults
 const system_config_t system_defaults = {
-    1, 30, 0, 0, 1, {0, 0, 0, 0, 0, 0, 0, 0, 0}, // clock enabled, 30s timeout, pulse mode
+    1, 120, 0, 0, 1, {0, 0, 0, 0, 0, 0, 0, 0, 0}, // clock enabled, 30s timeout, pulse mode
     5,
     5,
     60,
