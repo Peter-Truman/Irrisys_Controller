@@ -608,15 +608,14 @@ void main(void)
         }
         // Handle pending EEPROM saves...
 
-        // // Handle pending EEPROM saves when not in edit mode (MOVED OUTSIDE)
-        // if (save_pending && !menu.in_edit_mode)
-        // {
-        //     uart_println("Saving to EEPROM...");
-        //     save_current_config();
-        //     save_pending = 0;
-        //     uart_println("EEPROM save complete");
-        // }
-
+        // Handle pending EEPROM saves when back at main screen
+        if (save_pending && current_menu == 255)
+        {
+            uart_println("Saving to EEPROM...");
+            save_current_config();
+            save_pending = 0;
+            uart_println("EEPROM save complete");
+        }
         // Prevent LCD corruption at high speed
         __delay_us(50);
     }

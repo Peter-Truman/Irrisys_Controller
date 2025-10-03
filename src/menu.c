@@ -96,8 +96,16 @@ static char value_no_flow_bp[10] = "00:30";
 static char value_low_flow_bp[10] = "00:30";
 static char value_high_tbp[10] = "01:00";
 
+// Clock menu value buffers
+static char value_clock_enable[10] = "Enabled";
+static char value_end_runtime[10] = "Pulse";
+static char value_clock_display[10] = "Show";
+
 // Dynamic input menu - will be populated based on sensor type
 menu_item_t input_menu[15]; // Max 15 items to cover all cases
+
+// Clock menu - static 4 items
+menu_item_t clock_menu[4];
 
 // Menu template for PRESSURE sensor
 const menu_item_t pressure_menu_template[] = {
@@ -155,6 +163,14 @@ const menu_item_t flow_analog_template[] = {
     {"Rly Low", NULL, 1},     // 8
     {"Display", NULL, 1},     // 9
     {"Back", NULL, 0}         // 10
+};
+
+// Menu template for CLOCK configuration
+const menu_item_t clock_menu_template[] = {
+    {"Enable", NULL, 1},  // 0
+    {"End Run", NULL, 1}, // 1 - Changed from "End Runtime" to fit display
+    {"Display", NULL, 1}, // 2
+    {"Back", NULL, 0}     // 3
 };
 
 // Function declarations from header
@@ -1241,6 +1257,132 @@ void menu_draw_setup(void)
                 // Not selected - start at column 2
                 lcd_print_at(i + 1, 1, label);
             }
+
+            // Show asterisk for Clock if enabled (item_idx == 3)
+            if (item_idx == 3)
+            {
+                extern system_config_t system_config;
+                lcd_set_cursor(i + 1, 19);
+                lcd_print(system_config.clock_enabled ? "*" : " ");
+            }
+        }
+    }
+}
+
+/**
+ * Rebuild clock menu with current values from EEPROM
+ */
+void rebuild_clock_menu(void)
+{
+    extern system_config_t system_config;
+
+    // Debug: Show what we're loading
+    char buf[50];
+    sprintf(buf, "Rebuild clock: enabled=%d, mode=%d", system_config.clock_enabled, system_config.end_runtime_mode);
+    uart_println(buf);
+
+    // Load current values from system_config in RAM
+    sprintf(value_clock_enable, "%s", system_config.clock_enabled ? "Enabled" : "Disabled");
+    strcpy(value_end_runtime, system_config.end_runtime_mode == 0 ? "Latch" : system_config.end_runtime_mode == 1 ? "Pulse"
+                                                                                                                  : "Not Used");
+    strcpy(value_clock_display, "Show"); // TODO: Add to system_config if needed
+
+    sprintf(buf, "Values: enable='%s', runtime='%s'", value_clock_enable, value_end_runtime);
+    uart_println(buf);
+
+    // Copy template
+    memcpy(clock_menu, clock_menu_template, sizeof(clock_menu_template));
+
+    // Assign value pointers
+    clock_menu[0].value = value_clock_enable;
+    clock_menu[1].value = value_end_runtime;
+    clock_menu[2].value = value_clock_display;
+    clock_menu[3].value = value_back;
+
+    menu.total_items = 4;
+
+    sprintf(buf, "Clock menu rebuilt: %d items", menu.total_items);
+    uart_println(buf);
+}
+
+/**
+ * Draw the CLOCK configuration menu
+ */
+void menu_draw_clock(void)
+{
+    // Fixed title line
+    lcd_clear_line(0);
+    lcd_print_at(0, 0, "CLOCK");
+
+    // Draw 3 visible items (clock menu only has 4 items total)
+    for (uint8_t i = 0; i < 3 && (menu.top_line + i) < menu.total_items; i++)
+    {
+        uint8_t item_idx = menu.top_line + i;
+        lcd_clear_line(i + 1);
+
+        // Left side - label
+        lcd_print_at(i + 1, 0, clock_menu[item_idx].label);
+
+        // Build and display the value (right-justified)
+        char value_buf[15];
+        uint8_t show_brackets = 0; // 0=none, 1=square brackets, 2=parentheses
+
+        if (item_idx == menu.current_line)
+        {
+            if (menu.in_edit_mode)
+            {
+                show_brackets = 2; // Use parentheses in edit mode
+
+                // For option fields - handle blinking
+                if (menu.blink_state)
+                {
+                    strcpy(value_buf, clock_menu[item_idx].value);
+                }
+                else
+                {
+                    // Blink off - show spaces
+                    uint8_t val_len = strlen(clock_menu[item_idx].value);
+                    for (uint8_t j = 0; j < val_len; j++)
+                        value_buf[j] = ' ';
+                    value_buf[val_len] = '\0';
+                }
+            }
+            else
+            {
+                // Selected but not editing - show with square brackets
+                show_brackets = 1;
+                strcpy(value_buf, clock_menu[item_idx].value);
+            }
+        }
+        else
+        {
+            // Not selected - just show value, no brackets
+            show_brackets = 0;
+            strcpy(value_buf, clock_menu[item_idx].value);
+        }
+
+        // Display the value with proper positioning
+        uint8_t val_len = strlen(value_buf);
+        if (val_len > 0 && strcmp(clock_menu[item_idx].value, "") != 0)
+        {
+            if (show_brackets == 0)
+            {
+                // No brackets - value ends at column 19
+                lcd_print_at(i + 1, 19 - val_len, value_buf);
+            }
+            else
+            {
+                // With brackets - print everything in one sequence
+                uint8_t start_pos = 19 - val_len - 1; // Where opening bracket goes
+                lcd_set_cursor(i + 1, start_pos);
+
+                // Print opening bracket
+                lcd_print(show_brackets == 1 ? "[" : "(");
+                // Print value immediately after
+                lcd_print(value_buf);
+                // Print closing bracket immediately after
+                lcd_print(show_brackets == 1 ? "]" : ")");
+            }
         }
     }
 }
@@ -1258,6 +1400,68 @@ void menu_handle_encoder(int16_t delta)
     {
         if (delta != 0)
         {
+            // CLOCK menu has different handling (no sensor context needed)
+            if (current_menu == 3)
+            {
+                char buf[50];
+                sprintf(buf, "CLOCK edit rotate: line=%d, delta=%d", menu.current_line, delta);
+                uart_println(buf);
+
+                // CLOCK menu option field editing
+                const item_options_t *clock_opts = NULL;
+                uint8_t *clock_flag = NULL;
+
+                if (menu.current_line == 0) // Enable
+                {
+                    clock_opts = &menu_item_options[OPT_ENABLE];
+                    clock_flag = &enable_edit_flag;
+                }
+                else if (menu.current_line == 1) // End Runtime
+                {
+                    clock_opts = &menu_item_options[OPT_RELAY_MODE];
+                    clock_flag = &relay_high_edit_flag;
+                }
+                else if (menu.current_line == 2) // Display
+                {
+                    clock_opts = &menu_item_options[OPT_DISPLAY];
+                    clock_flag = &display_edit_flag;
+                }
+
+                if (clock_opts != NULL && clock_flag != NULL)
+                {
+                    sprintf(buf, "Before rotate: flag=%d", *clock_flag);
+                    uart_println(buf);
+
+                    if (delta > 0)
+                    {
+                        (*clock_flag)++;
+                        if (*clock_flag >= clock_opts->option_count)
+                            *clock_flag = 0;
+                    }
+                    else if (delta < 0)
+                    {
+                        if (*clock_flag == 0)
+                            *clock_flag = clock_opts->option_count - 1;
+                        else
+                            (*clock_flag)--;
+                    }
+
+                    // Safety clamp
+                    if (*clock_flag >= clock_opts->option_count)
+                        *clock_flag = 0;
+
+                    sprintf(buf, "After rotate: flag=%d, value=%s", *clock_flag, clock_opts->options[*clock_flag]);
+                    uart_println(buf);
+
+                    // Update display
+                    strcpy(clock_menu[menu.current_line].value, clock_opts->options[*clock_flag]);
+                    menu_draw_clock();
+                }
+
+                return; // Exit early for clock menu
+            }
+
+            // INPUT menu handling (needs sensor context)
             uint8_t sensor_type = input_config[current_input].sensor_type;
             uint8_t flow_type = input_config[current_input].flow_type;
 
@@ -1310,6 +1514,11 @@ void menu_handle_encoder(int16_t delta)
     // Normal navigation when not in edit mode
     if (delta > 0)
     {
+        // Debug navigation
+        char buf[50];
+        sprintf(buf, "Nav DOWN: menu=%d, line=%d, total=%d", current_menu, menu.current_line, menu.total_items);
+        uart_println(buf);
+
         // Clockwise - move down
         if (menu.current_line < menu.total_items - 1)
         {
@@ -1321,9 +1530,17 @@ void menu_handle_encoder(int16_t delta)
                 menu.top_line++;
             }
         }
+
+        sprintf(buf, "After DOWN: line=%d, top=%d", menu.current_line, menu.top_line);
+        uart_println(buf);
     }
     else if (delta < 0)
     {
+        // Debug navigation
+        char buf[50];
+        sprintf(buf, "Nav UP: menu=%d, line=%d, total=%d", current_menu, menu.current_line, menu.total_items);
+        uart_println(buf);
+
         // Counter-clockwise - move up
         if (menu.current_line > 0)
         {
@@ -1335,6 +1552,22 @@ void menu_handle_encoder(int16_t delta)
                 menu.top_line--;
             }
         }
+
+        sprintf(buf, "After UP: line=%d, top=%d", menu.current_line, menu.top_line);
+        uart_println(buf);
+    }
+
+    // Redraw the appropriate menu after navigation
+    if (!menu.in_edit_mode)
+    {
+        if (current_menu == 0)
+            menu_draw_options();
+        else if (current_menu == 1)
+            menu_draw_input();
+        else if (current_menu == 2)
+            menu_draw_setup();
+        else if (current_menu == 3)
+            menu_draw_clock();
     }
 }
 
@@ -1351,6 +1584,58 @@ void menu_handle_button(uint8_t press_type)
     {
         if (press_type == 1) // Short press - confirm edit
         {
+            // Handle CLOCK menu option fields FIRST (no sensor context needed)
+            if (current_menu == 3)
+            {
+                extern system_config_t system_config;
+
+                char buf[50];
+                sprintf(buf, "CLOCK save: line=%d, flag before=%d", menu.current_line,
+                        menu.current_line == 0 ? enable_edit_flag : menu.current_line == 1 ? relay_high_edit_flag
+                                                                                           : display_edit_flag);
+                uart_println(buf);
+
+                // Get the option info
+                const item_options_t *opts = NULL;
+                uint8_t *edit_flag = NULL;
+
+                if (menu.current_line == 0) // Enable
+                {
+                    opts = &menu_item_options[OPT_ENABLE];
+                    edit_flag = &enable_edit_flag;
+                    system_config.clock_enabled = enable_edit_flag;
+                    sprintf(buf, "Saved clock_enabled = %d", system_config.clock_enabled);
+                    uart_println(buf);
+                }
+                else if (menu.current_line == 1) // End Runtime
+                {
+                    opts = &menu_item_options[OPT_RELAY_MODE];
+                    edit_flag = &relay_high_edit_flag;
+                    system_config.end_runtime_mode = relay_high_edit_flag;
+                    sprintf(buf, "Saved end_runtime_mode = %d", system_config.end_runtime_mode);
+                    uart_println(buf);
+                }
+                else if (menu.current_line == 2) // Display
+                {
+                    opts = &menu_item_options[OPT_DISPLAY];
+                    edit_flag = &display_edit_flag;
+                    // TODO: Add clock display field to system_config if needed
+                }
+
+                if (opts != NULL && edit_flag != NULL && *edit_flag < opts->option_count)
+                {
+                    strcpy(clock_menu[menu.current_line].value, opts->options[*edit_flag]);
+                    save_pending = 1;
+                    sprintf(buf, "Updated menu value to: %s, save_pending=1", clock_menu[menu.current_line].value);
+                    uart_println(buf);
+                }
+
+                menu.in_edit_mode = 0;
+                beep(50);
+                return; // Exit early for CLOCK menu
+            }
+
+            // INPUT menu handling (needs sensor context)
             uint8_t sensor_type = input_config[current_input].sensor_type;
             uint8_t flow_type = input_config[current_input].flow_type;
 
@@ -1763,7 +2048,66 @@ void menu_handle_button(uint8_t press_type)
                 }
                 else if (menu.current_line == 3) // Clock
                 {
-                    // Stub
+                    rebuild_clock_menu();
+                    current_menu = 3; // 3 = CLOCK menu
+                    menu.current_line = 0;
+                    menu.top_line = 0;
+                    menu_draw_clock();
+                }
+            }
+            else if (current_menu == 3) // CLOCK menu
+            {
+                char buf[50];
+                sprintf(buf, "CLOCK btn: line=%d, editable=%d", menu.current_line,
+                        menu.current_line < 4 ? clock_menu[menu.current_line].editable : 0);
+                uart_println(buf);
+
+                if (menu.current_line == 3) // Back
+                {
+                    beep(50);
+                    // Go back to SETUP menu
+                    current_menu = 2;
+                    menu.current_line = 0;
+                    menu.top_line = 0;
+                    menu.total_items = 5;
+                    menu_draw_setup();
+                }
+                else if (clock_menu[menu.current_line].editable)
+                {
+                    uart_println("Entering CLOCK edit mode");
+
+                    // Enter edit mode for clock option fields (all are options)
+                    strcpy(original_value, clock_menu[menu.current_line].value);
+
+                    // Initialize the edit flag based on current value
+                    if (menu.current_line == 0) // Enable
+                    {
+                        enable_edit_flag = (strcmp(clock_menu[0].value, "Enabled") == 0) ? 1 : 0;
+                    }
+                    else if (menu.current_line == 1) // End Runtime
+                    {
+                        if (strcmp(clock_menu[1].value, "Latch") == 0)
+                            relay_high_edit_flag = 0;
+                        else if (strcmp(clock_menu[1].value, "Pulse") == 0)
+                            relay_high_edit_flag = 1;
+                        else
+                            relay_high_edit_flag = 2; // Not Used
+                    }
+                    else if (menu.current_line == 2) // Display
+                    {
+                        display_edit_flag = (strcmp(clock_menu[2].value, "Show") == 0) ? 1 : 0;
+                    }
+
+                    menu.in_edit_mode = 1;
+                    menu.blink_state = 1;
+                    beep(50);
+
+                    // Immediately redraw with () parentheses
+                    menu_draw_clock();
+                }
+                else
+                {
+                    uart_println("Field not editable!");
                 }
             }
         }
