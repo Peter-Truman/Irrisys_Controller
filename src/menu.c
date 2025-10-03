@@ -132,6 +132,8 @@ extern void lcd_print(const char *str);
 extern void beep(uint16_t duration_ms);
 extern void save_current_config(void);
 extern void uart_println(const char *str);
+extern void lcd_clear(void);
+// extern uint8_t strlen(const char *str); // If not already declared
 void handle_time_rotation(int8_t direction);
 
 // Helper function to identify numeric fields
@@ -982,6 +984,16 @@ void menu_handle_button(uint8_t press_type)
                     // Update the menu item value
                     strcpy(input_menu[menu.current_line].value, opts->options[*edit_flag]);
 
+                    // UPDATE THE ACTUAL CONFIG - ADD THIS
+                    if (menu.current_line == 0) // Enable field
+                    {
+                        input_config[current_input].enable = enable_edit_flag;
+                    }
+                    else if (menu.current_line == 1) // Sensor field
+                    {
+                        input_config[current_input].sensor_type = sensor_edit_flag;
+                    }
+
                     // Mark for EEPROM save (deferred)
                     save_pending = 1;
                 }
@@ -1125,7 +1137,7 @@ void menu_handle_button(uint8_t press_type)
             }
             else if (current_menu == 1) // INPUT menu
             {
-                if (menu.current_line == 13) // Back option
+                if (menu.current_line == menu.total_items - 1) // Back option (always last item)
                 {
                     beep(50);
                     // Go back to SETUP menu
@@ -1263,50 +1275,57 @@ void menu_draw_setup(void)
 {
     extern input_config_t input_config[3];
 
-    // Fixed title
-    lcd_clear_line(0);
-    lcd_print_at(0, 0, "SETUP");
+    lcd_clear();
+    lcd_print("SETUP");
 
-    // SETUP menu items
-    const char *setup_items[] = {
-        "Input 1",
-        "Input 2",
-        "Input 3",
-        "Clock",
-        "Back"};
-
-    // Sensor type names
-    const char *sensor_type_names[] = {"Pressure", "Temp", "Flow"};
-
-    // Draw 3 visible items (lines 1-3)
+    // Display 3 items based on current position
     for (uint8_t i = 0; i < 3 && (menu.top_line + i) < menu.total_items; i++)
     {
         uint8_t item_idx = menu.top_line + i;
-        lcd_clear_line(i + 1);
+        lcd_set_cursor(i + 1, 0);
 
-        // Add cursor brackets if this is selected line
+        // Highlight current selection
+        if (item_idx == menu.current_line)
+            lcd_print("[");
+        else
+            lcd_print(" ");
+
+        // Display item based on index
+        if (item_idx < 3) // Input 1, 2, 3
+        {
+            // Get sensor type for this input
+            uint8_t sensor = input_config[item_idx].sensor_type;
+            const char *sensor_name = (sensor == 0) ? "Pressure" : (sensor == 1) ? "Temp"
+                                                                                 : "Flow";
+            lcd_print(sensor_name);
+
+            // Add spacing to position enable indicator
+            uint8_t name_len = strlen(sensor_name);
+            for (uint8_t j = name_len; j < 14; j++)
+                lcd_print(" ");
+
+            // Show '*' if enabled
+            if (input_config[item_idx].enable)
+            {
+                lcd_set_cursor(i + 1, 19);
+                lcd_print("*");
+            }
+        }
+        else if (item_idx == 3) // Clock
+        {
+            lcd_print("Clock");
+            // TODO: Add clock enable check when available
+        }
+        else if (item_idx == 4) // Back
+        {
+            lcd_print("Back");
+        }
+
+        // Close bracket if selected
         if (item_idx == menu.current_line)
         {
-            lcd_print_at(i + 1, 0, "[");
-            lcd_print(setup_items[item_idx]);
+            lcd_set_cursor(i + 1, 10);
             lcd_print("]");
-        }
-        else
-        {
-            lcd_print_at(i + 1, 1, setup_items[item_idx]);
-        }
-
-        // Show sensor type right-justified for Input items only
-        if (item_idx <= 2) // Only for Input 1-3
-        {
-            uint8_t sensor_type = input_config[item_idx].sensor_type;
-            if (sensor_type <= 2) // Valid sensor type (0=Pressure, 1=Temp, 2=Flow)
-            {
-                const char *type_text = sensor_type_names[sensor_type];
-                uint8_t type_len = strlen(type_text);
-                // Position so text ends at column 19, column 20 reserved
-                lcd_print_at(i + 1, 20 - type_len, type_text);
-            }
         }
     }
 }

@@ -491,6 +491,11 @@ void main(void)
             lcd_set_cursor(1, 0);
             lcd_print("Ready");
             uart_println("Main screen displayed");
+            
+            uart_println("Saving to EEPROM...");
+            save_current_config();
+            save_pending = 0;
+            uart_println("EEPROM save complete");
         }
         last_menu_state = current_menu;
 
@@ -590,12 +595,14 @@ void main(void)
         }
         // Handle pending EEPROM saves...
 
-        // Handle pending EEPROM saves when not in edit mode (MOVED OUTSIDE)
+        // // Handle pending EEPROM saves when not in edit mode (MOVED OUTSIDE)
         // if (save_pending && !menu.in_edit_mode)
-        //{
-        // save_current_config();
-        // save_pending = 0;
-        //}
+        // {
+        //     uart_println("Saving to EEPROM...");
+        //     save_current_config();
+        //     save_pending = 0;
+        //     uart_println("EEPROM save complete");
+        // }
 
         // Prevent LCD corruption at high speed
         __delay_us(50);
