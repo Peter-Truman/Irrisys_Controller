@@ -1,6 +1,7 @@
 /**
- * IRRISYS - Menu System with Flexible Option System and Fixed Back Functionality
- * Optimized for 32MHz operation with EEPROM integration
+ * IRRISYS - Menu System with Context-Aware Field Detection
+ * Refactored for flexible option field handling across all sensor types
+ * Version: 1.0.0 - Sonnet 4.5 Refactor
  */
 
 #include "../include/config.h"
@@ -9,30 +10,56 @@
 #include "../include/eeprom.h"
 #include <stdio.h>
 #include <string.h>
-#include <stdlib.h> // ADD THIS LINE - needed for abs() function
+#include <stdlib.h>
 
 // Menu state - make it accessible
 menu_state_t menu;
 static char original_value[10]; // Store original value for cancellation
-uint8_t enable_edit_flag = 1;   // 1=Enabled, 0=Disabled
-uint8_t sensor_edit_flag = 0;   // 0=Pressure, 1=Temp, 2=Flow
-uint8_t current_menu = 0;       // 0=OPTIONS, 1=INPUT, 2=SETUP
 
-// Define options for each editable item
+// ALL option field edit flags
+uint8_t enable_edit_flag = 1;     // 1=Enabled, 0=Disabled
+uint8_t sensor_edit_flag = 0;     // 0=Pressure, 1=Temp, 2=Flow
+uint8_t flow_type_edit_flag = 1;  // 0=Analog, 1=Digital
+uint8_t no_flow_edit_flag = 0;    // 0=Low, 1=High
+uint8_t flow_units_edit_flag = 0; // 0=%, 1=LpS
+uint8_t display_edit_flag = 1;    // 0=Hide, 1=Show
+uint8_t relay_high_edit_flag = 0; // 0=Latch, 1=Pulse, 2=Not Used
+uint8_t relay_plp_edit_flag = 0;  // 0=Latch, 1=Pulse, 2=Not Used
+uint8_t relay_slp_edit_flag = 1;  // 0=Latch, 1=Pulse, 2=Not Used
+uint8_t relay_low_edit_flag = 0;  // 0=Latch, 1=Pulse, 2=Not Used
+
+uint8_t current_menu = 0;  // 0=OPTIONS, 1=INPUT, 2=SETUP
+uint8_t current_input = 0; // Which input (0-2) is being configured
+
+// Define options for each editable item type
 typedef struct
 {
-    uint8_t item_index;     // Which menu item (0=Enable, 1=Sensor, etc.)
+    uint8_t option_id;      // Unique ID for this option type
     uint8_t option_count;   // How many options this item has
     const char *options[5]; // Array of option strings (max 5 options)
 } item_options_t;
 
+// Option type IDs
+#define OPT_ENABLE 0
+#define OPT_SENSOR 1
+#define OPT_FLOW_TYPE 2
+#define OPT_NO_FLOW 3
+#define OPT_FLOW_UNITS 4
+#define OPT_DISPLAY 5
+#define OPT_RELAY_MODE 6 // Used for all relay fields
+
+// Expanded option definitions
 const item_options_t menu_item_options[] = {
-    {0, 2, {"Disabled", "Enabled", "", "", ""}},  // Enable: 2 options
-    {1, 3, {"Pressure", "Temp", "Flow", "", ""}}, // Sensor: 3 options
-    // Add more items here as needed
+    {OPT_ENABLE, 2, {"Disabled", "Enabled", "", "", ""}},
+    {OPT_SENSOR, 3, {"Pressure", "Temp", "Flow", "", ""}},
+    {OPT_FLOW_TYPE, 2, {"Analog", "Digital", "", "", ""}},
+    {OPT_NO_FLOW, 2, {"Low", "High", "", "", ""}},
+    {OPT_FLOW_UNITS, 2, {"%", "LpS", "", "", ""}},
+    {OPT_DISPLAY, 2, {"Hide", "Show", "", "", ""}},
+    {OPT_RELAY_MODE, 3, {"Latch", "Pulse", "Not Used", "", ""}},
 };
 
-#define NUM_EDITABLE_ITEMS 2 // Currently Enable and Sensor
+#define NUM_OPTION_TYPES 7
 
 // Test menu items for OPTIONS menu
 const char *options_menu[] = {
@@ -53,78 +80,82 @@ static char value_slpbp[10] = "00:05";
 static char value_rlyhigh[10] = "Latch";
 static char value_rlyplp[10] = "Latch";
 static char value_rlyslp[10] = "Pulse";
+static char value_rlylow[10] = "Latch";
 static char value_display[10] = "Show";
-static char value_back[5] = "Back"; // Back option with proper text
+static char value_back[5] = "Back";
 
 // Additional value buffers for dynamic menu items
-static char value_hi_pressure[10] = "150";   // PSI value
-static char value_low_pressure[10] = "50";   // PSI value
-static char value_high_temp[10] = "85";      // Temperature in C
-static char value_flow_type[10] = "Digital"; // Analog/Digital
-static char value_flow_units[10] = "%";      // % or LpS
-static char value_no_flow[10] = "Low";       // Low/High
-static char value_low_flow[10] = "30";       // Low flow threshold
-static char value_no_flow_bp[10] = "00:30";  // No flow bypass time
-static char value_low_flow_bp[10] = "00:30"; // Low flow bypass time
-static char value_high_tbp[10] = "01:00";    // High temp bypass
+static char value_hi_pressure[10] = "150";
+static char value_low_pressure[10] = "50";
+static char value_high_temp[10] = "85";
+static char value_flow_type[10] = "Digital";
+static char value_flow_units[10] = "%";
+static char value_no_flow[10] = "Low";
+static char value_low_flow[10] = "30";
+static char value_no_flow_bp[10] = "00:30";
+static char value_low_flow_bp[10] = "00:30";
+static char value_high_tbp[10] = "01:00";
 
 // Dynamic input menu - will be populated based on sensor type
 menu_item_t input_menu[15]; // Max 15 items to cover all cases
-uint8_t current_input = 0;  // Which input (0-2) is being configured
 
 // Menu template for PRESSURE sensor
 const menu_item_t pressure_menu_template[] = {
-    {"Enable", NULL, 1},
-    {"Sensor", NULL, 1},
-    {"Scale 4mA", NULL, 1},
-    {"Scale 20mA", NULL, 1},
-    {"Hi Pressure", NULL, 1},
-    {"High PBP", NULL, 1},
-    {"Low Pressure", NULL, 1},
-    {"PLPBP", NULL, 1},
-    {"SLPBP", NULL, 1},
-    {"Rly High", NULL, 1},
-    {"Rly Low", NULL, 1},
-    {"Rly SLP", NULL, 1},
-    {"Display", NULL, 1}, // Index 12 - THIS SHOULD BE "Display"
-    {"Back", NULL, 0}     // Index 13 - THIS SHOULD BE "Back"
+    {"Enable", NULL, 1},       // 0
+    {"Sensor", NULL, 1},       // 1
+    {"Scale 4mA", NULL, 1},    // 2
+    {"Scale 20mA", NULL, 1},   // 3
+    {"Hi Pressure", NULL, 1},  // 4
+    {"High PBP", NULL, 1},     // 5
+    {"Low Pressure", NULL, 1}, // 6
+    {"PLPBP", NULL, 1},        // 7
+    {"SLPBP", NULL, 1},        // 8
+    {"Rly High", NULL, 1},     // 9
+    {"Rly PLP", NULL, 1},      // 10
+    {"Rly SLP", NULL, 1},      // 11
+    {"Display", NULL, 1},      // 12
+    {"Back", NULL, 0}          // 13
 };
+
 // Menu template for TEMPERATURE sensor
 const menu_item_t temp_menu_template[] = {
-    {"Enable", NULL, 1},
-    {"Sensor", NULL, 1},
-    {"Scale 4mA", NULL, 1},
-    {"Scale 20mA", NULL, 1},
-    {"High Temp", NULL, 1},
-    {"High TBP", NULL, 1},
-    {"Rly High", NULL, 1},
-    {"Display", NULL, 1},
-    {"Back", NULL, 0}};
+    {"Enable", NULL, 1},     // 0
+    {"Sensor", NULL, 1},     // 1
+    {"Scale 4mA", NULL, 1},  // 2
+    {"Scale 20mA", NULL, 1}, // 3
+    {"High Temp", NULL, 1},  // 4
+    {"High TBP", NULL, 1},   // 5
+    {"Rly High", NULL, 1},   // 6
+    {"Display", NULL, 1},    // 7
+    {"Back", NULL, 0}        // 8
+};
 
 // Menu template for FLOW sensor - Digital
 const menu_item_t flow_digital_template[] = {
-    {"Enable", NULL, 1},
-    {"Sensor", NULL, 1},
-    {"Type", NULL, 1},
-    {"No Flow", NULL, 1},
-    {"No Flow BP", NULL, 1},
-    {"Rly Low", NULL, 1},
-    {"Display", NULL, 1},
-    {"Back", NULL, 0}};
+    {"Enable", NULL, 1},     // 0
+    {"Sensor", NULL, 1},     // 1
+    {"Type", NULL, 1},       // 2
+    {"No Flow", NULL, 1},    // 3
+    {"No Flow BP", NULL, 1}, // 4
+    {"Rly Low", NULL, 1},    // 5
+    {"Display", NULL, 1},    // 6
+    {"Back", NULL, 0}        // 7
+};
 
 // Menu template for FLOW sensor - Analog
 const menu_item_t flow_analog_template[] = {
-    {"Enable", NULL, 1},
-    {"Sensor", NULL, 1},
-    {"Type", NULL, 1},
-    {"Units", NULL, 1},
-    {"Scale 4mA", NULL, 1},
-    {"Scale 20mA", NULL, 1},
-    {"Low Flow", NULL, 1},
-    {"Low Flow BP", NULL, 1},
-    {"Rly Low", NULL, 1},
-    {"Display", NULL, 1},
-    {"Back", NULL, 0}};
+    {"Enable", NULL, 1},      // 0
+    {"Sensor", NULL, 1},      // 1
+    {"Type", NULL, 1},        // 2
+    {"Units", NULL, 1},       // 3
+    {"Scale 4mA", NULL, 1},   // 4
+    {"Scale 20mA", NULL, 1},  // 5
+    {"Low Flow", NULL, 1},    // 6
+    {"Low Flow BP", NULL, 1}, // 7
+    {"Rly Low", NULL, 1},     // 8
+    {"Display", NULL, 1},     // 9
+    {"Back", NULL, 0}         // 10
+};
 
 // Function declarations from header
 extern void lcd_set_cursor(uint8_t row, uint8_t col);
@@ -133,25 +164,240 @@ extern void beep(uint16_t duration_ms);
 extern void save_current_config(void);
 extern void uart_println(const char *str);
 extern void lcd_clear(void);
-// extern uint8_t strlen(const char *str); // If not already declared
 void handle_time_rotation(int8_t direction);
 
-// Helper function to identify numeric fields
-uint8_t is_numeric_field(uint8_t line)
+//=============================================================================
+// CONTEXT-AWARE FIELD DETECTION FUNCTIONS
+//=============================================================================
+
+/**
+ * Determine if a field is numeric based on context
+ * @param line Menu line index
+ * @param sensor_type 0=Pressure, 1=Temp, 2=Flow
+ * @param flow_type 0=Analog, 1=Digital (only relevant if sensor_type==2)
+ */
+uint8_t is_numeric_field(uint8_t line, uint8_t sensor_type, uint8_t flow_type)
 {
-    return (line == 2 || line == 3 || line == 4 || line == 6);
+    if (sensor_type == 0) // Pressure
+    {
+        // Scale 4mA, Scale 20mA, Hi Pressure, Low Pressure
+        return (line == 2 || line == 3 || line == 4 || line == 6);
+    }
+    else if (sensor_type == 1) // Temperature
+    {
+        // Scale 4mA, Scale 20mA, High Temp
+        return (line == 2 || line == 3 || line == 4);
+    }
+    else if (sensor_type == 2) // Flow
+    {
+        if (flow_type == 0) // Analog Flow
+        {
+            // Scale 4mA, Scale 20mA, Low Flow
+            return (line == 4 || line == 5 || line == 6);
+        }
+        else // Digital Flow
+        {
+            // No numeric fields in digital flow
+            return 0;
+        }
+    }
+
+    return 0; // Default: not numeric
 }
 
-// Helper function to identify time fields
-uint8_t is_time_field(uint8_t line)
+/**
+ * Determine if a field is a time field based on context
+ */
+uint8_t is_time_field(uint8_t line, uint8_t sensor_type, uint8_t flow_type)
 {
-    // High BP, PLPBP, SLPBP (lines 5, 7, 8 in pressure menu)
-    // High TBP (line 5 in temp menu)
-    return (line == 5 || line == 7 || line == 8);
+    if (sensor_type == 0) // Pressure
+    {
+        // High PBP, PLPBP, SLPBP
+        return (line == 5 || line == 7 || line == 8);
+    }
+    else if (sensor_type == 1) // Temperature
+    {
+        // High TBP
+        return (line == 5);
+    }
+    else if (sensor_type == 2) // Flow
+    {
+        if (flow_type == 0) // Analog Flow
+        {
+            // Low Flow BP
+            return (line == 7);
+        }
+        else // Digital Flow
+        {
+            // No Flow BP
+            return (line == 4);
+        }
+    }
+
+    return 0; // Default: not a time field
 }
 
-// Initialize time editor for HH:MM or MM:SS editing
-// Initialize time editor for HH:MM or MM:SS editing
+/**
+ * Determine if a field is an option field based on context
+ */
+uint8_t is_option_field(uint8_t line, uint8_t sensor_type, uint8_t flow_type)
+{
+    // Enable and Sensor are ALWAYS option fields at positions 0 and 1
+    if (line == 0 || line == 1)
+        return 1;
+
+    if (sensor_type == 0) // Pressure
+    {
+        // Rly High, Rly PLP, Rly SLP, Display
+        return (line == 9 || line == 10 || line == 11 || line == 12);
+    }
+    else if (sensor_type == 1) // Temperature
+    {
+        // Rly High, Display
+        return (line == 6 || line == 7);
+    }
+    else if (sensor_type == 2) // Flow
+    {
+        if (flow_type == 0) // Analog Flow
+        {
+            // Type, Units, Rly Low, Display
+            return (line == 2 || line == 3 || line == 8 || line == 9);
+        }
+        else // Digital Flow
+        {
+            // Type, No Flow, Rly Low, Display
+            return (line == 2 || line == 3 || line == 5 || line == 6);
+        }
+    }
+
+    return 0; // Default: not an option field
+}
+
+/**
+ * Get the appropriate edit flag pointer for a given field
+ * Returns NULL if the field is not an option field
+ */
+uint8_t *get_option_edit_flag(uint8_t line, uint8_t sensor_type, uint8_t flow_type)
+{
+    // Universal fields
+    if (line == 0)
+        return &enable_edit_flag;
+    if (line == 1)
+        return &sensor_edit_flag;
+
+    // Pressure-specific
+    if (sensor_type == 0)
+    {
+        if (line == 9)
+            return &relay_high_edit_flag;
+        if (line == 10)
+            return &relay_plp_edit_flag;
+        if (line == 11)
+            return &relay_slp_edit_flag;
+        if (line == 12)
+            return &display_edit_flag;
+    }
+    // Temperature-specific
+    else if (sensor_type == 1)
+    {
+        if (line == 6)
+            return &relay_high_edit_flag;
+        if (line == 7)
+            return &display_edit_flag;
+    }
+    // Flow-specific
+    else if (sensor_type == 2)
+    {
+        if (line == 2)
+            return &flow_type_edit_flag;
+
+        if (flow_type == 0) // Analog
+        {
+            if (line == 3)
+                return &flow_units_edit_flag;
+            if (line == 8)
+                return &relay_low_edit_flag;
+            if (line == 9)
+                return &display_edit_flag;
+        }
+        else // Digital
+        {
+            if (line == 3)
+                return &no_flow_edit_flag;
+            if (line == 5)
+                return &relay_low_edit_flag;
+            if (line == 6)
+                return &display_edit_flag;
+        }
+    }
+
+    return NULL; // Not an option field
+}
+
+/**
+ * Get the option definition for a given field
+ * Returns NULL if not found
+ */
+const item_options_t *get_item_options_for_field(uint8_t line, uint8_t sensor_type, uint8_t flow_type)
+{
+    // Universal fields
+    if (line == 0)
+        return &menu_item_options[OPT_ENABLE];
+    if (line == 1)
+        return &menu_item_options[OPT_SENSOR];
+
+    // Pressure-specific
+    if (sensor_type == 0)
+    {
+        if (line == 9 || line == 10 || line == 11)
+            return &menu_item_options[OPT_RELAY_MODE];
+        if (line == 12)
+            return &menu_item_options[OPT_DISPLAY];
+    }
+    // Temperature-specific
+    else if (sensor_type == 1)
+    {
+        if (line == 6)
+            return &menu_item_options[OPT_RELAY_MODE];
+        if (line == 7)
+            return &menu_item_options[OPT_DISPLAY];
+    }
+    // Flow-specific
+    else if (sensor_type == 2)
+    {
+        if (line == 2)
+            return &menu_item_options[OPT_FLOW_TYPE];
+
+        if (flow_type == 0) // Analog
+        {
+            if (line == 3)
+                return &menu_item_options[OPT_FLOW_UNITS];
+            if (line == 8)
+                return &menu_item_options[OPT_RELAY_MODE];
+            if (line == 9)
+                return &menu_item_options[OPT_DISPLAY];
+        }
+        else // Digital
+        {
+            if (line == 3)
+                return &menu_item_options[OPT_NO_FLOW];
+            if (line == 5)
+                return &menu_item_options[OPT_RELAY_MODE];
+            if (line == 6)
+                return &menu_item_options[OPT_DISPLAY];
+        }
+    }
+
+    return NULL;
+}
+
+//=============================================================================
+// TIME EDITING FUNCTIONS
+//=============================================================================
+
+/**
+ * Initialize time editor for HH:MM or MM:SS editing
+ */
 void init_time_editor(uint16_t value_seconds, uint8_t mode)
 {
     // Mode: 0=MM:SS, 1=HH:MM, 2=HH:MM with 24hr limit
@@ -167,7 +413,7 @@ void init_time_editor(uint16_t value_seconds, uint8_t mode)
     else // HH:MM
     {
         menu.time_xx = value_seconds / 3600;        // Hours (0-99 or 0-23)
-        menu.time_yy = (value_seconds % 3600) / 60; // Minutes (0-59) - FIX THIS LINE
+        menu.time_yy = (value_seconds % 3600) / 60; // Minutes (0-59)
     }
 
     // Start editing at first digit (tens of XX)
@@ -180,10 +426,12 @@ void init_time_editor(uint16_t value_seconds, uint8_t mode)
     uart_println(buf);
 }
 
-// Handle rotation for time editing - correct version
+/**
+ * Handle rotation for time editing
+ */
 void handle_time_rotation(int8_t direction)
 {
-    uart_println("handle_time_rotation called!"); // ADD THIS
+    uart_println("handle_time_rotation called!");
 
     char buf[50];
     sprintf(buf, "Rotate start: XX=%d, YY=%d, dir=%d, digit=%d",
@@ -229,11 +477,13 @@ void handle_time_rotation(int8_t direction)
         }
     }
 
-    sprintf(buf, "Rotate end: XX=%d, YY=%d", menu.time_xx, menu.time_yy); // ADD THIS
+    sprintf(buf, "Rotate end: XX=%d, YY=%d", menu.time_xx, menu.time_yy);
     uart_println(buf);
 }
 
-// Update time value display during editing
+/**
+ * Update time value display during editing
+ */
 void menu_update_time_value(void)
 {
     // Only update if in INPUT menu and edit mode
@@ -245,11 +495,15 @@ void menu_update_time_value(void)
     if (screen_line >= 3)
         return; // Not visible
 
-    // Get the item being edited
     uint8_t item_idx = menu.current_line;
 
+    // Get current sensor type and flow type
+    extern input_config_t input_config[3];
+    uint8_t sensor_type = input_config[current_input].sensor_type;
+    uint8_t flow_type = input_config[current_input].flow_type;
+
     // Only handle time fields
-    if (!is_time_field(item_idx))
+    if (!is_time_field(item_idx, sensor_type, flow_type))
         return;
 
     // Build display string XX:YY with field flashing
@@ -295,24 +549,8 @@ void menu_update_time_value(void)
     sprintf(debug_after, "Final display string: (%s)", value_buf);
     uart_println(debug_after);
 
-    // DEBUG: Show what we're displaying
-    char debug[50];
-    if (!menu.blink_state && menu.time_edit_digit == 0)
-    {
-        sprintf(debug, "LCD: (  :%02d) [XX blanked]", menu.time_yy);
-    }
-    else if (!menu.blink_state && menu.time_edit_digit == 1)
-    {
-        sprintf(debug, "LCD: (%02d:  ) [YY blanked]", menu.time_xx);
-    }
-    else
-    {
-        sprintf(debug, "LCD: (%02d:%02d) [solid]", menu.time_xx, menu.time_yy);
-    }
-    uart_println(debug);
-
     // Display at correct position
-    uint8_t start_col = 13; // Adjust as needed for your display
+    uint8_t start_col = 13;
 
     lcd_set_cursor(screen_line + 1, start_col);
     lcd_print("       "); // Clear area
@@ -323,34 +561,26 @@ void menu_update_time_value(void)
     lcd_print(")");
 }
 
-// LCD helper - print at specific position
+//=============================================================================
+// LCD HELPER FUNCTIONS
+//=============================================================================
+
 void lcd_print_at(uint8_t row, uint8_t col, const char *str)
 {
     lcd_set_cursor(row, col);
     lcd_print(str);
 }
 
-// Clear a single line
 void lcd_clear_line(uint8_t row)
 {
     lcd_set_cursor(row, 0);
     lcd_print("                    "); // 20 spaces
 }
 
-// Get options for a specific menu item
-const item_options_t *get_item_options(uint8_t item_index)
-{
-    for (uint8_t i = 0; i < NUM_EDITABLE_ITEMS; i++)
-    {
-        if (menu_item_options[i].item_index == item_index)
-        {
-            return &menu_item_options[i];
-        }
-    }
-    return NULL; // Not found
-}
+//=============================================================================
+// MENU INITIALIZATION AND REBUILDING
+//=============================================================================
 
-// Initialize menu system
 void menu_init(void)
 {
     menu.current_line = 0;
@@ -361,14 +591,17 @@ void menu_init(void)
     menu.blink_timer = 0;
 }
 
-// Rebuild input menu based on sensor type
+/**
+ * Rebuild input menu based on sensor type - COMPLETE IMPLEMENTATION
+ */
 void rebuild_input_menu(uint8_t input_num)
 {
     extern input_config_t input_config[3];
     current_input = input_num;
 
-    // Get sensor type from EEPROM config
+    // Get sensor type and flow type from EEPROM config
     uint8_t sensor = input_config[input_num].sensor_type;
+    uint8_t flow_type_val = input_config[input_num].flow_type;
 
     // Convert EEPROM values to strings for display
     sprintf(value_enable, "%s", input_config[input_num].enable ? "Enabled" : "Disabled");
@@ -379,13 +612,17 @@ void rebuild_input_menu(uint8_t input_num)
         sprintf(value_scale4, "%+04d", input_config[input_num].scale_4ma);
         sprintf(value_scale20, "%+04d", input_config[input_num].scale_20ma);
         sprintf(value_hi_pressure, "%03d", input_config[input_num].high_setpoint);
-        sprintf(value_highbp, "%02d:%02d", input_config[input_num].high_bypass_time / 60,
+        sprintf(value_highbp, "%02d:%02d",
+                input_config[input_num].high_bypass_time / 60,
                 input_config[input_num].high_bypass_time % 60);
-        sprintf(value_low_pressure, "%03d", 50);
-        sprintf(value_plpbp, "%02d:%02d", input_config[input_num].plp_bypass_time / 60,
+        sprintf(value_low_pressure, "%03d", 50); // TODO: Add to EEPROM structure
+        sprintf(value_plpbp, "%02d:%02d",
+                input_config[input_num].plp_bypass_time / 60,
                 input_config[input_num].plp_bypass_time % 60);
-        sprintf(value_slpbp, "%02d:%02d", input_config[input_num].slp_bypass_time / 60,
+        sprintf(value_slpbp, "%02d:%02d",
+                input_config[input_num].slp_bypass_time / 60,
                 input_config[input_num].slp_bypass_time % 60);
+
         strcpy(value_rlyhigh, input_config[input_num].relay_high_mode == 0 ? "Latch" : input_config[input_num].relay_high_mode == 1 ? "Pulse"
                                                                                                                                     : "Not Used");
         strcpy(value_rlyplp, input_config[input_num].relay_plp_mode == 0 ? "Latch" : input_config[input_num].relay_plp_mode == 1 ? "Pulse"
@@ -421,8 +658,12 @@ void rebuild_input_menu(uint8_t input_num)
         sprintf(value_scale4, "%+04d", input_config[input_num].scale_4ma);
         sprintf(value_scale20, "%+04d", input_config[input_num].scale_20ma);
         sprintf(value_high_temp, "%d", input_config[input_num].high_setpoint);
-        sprintf(value_high_tbp, "%02d:%02d", input_config[input_num].high_bypass_time / 60,
+        sprintf(value_high_tbp, "%02d:%02d",
+                input_config[input_num].high_bypass_time / 60,
                 input_config[input_num].high_bypass_time % 60);
+        strcpy(value_rlyhigh, input_config[input_num].relay_high_mode == 0 ? "Latch" : input_config[input_num].relay_high_mode == 1 ? "Pulse"
+                                                                                                                                    : "Not Used");
+        strcpy(value_display, input_config[input_num].display_enabled ? "Show" : "Hide");
 
         // Copy template
         memcpy(input_menu, temp_menu_template, sizeof(temp_menu_template));
@@ -440,27 +681,105 @@ void rebuild_input_menu(uint8_t input_num)
 
         menu.total_items = 9;
     }
-    // Flow sensor handling will be added later
+    else if (sensor == 2) // Flow - NOW IMPLEMENTED!
+    {
+        strcpy(value_sensor, "Flow");
+        strcpy(value_flow_type, flow_type_val == 0 ? "Analog" : "Digital");
+        strcpy(value_display, input_config[input_num].display_enabled ? "Show" : "Hide");
+        strcpy(value_rlylow, input_config[input_num].relay_low_mode == 0 ? "Latch" : input_config[input_num].relay_low_mode == 1 ? "Pulse"
+                                                                                                                                 : "Not Used");
+
+        if (flow_type_val == 0) // Analog Flow
+        {
+            strcpy(value_flow_units, input_config[input_num].flow_units == 0 ? "%" : "LpS");
+            sprintf(value_scale4, "%+04d", input_config[input_num].scale_4ma);
+            sprintf(value_scale20, "%+04d", input_config[input_num].scale_20ma);
+            sprintf(value_low_flow, "%03d", input_config[input_num].low_flow_setpoint);
+            sprintf(value_low_flow_bp, "%02d:%02d",
+                    input_config[input_num].low_flow_bypass / 60,
+                    input_config[input_num].low_flow_bypass % 60);
+
+            // Copy template
+            memcpy(input_menu, flow_analog_template, sizeof(flow_analog_template));
+
+            // Assign value pointers
+            input_menu[0].value = value_enable;
+            input_menu[1].value = value_sensor;
+            input_menu[2].value = value_flow_type;
+            input_menu[3].value = value_flow_units;
+            input_menu[4].value = value_scale4;
+            input_menu[5].value = value_scale20;
+            input_menu[6].value = value_low_flow;
+            input_menu[7].value = value_low_flow_bp;
+            input_menu[8].value = value_rlylow;
+            input_menu[9].value = value_display;
+            input_menu[10].value = value_back;
+
+            menu.total_items = 11;
+        }
+        else // Digital Flow
+        {
+            strcpy(value_no_flow, "Low"); // TODO: Load from EEPROM when field added
+            sprintf(value_no_flow_bp, "%02d:%02d",
+                    input_config[input_num].low_flow_bypass / 60,
+                    input_config[input_num].low_flow_bypass % 60);
+
+            // Copy template
+            memcpy(input_menu, flow_digital_template, sizeof(flow_digital_template));
+
+            // Assign value pointers
+            input_menu[0].value = value_enable;
+            input_menu[1].value = value_sensor;
+            input_menu[2].value = value_flow_type;
+            input_menu[3].value = value_no_flow;
+            input_menu[4].value = value_no_flow_bp;
+            input_menu[5].value = value_rlylow;
+            input_menu[6].value = value_display;
+            input_menu[7].value = value_back;
+
+            menu.total_items = 8;
+        }
+    }
 
     // DEBUG: Verify total items
-    char buf[30];
-    sprintf(buf, "Total items set to: %d", menu.total_items);
+    char buf[50];
+    sprintf(buf, "Menu rebuilt: sensor=%d, flow_type=%d, items=%d",
+            sensor, flow_type_val, menu.total_items);
     uart_println(buf);
+}
 
-    // DEBUG: Check what's actually in the menu
-    uart_println("Menu items after rebuild:");
-    for (uint8_t i = 12; i < 14; i++)
-    {
-        char buf[50];
-        sprintf(buf, "Item %d: %s", i, input_menu[i].label);
-        uart_println(buf);
-    }
-} // End of rebuild_input_menu function
-// Initialize numeric editor for Scale values
+//=============================================================================
+// NUMERIC EDITING FUNCTIONS
+//=============================================================================
+
 void init_numeric_editor(int16_t value)
 {
-    // Set flag for unsigned fields (Hi Pressure, Low Pressure)
-    menu.edit_unsigned = (menu.current_line == 4 || menu.current_line == 6) ? 1 : 0;
+    // Get current context
+    extern input_config_t input_config[3];
+    uint8_t sensor_type = input_config[current_input].sensor_type;
+    uint8_t flow_type = input_config[current_input].flow_type;
+
+    // Determine if field is unsigned
+    menu.edit_unsigned = 0; // Default to signed
+
+    if (sensor_type == 0) // Pressure
+    {
+        // Hi Pressure and Low Pressure are unsigned
+        if (menu.current_line == 4 || menu.current_line == 6)
+            menu.edit_unsigned = 1;
+    }
+    else if (sensor_type == 1) // Temperature
+    {
+        // High Temp is unsigned
+        if (menu.current_line == 4)
+            menu.edit_unsigned = 1;
+    }
+    else if (sensor_type == 2 && flow_type == 0) // Analog Flow
+    {
+        // Low Flow is unsigned
+        if (menu.current_line == 6)
+            menu.edit_unsigned = 1;
+    }
 
     // Store original value
     menu.original_value = value;
@@ -482,7 +801,6 @@ void init_numeric_editor(int16_t value)
     menu.edit_digit = menu.edit_unsigned ? 1 : 0; // Skip sign for unsigned
 }
 
-// Get current numeric value being edited
 int16_t get_current_numeric_value(void)
 {
     int16_t value = menu.digit_100 * 100 + menu.digit_10 * 10 + menu.digit_1;
@@ -491,12 +809,10 @@ int16_t get_current_numeric_value(void)
     return value;
 }
 
-// Handle rotation for numeric editing
 void handle_numeric_rotation(int8_t direction)
-{                                                   // <-- Opening brace must be HERE, right after the function signature
-    uart_println("handle_numeric_rotation called"); // Debug line INSIDE the function
+{
+    uart_println("handle_numeric_rotation called");
 
-    // Add debug info
     char buf[50];
     sprintf(buf, "edit_digit: %d, unsigned: %d", menu.edit_digit, menu.edit_unsigned);
     uart_println(buf);
@@ -521,102 +837,154 @@ void handle_numeric_rotation(int8_t direction)
         {
             menu.digit_100++;
             if (menu.digit_100 > 5)
-                menu.digit_100 = 0; // Roll over to 0
+                menu.digit_100 = 0;
         }
         else if (direction < 0)
         {
             if (menu.digit_100 == 0)
-                menu.digit_100 = 5; // Roll under to 5
+                menu.digit_100 = 5;
             else
                 menu.digit_100--;
         }
-        // REMOVE THE AUTO-RESET - don't force tens/units to 0 here
         break;
 
-    case 2: // Tens (0-9) with rollover, but limited if hundreds = 5
+    case 2: // Tens (0-9) with rollover, limited if hundreds = 5
     {
         uint8_t max_tens = (menu.digit_100 == 5) ? 0 : 9;
         if (direction > 0)
         {
             if (max_tens == 0)
-                break; // Can't change if at 500
+                break;
             menu.digit_10++;
             if (menu.digit_10 > max_tens)
-                menu.digit_10 = 0; // Roll over to 0
+                menu.digit_10 = 0;
         }
         else if (direction < 0)
         {
             if (max_tens == 0)
-                break; // Can't change if at 500
+                break;
             if (menu.digit_10 == 0)
-                menu.digit_10 = max_tens; // Roll under to max
+                menu.digit_10 = max_tens;
             else
                 menu.digit_10--;
         }
+        break;
     }
-    break;
 
-    case 3: // Units (0-9) with rollover, but limited if at 50x
+    case 3: // Units (0-9) with rollover, limited if hundreds = 5
     {
-        // If we're at 50x, units must be 0
-        if (menu.digit_100 == 5 && menu.digit_10 == 0)
-        {
-            menu.digit_1 = 0; // Force to 0, no change allowed
-            break;            // Don't allow any change
-        }
-
-        // Otherwise normal 0-9 with rollover
+        uint8_t max_units = (menu.digit_100 == 5) ? 0 : 9;
         if (direction > 0)
         {
+            if (max_units == 0)
+                break;
             menu.digit_1++;
-            if (menu.digit_1 > 9)
-                menu.digit_1 = 0; // Roll over to 0
+            if (menu.digit_1 > max_units)
+                menu.digit_1 = 0;
         }
         else if (direction < 0)
         {
+            if (max_units == 0)
+                break;
             if (menu.digit_1 == 0)
-                menu.digit_1 = 9; // Roll under to 9
+                menu.digit_1 = max_units;
             else
                 menu.digit_1--;
         }
+        break;
     }
-    break;
     }
 }
 
-// Update only the numeric value during editing - FAST UPDATE
-void menu_update_numeric_value(void)
+void menu_update_edit_value(void)
 {
-    // DEBUG: Check if this function is being called
-    extern void uart_println(const char *str);
-    uart_println("menu_update_numeric_value called");
+    // Get current context
+    extern input_config_t input_config[3];
+    uint8_t sensor_type = input_config[current_input].sensor_type;
+    uint8_t flow_type = input_config[current_input].flow_type;
 
-    // Only update if we're in INPUT menu and edit mode
-    if (current_menu != 1 || !menu.in_edit_mode)
+    // Only update if we're in edit mode and in INPUT menu
+    if (!menu.in_edit_mode || current_menu != 1)
         return;
 
-    // Find which line on screen has the edited item
+    // Find which line on screen (0, 1, or 2)
     uint8_t screen_line = menu.current_line - menu.top_line;
     if (screen_line >= 3)
         return; // Not visible
 
-    // Get the item being edited
-    uint8_t item_idx = menu.current_line;
+    // Check if this is a numeric field
+    if (!is_numeric_field(menu.current_line, sensor_type, flow_type))
+        return;
 
-    // Handle Scale 4mA, Scale 20mA, Hi Pressure, Low Pressure
-    if (!is_numeric_field(item_idx))
+    // Build display string based on sign and digits
+    char value_buf[10];
+    if (menu.edit_unsigned)
+    {
+        sprintf(value_buf, "%d%d%d", menu.digit_100, menu.digit_10, menu.digit_1);
+    }
+    else
+    {
+        sprintf(value_buf, "%c%d%d%d",
+                menu.sign_negative ? '-' : '+',
+                menu.digit_100, menu.digit_10, menu.digit_1);
+    }
+
+    // Apply blinking to current digit
+    char display_buf[10];
+    strcpy(display_buf, value_buf);
+
+    if (!menu.blink_state)
+    {
+        uint8_t blink_pos;
+        if (menu.edit_unsigned)
+            blink_pos = menu.edit_digit - 1;
+        else
+            blink_pos = menu.edit_digit;
+
+        if (blink_pos < strlen(display_buf))
+            display_buf[blink_pos] = ' ';
+    }
+
+    // Display at correct position
+    uint8_t start_col = menu.edit_unsigned ? 14 : 13;
+    lcd_set_cursor(screen_line + 1, start_col);
+    lcd_print("      "); // Clear area
+
+    lcd_set_cursor(screen_line + 1, start_col);
+    lcd_print("(");
+    lcd_print(display_buf);
+    lcd_print(")");
+}
+
+/**
+ * Update numeric value display during editing - specialized for numeric fields
+ * Called from main.c during encoder rotation and blink updates
+ */
+void menu_update_numeric_value(void)
+{
+    // Only update if we're in INPUT menu and edit mode
+    if (current_menu != 1 || !menu.in_edit_mode)
+        return;
+
+    // Find which line on screen
+    uint8_t screen_line = menu.current_line - menu.top_line;
+    if (screen_line >= 3)
+        return; // Not visible
+
+    // Get current context
+    extern input_config_t input_config[3];
+    uint8_t sensor_type = input_config[current_input].sensor_type;
+    uint8_t flow_type = input_config[current_input].flow_type;
+
+    // Only handle numeric fields
+    if (!is_numeric_field(menu.current_line, sensor_type, flow_type))
         return;
 
     // Build the complete value string
-    char value_buf[6] = {0}; // Maximum size needed
+    char value_buf[6] = {0};
 
     if (menu.edit_unsigned)
     {
-        // Add debug
-        char debug[50];
-        sprintf(debug, "edit_digit=%d, blink=%d", menu.edit_digit, menu.blink_state);
-        uart_println(debug);
-
         // Unsigned: just 3 digits, no sign
         value_buf[0] = (menu.edit_digit == 1 && !menu.blink_state) ? ' ' : ('0' + menu.digit_100);
         value_buf[1] = (menu.edit_digit == 2 && !menu.blink_state) ? ' ' : ('0' + menu.digit_10);
@@ -637,49 +1005,63 @@ void menu_update_numeric_value(void)
     uint8_t start_col = menu.edit_unsigned ? 15 : 14;
 
     lcd_set_cursor(screen_line + 1, start_col);
-    lcd_print("      "); // Clear 6 positions
+    lcd_print("     "); // Clear area
 
-    // Position and print with parentheses
     lcd_set_cursor(screen_line + 1, start_col);
     lcd_print("(");
     lcd_print(value_buf);
     lcd_print(")");
 }
 
-// Draw OPTIONS menu with scrolling
+//=============================================================================
+// MENU DRAWING FUNCTIONS
+//=============================================================================
+
 void menu_draw_options(void)
 {
-    // Fixed title
-    lcd_clear_line(0);
-    lcd_print_at(0, 0, "OPTIONS");
+    // Fixed title line
+    lcd_clear();
+    lcd_set_cursor(0, 0);
+    lcd_print("OPTIONS             ");
 
-    // Draw 3 visible items (lines 1-3)
-    for (uint8_t i = 0; i < 3 && (menu.top_line + i) < menu.total_items; i++)
+    // Draw 3 visible menu items
+    for (uint8_t i = 0; i < 3; i++)
     {
+        uint8_t item_index = menu.top_line + i;
+        if (item_index >= 5)
+            break;
+
         lcd_clear_line(i + 1);
 
-        // Add cursor brackets if this is selected line
-        if (menu.top_line + i == menu.current_line)
+        // If this is the current line, show with bracket cursor
+        if (item_index == menu.current_line)
         {
-            lcd_print_at(i + 1, 0, "[");
-            lcd_print(options_menu[menu.top_line + i]);
+            lcd_set_cursor(i + 1, 0);
+            lcd_print("[");
+            lcd_print(options_menu[item_index]);
             lcd_print("]");
         }
         else
         {
-            lcd_print_at(i + 1, 1, options_menu[menu.top_line + i]);
+            // Not selected - start at column 2 (leave column 1 for potential bracket)
+            lcd_print_at(i + 1, 1, options_menu[item_index]);
         }
     }
 }
 
-// Draw INPUT menu with values right-justified and brackets on VALUES
 void menu_draw_input(void)
 {
+    extern input_config_t input_config[3];
+
     // Dynamic title showing which input
     lcd_clear_line(0);
     char title[10];
     sprintf(title, "INPUT %d", current_input + 1);
     lcd_print_at(0, 0, title);
+
+    // Get sensor context for field detection
+    uint8_t sensor_type = input_config[current_input].sensor_type;
+    uint8_t flow_type = input_config[current_input].flow_type;
 
     // Draw 3 visible items
     for (uint8_t i = 0; i < 3 && (menu.top_line + i) < menu.total_items; i++)
@@ -690,14 +1072,6 @@ void menu_draw_input(void)
         // Left side - label (no brackets)
         lcd_print_at(i + 1, 0, input_menu[item_idx].label);
 
-        // DEBUG: See what's being drawn
-        if (item_idx >= 11)
-        {
-            char buf[50];
-            sprintf(buf, "Drawing idx %d: %s", item_idx, input_menu[item_idx].label);
-            uart_println(buf);
-        }
-
         // Build and display the value (right-justified)
         char value_buf[15];
         uint8_t show_brackets = 0; // 0=none, 1=square brackets, 2=parentheses
@@ -707,38 +1081,34 @@ void menu_draw_input(void)
             if (menu.in_edit_mode)
             {
                 show_brackets = 2; // Use parentheses in edit mode
-                // Edit mode - only value blinks
-                if (menu.blink_state)
+
+                // For option fields - handle blinking
+                if (is_option_field(item_idx, sensor_type, flow_type))
                 {
-                    // Show text (without parentheses)
-                    const item_options_t *opts = get_item_options(item_idx);
-                    if (opts != NULL)
+                    if (menu.blink_state)
                     {
-                        uint8_t flag_value = (item_idx == 0) ? enable_edit_flag : sensor_edit_flag;
-                        if (flag_value < opts->option_count)
+                        // Show text
+                        const item_options_t *opts = get_item_options_for_field(item_idx, sensor_type, flow_type);
+                        uint8_t *flag = get_option_edit_flag(item_idx, sensor_type, flow_type);
+
+                        if (opts != NULL && flag != NULL && *flag < opts->option_count)
                         {
-                            strcpy(value_buf, opts->options[flag_value]);
+                            strcpy(value_buf, opts->options[*flag]);
                         }
                         else
                         {
-                            strcpy(value_buf, "Error");
+                            strcpy(value_buf, input_menu[item_idx].value);
                         }
                     }
                     else
                     {
-                        strcpy(value_buf, input_menu[item_idx].value);
-                    }
-                }
-                else
-                {
-                    // Blink off - show spaces
-                    const item_options_t *opts = get_item_options(item_idx);
-                    if (opts != NULL)
-                    {
-                        uint8_t flag_value = (item_idx == 0) ? enable_edit_flag : sensor_edit_flag;
-                        if (flag_value < opts->option_count)
+                        // Blink off - show spaces
+                        const item_options_t *opts = get_item_options_for_field(item_idx, sensor_type, flow_type);
+                        uint8_t *flag = get_option_edit_flag(item_idx, sensor_type, flow_type);
+
+                        if (opts != NULL && flag != NULL && *flag < opts->option_count)
                         {
-                            uint8_t val_len = strlen(opts->options[flag_value]);
+                            uint8_t val_len = strlen(opts->options[*flag]);
                             for (uint8_t j = 0; j < val_len; j++)
                                 value_buf[j] = ' ';
                             value_buf[val_len] = '\0';
@@ -748,13 +1118,11 @@ void menu_draw_input(void)
                             strcpy(value_buf, "     ");
                         }
                     }
-                    else
-                    {
-                        uint8_t val_len = strlen(input_menu[item_idx].value);
-                        for (uint8_t j = 0; j < val_len; j++)
-                            value_buf[j] = ' ';
-                        value_buf[val_len] = '\0';
-                    }
+                }
+                else
+                {
+                    // For numeric/time fields, just get current value
+                    strcpy(value_buf, input_menu[item_idx].value);
                 }
             }
             else
@@ -775,152 +1143,165 @@ void menu_draw_input(void)
         uint8_t val_len = strlen(value_buf);
         if (val_len > 0 && strcmp(input_menu[item_idx].value, "") != 0)
         {
-            // Skip drawing if we're editing a numeric field - let menu_update_numeric_value handle it
-            if (menu.in_edit_mode && is_numeric_field(item_idx) && (item_idx == menu.current_line))
+            // Skip drawing if we're editing a numeric or time field
+            if (menu.in_edit_mode && item_idx == menu.current_line)
             {
-                // Don't draw anything here for numeric fields in edit mode
-                uart_println("Skipping numeric draw in menu_draw_input");
-                // Don't draw anything here for numeric fields in edit mode
-                // menu_update_numeric_value() will handle the display
+                if (is_numeric_field(item_idx, sensor_type, flow_type) ||
+                    is_time_field(item_idx, sensor_type, flow_type))
+                {
+                    // Don't draw - specialized update functions handle it
+                    continue;
+                }
+            }
+
+            if (show_brackets == 0)
+            {
+                // No brackets - value ends at column 19
+                lcd_print_at(i + 1, 19 - val_len, value_buf);
             }
             else
             {
-                if (show_brackets == 0)
-                {
-                    // No brackets - value ends at column 19
-                    lcd_print_at(i + 1, 19 - val_len, value_buf);
-                }
-                else
-                {
-                    // With brackets - print everything in one sequence
-                    uint8_t start_pos = 19 - val_len - 1; // Where opening bracket goes
-                    lcd_set_cursor(i + 1, start_pos);
+                // With brackets - print everything in one sequence
+                uint8_t start_pos = 19 - val_len - 1; // Where opening bracket goes
+                lcd_set_cursor(i + 1, start_pos);
 
-                    // Print opening bracket
-                    lcd_print(show_brackets == 1 ? "[" : "(");
-                    // Print value immediately after
-                    lcd_print(value_buf);
-                    // Print closing bracket immediately after
-                    lcd_print(show_brackets == 1 ? "]" : ")");
-                }
+                // Print opening bracket
+                lcd_print(show_brackets == 1 ? "[" : "(");
+                // Print value immediately after
+                lcd_print(value_buf);
+                // Print closing bracket immediately after
+                lcd_print(show_brackets == 1 ? "]" : ")");
             }
         }
     }
 }
-// Update only the edited value - FAST UPDATE for edit mode
-void menu_update_edit_value(void)
+
+void menu_draw_setup(void)
 {
-    // Only update if we're in INPUT menu and edit mode
-    if (current_menu != 1 || !menu.in_edit_mode)
-        return;
+    extern input_config_t input_config[3];
 
-    // Find which line on screen has the edited item
-    uint8_t screen_line = menu.current_line - menu.top_line;
-    if (screen_line >= 3)
-        return; // Not visible
+    // Fixed title line
+    lcd_clear();
+    lcd_set_cursor(0, 0);
+    lcd_print("SETUP               ");
 
-    // Get the item being edited
-    uint8_t item_idx = menu.current_line;
+    // Menu items: Input 1, Input 2, Input 3, Clock, Back
+    const char *setup_labels[] = {"", "", "", "Clock", "Back"};
 
-    // Build the value string (without parentheses)
-    char value_buf[15];
-    const item_options_t *opts = get_item_options(item_idx);
-
-    if (opts != NULL)
+    // Draw 3 visible menu items
+    for (uint8_t i = 0; i < 3; i++)
     {
-        uint8_t flag_value = (item_idx == 0) ? enable_edit_flag : sensor_edit_flag;
-        if (flag_value < opts->option_count)
+        uint8_t item_idx = menu.top_line + i;
+        if (item_idx >= 5)
+            break;
+
+        lcd_clear_line(i + 1);
+
+        // For Input 1-3, show sensor type
+        if (item_idx < 3)
         {
-            if (menu.blink_state)
+            uint8_t sensor = input_config[item_idx].sensor_type;
+            const char *sensor_name = (sensor == 0) ? "Pressure" : (sensor == 1) ? "Temp"
+                                                                                 : "Flow";
+
+            // Show label with or without brackets based on selection
+            if (item_idx == menu.current_line)
             {
-                // Show the value
-                strcpy(value_buf, opts->options[flag_value]);
+                // Selected - show with bracket cursor at column 1
+                lcd_set_cursor(i + 1, 0);
+                lcd_print("[");
+                lcd_print(sensor_name);
+                lcd_print("]");
             }
             else
             {
-                // Show spaces (blink off)
-                uint8_t val_len = strlen(opts->options[flag_value]);
-                for (uint8_t j = 0; j < val_len; j++)
-                    value_buf[j] = ' ';
-                value_buf[val_len] = '\0';
+                // Not selected - start at column 2
+                lcd_print_at(i + 1, 1, sensor_name);
+            }
+
+            // Enable indicator in column 20 (always shown, separate from brackets)
+            lcd_set_cursor(i + 1, 19);
+            lcd_print(input_config[item_idx].enable ? "*" : " ");
+        }
+        else
+        {
+            // Clock or Back
+            const char *label = setup_labels[item_idx];
+
+            if (item_idx == menu.current_line)
+            {
+                // Selected - show with bracket cursor at column 1
+                lcd_set_cursor(i + 1, 0);
+                lcd_print("[");
+                lcd_print(label);
+                lcd_print("]");
+            }
+            else
+            {
+                // Not selected - start at column 2
+                lcd_print_at(i + 1, 1, label);
             }
         }
-        else
-        {
-            if (menu.blink_state)
-                strcpy(value_buf, "Error");
-            else
-                strcpy(value_buf, "     "); // 5 spaces
-        }
-    }
-    else
-    {
-        if (menu.blink_state)
-        {
-            strcpy(value_buf, input_menu[item_idx].value);
-        }
-        else
-        {
-            uint8_t val_len = strlen(input_menu[item_idx].value);
-            for (uint8_t j = 0; j < val_len; j++)
-                value_buf[j] = ' ';
-            value_buf[val_len] = '\0';
-        }
-    }
-
-    // Clear the entire value area to handle different lengths
-    lcd_set_cursor(screen_line + 1, 10); // Start clearing from column 10
-    lcd_print("          ");             // 10 spaces to clear any remnants
-
-    // Display with parentheses - move left by 1 to make room for closing paren
-    uint8_t val_len = strlen(value_buf);
-    if (val_len > 0)
-    {
-        // Move everything left by 1 more position
-        uint8_t start_pos = 18 - val_len; // One position further left (was 19-val_len-1)
-        lcd_set_cursor(screen_line + 1, start_pos);
-
-        // Print opening parenthesis
-        lcd_print("(");
-        // Print value immediately after (will end at column 19)
-        lcd_print(value_buf);
-        // Print closing parenthesis immediately after (at column 20)
-        lcd_print(")");
     }
 }
 
-// Handle encoder rotation - FLEXIBLE OPTION SYSTEM
+//=============================================================================
+// ENCODER HANDLING
+//=============================================================================
+
 void menu_handle_encoder(int16_t delta)
 {
-    // Edit mode - handle all editable items flexibly
+    extern input_config_t input_config[3];
+
+    // Edit mode - handle based on field type
     if (menu.in_edit_mode)
     {
         if (delta != 0)
         {
-            // Get the options for this menu item
-            const item_options_t *opts = get_item_options(menu.current_line);
-            if (opts != NULL)
+            uint8_t sensor_type = input_config[current_input].sensor_type;
+            uint8_t flow_type = input_config[current_input].flow_type;
+
+            // Check if this is an option field
+            if (is_option_field(menu.current_line, sensor_type, flow_type))
             {
-                // Get pointer to the appropriate edit flag
-                uint8_t *edit_flag = (menu.current_line == 0) ? &enable_edit_flag : &sensor_edit_flag;
+                uint8_t *edit_flag = get_option_edit_flag(menu.current_line, sensor_type, flow_type);
+                const item_options_t *opts = get_item_options_for_field(menu.current_line, sensor_type, flow_type);
 
-                if (delta > 0)
+                if (edit_flag != NULL && opts != NULL)
                 {
-                    (*edit_flag)++;
+                    if (delta > 0)
+                    {
+                        (*edit_flag)++;
+                        if (*edit_flag >= opts->option_count)
+                            *edit_flag = 0;
+                    }
+                    else if (delta < 0)
+                    {
+                        if (*edit_flag == 0)
+                            *edit_flag = opts->option_count - 1;
+                        else
+                            (*edit_flag)--;
+                    }
+
+                    // Safety clamp
                     if (*edit_flag >= opts->option_count)
-                        *edit_flag = 0; // Wrap to 0
-                }
-                else if (delta < 0)
-                {
-                    if (*edit_flag == 0)
-                        *edit_flag = opts->option_count - 1; // Wrap to last option
-                    else
-                        (*edit_flag)--;
-                }
+                        *edit_flag = 0;
 
-                // Safety clamp
-                if (*edit_flag >= opts->option_count)
-                    *edit_flag = 0;
+                    // Update display immediately for option fields
+                    if (current_menu == 1)
+                    {
+                        strcpy(input_menu[menu.current_line].value, opts->options[*edit_flag]);
+                        menu_draw_input();
+                    }
+                }
+            }
+            else if (is_numeric_field(menu.current_line, sensor_type, flow_type))
+            {
+                handle_numeric_rotation(delta > 0 ? 1 : -1);
+            }
+            else if (is_time_field(menu.current_line, sensor_type, flow_type))
+            {
+                handle_time_rotation(delta > 0 ? 1 : -1);
             }
         }
         return;
@@ -946,12 +1327,6 @@ void menu_handle_encoder(int16_t delta)
         // Counter-clockwise - move up
         if (menu.current_line > 0)
         {
-
-            // DEBUG: Hit the limit
-            char buf[50];
-            sprintf(buf, "At limit: line=%d, total=%d", menu.current_line, menu.total_items);
-            uart_println(buf);
-
             menu.current_line--;
 
             // Adjust scroll if needed
@@ -963,60 +1338,119 @@ void menu_handle_encoder(int16_t delta)
     }
 }
 
-// Handle button press - FLEXIBLE OPTION SYSTEM WITH EEPROM SAVE
+//=============================================================================
+// BUTTON HANDLING
+//=============================================================================
+
 void menu_handle_button(uint8_t press_type)
 {
     extern uint8_t save_pending;
+    extern input_config_t input_config[3];
 
     if (menu.in_edit_mode)
     {
         if (press_type == 1) // Short press - confirm edit
         {
-            // Check if we're editing Enable or Sensor (option fields)
-            if (menu.current_line == 0 || menu.current_line == 1)
-            {
-                // Apply the value based on which item we're editing
-                const item_options_t *opts = get_item_options(menu.current_line);
-                if (opts != NULL)
-                {
-                    uint8_t *edit_flag = (menu.current_line == 0) ? &enable_edit_flag : &sensor_edit_flag;
+            uint8_t sensor_type = input_config[current_input].sensor_type;
+            uint8_t flow_type = input_config[current_input].flow_type;
 
+            // Handle option fields
+            if (is_option_field(menu.current_line, sensor_type, flow_type))
+            {
+                uint8_t *edit_flag = get_option_edit_flag(menu.current_line, sensor_type, flow_type);
+                const item_options_t *opts = get_item_options_for_field(menu.current_line, sensor_type, flow_type);
+
+                if (edit_flag != NULL && opts != NULL)
+                {
                     // Update the menu item value
                     strcpy(input_menu[menu.current_line].value, opts->options[*edit_flag]);
 
-                    // UPDATE THE ACTUAL CONFIG - ADD THIS
-                    if (menu.current_line == 0) // Enable field
+                    // UPDATE THE ACTUAL CONFIG based on which field
+                    if (menu.current_line == 0) // Enable
                     {
                         input_config[current_input].enable = enable_edit_flag;
                     }
-                    else if (menu.current_line == 1) // Sensor field
+                    else if (menu.current_line == 1) // Sensor
                     {
                         input_config[current_input].sensor_type = sensor_edit_flag;
+
+                        // If changing TO Flow, set default flow_type
+                        if (sensor_edit_flag == 2 && sensor_type != 2)
+                        {
+                            input_config[current_input].flow_type = 1; // Default to Digital
+                        }
+                    }
+                    else if (menu.current_line == 2 && sensor_type == 2) // Flow Type
+                    {
+                        input_config[current_input].flow_type = flow_type_edit_flag;
+
+                        // IMPORTANT: Rebuild menu when flow type changes
+                        rebuild_input_menu(current_input);
+                    }
+                    else if (menu.current_line == 3 && sensor_type == 2 && flow_type == 1) // No Flow
+                    {
+                        // TODO: Save to EEPROM when field added
+                    }
+                    else if (menu.current_line == 3 && sensor_type == 2 && flow_type == 0) // Units
+                    {
+                        input_config[current_input].flow_units = flow_units_edit_flag;
+                    }
+                    else if (sensor_type == 0) // Pressure relay/display fields
+                    {
+                        if (menu.current_line == 9)
+                            input_config[current_input].relay_high_mode = relay_high_edit_flag;
+                        else if (menu.current_line == 10)
+                            input_config[current_input].relay_plp_mode = relay_plp_edit_flag;
+                        else if (menu.current_line == 11)
+                            input_config[current_input].relay_slp_mode = relay_slp_edit_flag;
+                        else if (menu.current_line == 12)
+                            input_config[current_input].display_enabled = display_edit_flag;
+                    }
+                    else if (sensor_type == 1) // Temp relay/display fields
+                    {
+                        if (menu.current_line == 6)
+                            input_config[current_input].relay_high_mode = relay_high_edit_flag;
+                        else if (menu.current_line == 7)
+                            input_config[current_input].display_enabled = display_edit_flag;
+                    }
+                    else if (sensor_type == 2) // Flow relay/display fields
+                    {
+                        if (flow_type == 0) // Analog
+                        {
+                            if (menu.current_line == 8)
+                                input_config[current_input].relay_low_mode = relay_low_edit_flag;
+                            else if (menu.current_line == 9)
+                                input_config[current_input].display_enabled = display_edit_flag;
+                        }
+                        else // Digital
+                        {
+                            if (menu.current_line == 5)
+                                input_config[current_input].relay_low_mode = relay_low_edit_flag;
+                            else if (menu.current_line == 6)
+                                input_config[current_input].display_enabled = display_edit_flag;
+                        }
                     }
 
-                    // Mark for EEPROM save (deferred)
                     save_pending = 1;
                 }
 
                 menu.in_edit_mode = 0;
-                beep(50); // Confirmation beep
+                beep(50);
             }
-            else if (is_time_field(menu.current_line)) // Time fields
+            // Handle time fields
+            else if (is_time_field(menu.current_line, sensor_type, flow_type))
             {
-                // Advance to next field or save
                 menu.time_edit_digit++;
-                menu.blink_state = 1; // ADD THIS - force solid display when switching fields
+                menu.blink_state = 1;
                 beep(50);
 
-                // Debug
                 char buf[50];
                 sprintf(buf, "Time button: digit now=%d", menu.time_edit_digit);
                 uart_println(buf);
 
-                // Force immediate display update
-                menu_update_time_value(); // ADD THIS - update display right away
+                menu_update_time_value();
 
-                if (menu.time_edit_digit > 1) // Done editing (only 0 and 1 positions)
+                if (menu.time_edit_digit > 1)
                 {
                     // Calculate total seconds
                     uint16_t new_seconds;
@@ -1025,73 +1459,126 @@ void menu_handle_button(uint8_t press_type)
                     else // HH:MM
                         new_seconds = menu.time_xx * 3600 + menu.time_yy * 60;
 
-                    // Save to appropriate field
-                    if (menu.current_line == 5)
-                        input_config[current_input].high_bypass_time = new_seconds;
-                    else if (menu.current_line == 7)
-                        input_config[current_input].plp_bypass_time = new_seconds;
-                    else if (menu.current_line == 8)
-                        input_config[current_input].slp_bypass_time = new_seconds;
+                    // Save to appropriate field based on sensor and line
+                    if (sensor_type == 0) // Pressure
+                    {
+                        if (menu.current_line == 5)
+                            input_config[current_input].high_bypass_time = new_seconds;
+                        else if (menu.current_line == 7)
+                            input_config[current_input].plp_bypass_time = new_seconds;
+                        else if (menu.current_line == 8)
+                            input_config[current_input].slp_bypass_time = new_seconds;
+                    }
+                    else if (sensor_type == 1) // Temperature
+                    {
+                        if (menu.current_line == 5)
+                            input_config[current_input].high_bypass_time = new_seconds;
+                    }
+                    else if (sensor_type == 2) // Flow
+                    {
+                        if (flow_type == 0 && menu.current_line == 7) // Analog - Low Flow BP
+                            input_config[current_input].low_flow_bypass = new_seconds;
+                        else if (flow_type == 1 && menu.current_line == 4) // Digital - No Flow BP
+                            input_config[current_input].low_flow_bypass = new_seconds;
+                    }
 
                     // Update display string
                     sprintf(input_menu[menu.current_line].value, "%02d:%02d",
                             menu.time_xx, menu.time_yy);
 
-                    // Exit edit mode
                     menu.in_edit_mode = 0;
                     save_pending = 1;
-
                     uart_println("Time edit complete - saved");
                 }
             }
-            else if (is_numeric_field(menu.current_line)) // Numeric fields
+            // Handle numeric fields
+            else if (is_numeric_field(menu.current_line, sensor_type, flow_type))
             {
-                // Advance to next digit
                 menu.edit_digit++;
-                beep(50); // Confirmation beep
+                beep(50);
 
-                // ADD THIS: If we just confirmed hundreds=5, reset tens and units
-                if (menu.edit_digit == 2 && menu.digit_100 == 5) // Just moved to tens, hundreds is 5
+                if (menu.edit_digit == 2 && menu.digit_100 == 5)
                 {
                     menu.digit_10 = 0;
                     menu.digit_1 = 0;
                 }
 
-                if (menu.edit_digit > 3) // Finished all digits
+                if (menu.edit_digit > 3)
                 {
-                    // Save the new value
-                    extern input_config_t input_config[3];
                     int16_t new_value = get_current_numeric_value();
 
-                    // Update the configuration
-                    if (menu.current_line == 2)
+                    // Save based on sensor type and line
+                    if (sensor_type == 0) // Pressure
                     {
-                        input_config[current_input].scale_4ma = new_value;
-                        sprintf(input_menu[2].value, "%+04d", new_value);
+                        if (menu.current_line == 2)
+                        {
+                            input_config[current_input].scale_4ma = new_value;
+                            sprintf(input_menu[2].value, "%+04d", new_value);
+                        }
+                        else if (menu.current_line == 3)
+                        {
+                            input_config[current_input].scale_20ma = new_value;
+                            sprintf(input_menu[3].value, "%+04d", new_value);
+                        }
+                        else if (menu.current_line == 4)
+                        {
+                            input_config[current_input].high_setpoint = (uint16_t)new_value;
+                            sprintf(input_menu[4].value, "%03d", new_value);
+                        }
+                        else if (menu.current_line == 6)
+                        {
+                            // TODO: Save to low_pressure_setpoint when added
+                            sprintf(input_menu[6].value, "%03d", new_value);
+                        }
                     }
-                    else if (menu.current_line == 3)
+                    else if (sensor_type == 1) // Temperature
                     {
-                        input_config[current_input].scale_20ma = new_value;
-                        sprintf(input_menu[3].value, "%+04d", new_value);
+                        if (menu.current_line == 2)
+                        {
+                            input_config[current_input].scale_4ma = new_value;
+                            sprintf(input_menu[2].value, "%+04d", new_value);
+                        }
+                        else if (menu.current_line == 3)
+                        {
+                            input_config[current_input].scale_20ma = new_value;
+                            sprintf(input_menu[3].value, "%+04d", new_value);
+                        }
+                        else if (menu.current_line == 4)
+                        {
+                            input_config[current_input].high_setpoint = (uint16_t)new_value;
+                            sprintf(input_menu[4].value, "%03d", new_value);
+                        }
                     }
-                    else if (menu.current_line == 4)
+                    else if (sensor_type == 2 && flow_type == 0) // Analog Flow
                     {
-                        input_config[current_input].high_setpoint = (uint16_t)new_value;
-                        sprintf(input_menu[4].value, "%03d", new_value);
-                    }
-                    else if (menu.current_line == 6)
-                    {
-                        // TODO: Save to low_pressure_setpoint when added to structure
-                        sprintf(input_menu[6].value, "%03d", new_value);
+                        if (menu.current_line == 4)
+                        {
+                            input_config[current_input].scale_4ma = new_value;
+                            sprintf(input_menu[4].value, "%+04d", new_value);
+                        }
+                        else if (menu.current_line == 5)
+                        {
+                            input_config[current_input].scale_20ma = new_value;
+                            sprintf(input_menu[5].value, "%+04d", new_value);
+                        }
+                        else if (menu.current_line == 6)
+                        {
+                            input_config[current_input].low_flow_setpoint = (uint16_t)new_value;
+                            sprintf(input_menu[6].value, "%03d", new_value);
+                        }
                     }
 
-                    // Mark for EEPROM save
                     save_pending = 1;
-
-                    // Exit edit mode
                     menu.in_edit_mode = 0;
                 }
             }
+        }
+        else if (press_type == 2) // Long press - cancel edit
+        {
+            menu.in_edit_mode = 0;
+            beep(100);
+            __delay_ms(50);
+            beep(100); // Double beep for cancel
         }
     }
     else // Not in edit mode
@@ -1105,107 +1592,136 @@ void menu_handle_button(uint8_t press_type)
                 switch (menu.current_line)
                 {
                 case 0: // Main Menu
-                    // Stub for Main Menu
                     break;
 
-                case 1:               // Setup Menu - Go to SETUP menu
-                    current_menu = 2; // 2 = SETUP menu
+                case 1: // Setup Menu
+                    current_menu = 2;
                     menu.current_line = 0;
                     menu.top_line = 0;
-                    menu.total_items = 5; // 5 items in SETUP menu
+                    menu.total_items = 5;
                     menu_draw_setup();
                     break;
 
                 case 2: // Utility Menu
-                    // Stub for Utility Menu
                     break;
 
                 case 3: // About
-                    // Stub for About
                     break;
 
                 case 4: // Exit
-                    // Save any pending changes to EEPROM before exiting
                     if (save_pending)
                     {
                         save_current_config();
                         save_pending = 0;
                     }
-                    current_menu = 255; // ADD THIS LINE - Return to main screen
+                    current_menu = 255;
                     break;
                 }
             }
             else if (current_menu == 1) // INPUT menu
             {
-                if (menu.current_line == menu.total_items - 1) // Back option (always last item)
+                if (menu.current_line == menu.total_items - 1) // Back
                 {
                     beep(50);
-                    // Go back to SETUP menu
-                    current_menu = 2; // Go to SETUP menu
+                    current_menu = 2;
                     menu.current_line = 0;
                     menu.top_line = 0;
-                    menu.total_items = 5; // SETUP menu has 5 items
+                    menu.total_items = 5;
                     menu_draw_setup();
                 }
                 else if (input_menu[menu.current_line].editable)
                 {
-                    // Check if it's a numeric field
-                    if (is_numeric_field(menu.current_line))
-                    {
-                        // Initialize numeric editor
-                        extern input_config_t input_config[3];
-                        int16_t current_val;
+                    uint8_t sensor_type = input_config[current_input].sensor_type;
+                    uint8_t flow_type = input_config[current_input].flow_type;
 
-                        if (menu.current_line == 2)
-                            current_val = input_config[current_input].scale_4ma;
-                        else if (menu.current_line == 3)
-                            current_val = input_config[current_input].scale_20ma;
-                        else if (menu.current_line == 4)
-                            current_val = (int16_t)input_config[current_input].high_setpoint;
-                        else if (menu.current_line == 6)
-                            current_val = 50; // TODO: Add low_pressure_setpoint to structure
+                    // Enter edit mode for numeric fields
+                    if (is_numeric_field(menu.current_line, sensor_type, flow_type))
+                    {
+                        int16_t current_val = 0;
+
+                        // Get current value based on sensor and line
+                        if (sensor_type == 0) // Pressure
+                        {
+                            if (menu.current_line == 2)
+                                current_val = input_config[current_input].scale_4ma;
+                            else if (menu.current_line == 3)
+                                current_val = input_config[current_input].scale_20ma;
+                            else if (menu.current_line == 4)
+                                current_val = (int16_t)input_config[current_input].high_setpoint;
+                            else if (menu.current_line == 6)
+                                current_val = 50; // TODO
+                        }
+                        else if (sensor_type == 1) // Temperature
+                        {
+                            if (menu.current_line == 2)
+                                current_val = input_config[current_input].scale_4ma;
+                            else if (menu.current_line == 3)
+                                current_val = input_config[current_input].scale_20ma;
+                            else if (menu.current_line == 4)
+                                current_val = (int16_t)input_config[current_input].high_setpoint;
+                        }
+                        else if (sensor_type == 2 && flow_type == 0) // Analog Flow
+                        {
+                            if (menu.current_line == 4)
+                                current_val = input_config[current_input].scale_4ma;
+                            else if (menu.current_line == 5)
+                                current_val = input_config[current_input].scale_20ma;
+                            else if (menu.current_line == 6)
+                                current_val = (int16_t)input_config[current_input].low_flow_setpoint;
+                        }
 
                         init_numeric_editor(current_val);
-                        menu.in_edit_mode = 1;
-                        menu.blink_state = 1; // Start with value visible
-                        beep(50);
-                    }
-                    else if (is_time_field(menu.current_line)) // Time field handling
-                    {
-                        // Initialize time editor
-                        extern input_config_t input_config[3];
-                        uint16_t current_val = 0;
-
-                        // Get the current value in seconds based on which field
-                        if (menu.current_line == 5) // High BP or High TBP
-                            current_val = input_config[current_input].high_bypass_time;
-                        else if (menu.current_line == 7) // PLPBP
-                            current_val = input_config[current_input].plp_bypass_time;
-                        else if (menu.current_line == 8) // SLPBP
-                            current_val = input_config[current_input].slp_bypass_time;
-
-                        // DEBUG: Print what we're sending to init
-                        char buf[50];
-                        sprintf(buf, "Init time editor: seconds=%d, line=%d", current_val, menu.current_line);
-                        uart_println(buf);
-
-                        init_time_editor(current_val, 0); // Mode 0 for MM:SS
                         menu.in_edit_mode = 1;
                         menu.blink_state = 1;
                         beep(50);
                     }
-                    else // Enable or Sensor - option field handling
+                    // Enter edit mode for time fields
+                    else if (is_time_field(menu.current_line, sensor_type, flow_type))
                     {
-                        // Store original value for potential cancellation
+                        uint16_t current_val = 0;
+
+                        // Get current value based on sensor and line
+                        if (sensor_type == 0) // Pressure
+                        {
+                            if (menu.current_line == 5)
+                                current_val = input_config[current_input].high_bypass_time;
+                            else if (menu.current_line == 7)
+                                current_val = input_config[current_input].plp_bypass_time;
+                            else if (menu.current_line == 8)
+                                current_val = input_config[current_input].slp_bypass_time;
+                        }
+                        else if (sensor_type == 1) // Temperature
+                        {
+                            if (menu.current_line == 5)
+                                current_val = input_config[current_input].high_bypass_time;
+                        }
+                        else if (sensor_type == 2) // Flow
+                        {
+                            if ((flow_type == 0 && menu.current_line == 7) ||
+                                (flow_type == 1 && menu.current_line == 4))
+                                current_val = input_config[current_input].low_flow_bypass;
+                        }
+
+                        char buf[50];
+                        sprintf(buf, "Init time editor: seconds=%d, line=%d", current_val, menu.current_line);
+                        uart_println(buf);
+
+                        init_time_editor(current_val, 0);
+                        menu.in_edit_mode = 1;
+                        menu.blink_state = 1;
+                        beep(50);
+                    }
+                    // Enter edit mode for option fields
+                    else if (is_option_field(menu.current_line, sensor_type, flow_type))
+                    {
                         strcpy(original_value, input_menu[menu.current_line].value);
 
-                        // Get the correct flag value for this item
-                        const item_options_t *opts = get_item_options(menu.current_line);
-                        if (opts != NULL)
-                        {
-                            uint8_t *edit_flag = (menu.current_line == 0) ? &enable_edit_flag : &sensor_edit_flag;
+                        uint8_t *edit_flag = get_option_edit_flag(menu.current_line, sensor_type, flow_type);
+                        const item_options_t *opts = get_item_options_for_field(menu.current_line, sensor_type, flow_type);
 
-                            // Find which option matches the current value
+                        if (edit_flag != NULL && opts != NULL)
+                        {
+                            // Find which option matches current value
                             for (uint8_t i = 0; i < opts->option_count; i++)
                             {
                                 if (strcmp(input_menu[menu.current_line].value, opts->options[i]) == 0)
@@ -1217,8 +1733,8 @@ void menu_handle_button(uint8_t press_type)
                         }
 
                         menu.in_edit_mode = 1;
-                        menu.blink_state = 1; // Start with value visible
-                        beep(50);             // Immediate feedback
+                        menu.blink_state = 1;
+                        beep(50);
                     }
                 }
             }
@@ -1226,106 +1742,33 @@ void menu_handle_button(uint8_t press_type)
             {
                 beep(50);
 
-                if (menu.current_line == 4) // Back option
+                if (menu.current_line == 4) // Back
                 {
-                    // Go back to OPTIONS menu
                     current_menu = 0;
                     menu.current_line = 0;
                     menu.top_line = 0;
-                    menu.total_items = 5; // OPTIONS menu has 5 items
+                    menu.total_items = 5;
                     menu_draw_options();
                 }
                 else if (menu.current_line <= 2) // Input 1-3
                 {
-                    // Rebuild menu for selected input
-                    rebuild_input_menu(menu.current_line); // 0=Input1, 1=Input2, 2=Input3
-
-                    // Go to INPUT menu
+                    rebuild_input_menu(menu.current_line);
                     current_menu = 1;
                     menu.current_line = 0;
                     menu.top_line = 0;
-                    // total_items already set by rebuild_input_menu
                     menu_draw_input();
                 }
                 else if (menu.current_line == 3) // Clock
                 {
-                    // Stub for Clock configuration
+                    // Stub
                 }
             }
         }
-        else if (press_type == 2) // Long press
-        {
-            beep(100);
-            __delay_ms(50);
-            beep(100); // Double beep
-        }
-        else if (press_type == 3) // Very long press
+        else if (press_type == 2) // Long press - factory reset
         {
             beep(100);
             __delay_ms(50);
             beep(100);
-            __delay_ms(50);
-            beep(100); // Triple beep
-        }
-    }
-}
-
-// Draw SETUP menu - NEW FUNCTION
-void menu_draw_setup(void)
-{
-    extern input_config_t input_config[3];
-
-    lcd_clear();
-    lcd_print("SETUP");
-
-    // Display 3 items based on current position
-    for (uint8_t i = 0; i < 3 && (menu.top_line + i) < menu.total_items; i++)
-    {
-        uint8_t item_idx = menu.top_line + i;
-        lcd_set_cursor(i + 1, 0);
-
-        // Highlight current selection
-        if (item_idx == menu.current_line)
-            lcd_print("[");
-        else
-            lcd_print(" ");
-
-        // Display item based on index
-        if (item_idx < 3) // Input 1, 2, 3
-        {
-            // Get sensor type for this input
-            uint8_t sensor = input_config[item_idx].sensor_type;
-            const char *sensor_name = (sensor == 0) ? "Pressure" : (sensor == 1) ? "Temp"
-                                                                                 : "Flow";
-            lcd_print(sensor_name);
-
-            // Add spacing to position enable indicator
-            uint8_t name_len = strlen(sensor_name);
-            for (uint8_t j = name_len; j < 14; j++)
-                lcd_print(" ");
-
-            // Show '*' if enabled
-            if (input_config[item_idx].enable)
-            {
-                lcd_set_cursor(i + 1, 19);
-                lcd_print("*");
-            }
-        }
-        else if (item_idx == 3) // Clock
-        {
-            lcd_print("Clock");
-            // TODO: Add clock enable check when available
-        }
-        else if (item_idx == 4) // Back
-        {
-            lcd_print("Back");
-        }
-
-        // Close bracket if selected
-        if (item_idx == menu.current_line)
-        {
-            lcd_set_cursor(i + 1, 10);
-            lcd_print("]");
         }
     }
 }

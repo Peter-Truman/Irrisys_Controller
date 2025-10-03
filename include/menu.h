@@ -26,8 +26,10 @@ typedef struct
     uint16_t time_original;  // Original value in seconds for cancel
 } menu_state_t;
 
-uint8_t is_numeric_field(uint8_t line);
-uint8_t is_time_field(uint8_t line);
+// Context-aware field detection functions - NEW SIGNATURES
+uint8_t is_numeric_field(uint8_t line, uint8_t sensor_type, uint8_t flow_type);
+uint8_t is_time_field(uint8_t line, uint8_t sensor_type, uint8_t flow_type);
+uint8_t is_option_field(uint8_t line, uint8_t sensor_type, uint8_t flow_type);
 
 // Menu item structure
 typedef struct
@@ -41,10 +43,20 @@ typedef struct
 extern menu_state_t menu;
 extern menu_item_t input_menu[];
 
-// External variables that other files can access
-extern uint8_t enable_edit_flag;
-extern uint8_t sensor_edit_flag;
+// External edit flags for ALL option fields
+extern uint8_t enable_edit_flag;     // 0=Disabled, 1=Enabled
+extern uint8_t sensor_edit_flag;     // 0=Pressure, 1=Temp, 2=Flow
+extern uint8_t flow_type_edit_flag;  // 0=Analog, 1=Digital
+extern uint8_t no_flow_edit_flag;    // 0=Low, 1=High
+extern uint8_t flow_units_edit_flag; // 0=%, 1=LpS
+extern uint8_t display_edit_flag;    // 0=Hide, 1=Show
+extern uint8_t relay_high_edit_flag; // 0=Latch, 1=Pulse, 2=Not Used
+extern uint8_t relay_plp_edit_flag;  // 0=Latch, 1=Pulse, 2=Not Used
+extern uint8_t relay_slp_edit_flag;  // 0=Latch, 1=Pulse, 2=Not Used
+extern uint8_t relay_low_edit_flag;  // 0=Latch, 1=Pulse, 2=Not Used
+
 extern uint8_t current_menu;
+extern uint8_t current_input; // Which input (0-2) is being configured
 
 // Function prototypes
 void menu_init(void);
@@ -58,4 +70,8 @@ void lcd_print_at(uint8_t row, uint8_t col, const char *str);
 void lcd_clear_line(uint8_t row);
 void init_time_editor(uint16_t value_seconds, uint8_t mode);
 void menu_update_time_value(void);
+
+// NEW: Helper function to get the edit flag pointer for current field
+uint8_t *get_option_edit_flag(uint8_t line, uint8_t sensor_type, uint8_t flow_type);
+
 #endif
