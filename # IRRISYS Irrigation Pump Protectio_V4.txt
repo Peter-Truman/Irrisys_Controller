@@ -1,0 +1,104 @@
+# IRRISYS Irrigation Pump Protection System
+## PIC18F2525 Menu System Implementation
+
+### PROJECT STATUS
+Last Updated: [03/10/25 - 1200]
+Version: 0.8.5
+
+### COMPLETED FEATURES
+
+#### Core Infrastructure
+- ✅ Menu navigation with rotary encoder and button
+- ✅ 3-line LCD display with scrolling
+- ✅ EEPROM configuration storage with checksum validation
+- ✅ Factory defaults and configuration management
+- ✅ Menu timeout (returns to main after 30 seconds)
+- ✅ Multi-level menu system (OPTIONS → SETUP → INPUT)
+
+#### Editing Systems
+- ✅ Numeric field editor
+  - Signed values (-999 to +999) for Scale 4mA/20mA
+  - Unsigned values (0-999) for pressure setpoints
+  - Digit-by-digit editing with flashing current digit
+  - Automatic value limiting (e.g., max 500 for certain fields)
+  
+- ✅ Time field editor
+  - MM:SS format for bypass times
+  - Two-field editing (minutes then seconds)
+  - Proper value constraints (0-99 minutes, 0-59 seconds)
+  - Mode support for future HH:MM with 24-hour limit
+
+- ✅ Option field editor (partial)
+  - Working for Enable/Disable (index 0)
+  - Working for Sensor type (index 1)
+  - Infrastructure ready for additional option fields
+
+#### Menu Implementations
+- ✅ OPTIONS menu (Main/Setup/Utility/About/Exit)
+- ✅ SETUP menu 
+  - Shows actual sensor types (Pressure/Temp/Flow)
+  - Enable indicator (*) in column 20
+  - Dynamic based on input configuration
+  
+- ✅ INPUT menu - Pressure sensor
+  - All 14 fields displaying correctly
+  - Enable, Sensor, Scale 4mA/20mA editable
+  - Hi/Low Pressure setpoints editable
+  - All bypass times (High PBP, PLPBP, SLPBP) editable
+  
+- ✅ INPUT menu - Temperature sensor
+  - 9 fields with proper Back button
+  - Basic field editing working
+
+- ⚠️ INPUT menu - Flow sensor
+  - Templates created (Digital: 8 items, Analog: 11 items)
+  - Display working but editing incomplete
+
+### PENDING IMPLEMENTATION
+
+#### Flow Sensor Completion
+1. Option field handling for indices 2,3,5,6,8,9
+2. Dynamic menu rebuild when Type changes (Analog↔Digital)
+3. Field-specific edit flags (flow_type_edit_flag, etc.)
+
+#### Additional Features
+- Low pressure setpoint (needs EEPROM structure addition)
+- Clock configuration menu
+- Main display screen
+- Alarm handling
+- Relay control logic
+
+### CODE ARCHITECTURE
+
+#### Key Files
+- main.c - Main loop, encoder/button handling, display refresh
+- menu.c - Menu logic, drawing, field editing
+- menu.h - Menu structures and declarations
+- eeprom.c - Configuration storage and factory defaults
+- eeprom.h - Data structures for configuration
+
+#### Helper Functions
+- is_numeric_field() - Identifies numeric editable fields
+- is_time_field() - Identifies time editable fields  
+- is_option_field() - Needed for remaining option fields
+- get_item_options() - Returns options for editable fields
+- rebuild_input_menu() - Dynamically builds INPUT menu based on sensor
+
+#### Edit Flag Pattern
+Option fields use edit flags to track selection:
+- enable_edit_flag - Enable/Disable selection
+- sensor_edit_flag - Pressure/Temp/Flow selection
+- flow_type_edit_flag - Analog/Digital (needs implementation)
+- no_flow_edit_flag - Low/High (needs implementation)
+
+### EEPROM STRUCTURE
+Each input has 128 bytes allocated:
+- Basic config (8 bytes): enable, sensor_type, flow_type, flow_units, display
+- Signed values (16 bytes): scale_4ma, scale_20ma, temp_low
+- Unsigned values (32 bytes): setpoints, bypass times, flow limits
+- Relay modes (8 bytes): high, plp, slp, low modes
+- Reserved space for expansion
+
+### NEXT IMPLEMENTATION PHASE
+Focus: Complete Flow sensor option field editing
+Priority: Get one field working completely before adding others
