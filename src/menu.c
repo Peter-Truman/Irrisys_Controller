@@ -1379,6 +1379,9 @@ void menu_handle_button(uint8_t press_type)
                         {
                             input_config[current_input].flow_type = 1; // Default to Digital
                         }
+
+                        // IMPORTANT: Rebuild menu when sensor type changes
+                        rebuild_input_menu(current_input);
                     }
                     else if (menu.current_line == 2 && sensor_type == 2) // Flow Type
                     {
