@@ -52,4 +52,8 @@ void uart_println(const char *str);
 #define SENSOR2_PIN 1 // AN1
 #define SENSOR3_PIN 2 // AN2
 
+// Relay output
+#define RELAY_PIN LATCbits.LATC2
+#define RELAY_TRIS TRISCbits.TRISC2
+
 #endif

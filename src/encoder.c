@@ -27,6 +27,11 @@ static int8_t enc_accumulator = 0;
 static uint8_t btn_debounce = 0;
 static uint8_t last_btn = 1;
 
+// Relay pulse state machine
+extern volatile uint8_t relay_state;
+extern volatile uint16_t relay_counter;
+static uint8_t relay_ms_counter = 0;
+
 // Quadrature state machine lookup table
 static const int8_t enc_table[16] = {
     0, -1, 1, 0,
@@ -42,6 +47,27 @@ void __interrupt() isr(void)
         // Reload timer for 1ms @ 32MHz
         TMR0L = 6;
         INTCONbits.TMR0IF = 0;
+
+        // Handle relay pulse countdown (every 10ms)
+        if (relay_state == 1)
+        {
+            relay_ms_counter++;
+            if (relay_ms_counter >= 10)
+            {
+                relay_ms_counter = 0;
+
+                if (relay_counter > 0)
+                {
+                    relay_counter--;
+                }
+                else
+                {
+                    // Pulse complete - turn off relay
+                    LATCbits.LATC2 = 0;
+                    relay_state = 0;
+                }
+            }
+        }
 
         // Menu timeout countdown (every 2ms)
         ms_counter++;

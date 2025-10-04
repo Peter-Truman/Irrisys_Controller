@@ -40,6 +40,10 @@ void lcd_clear(void);
 void lcd_set_cursor(uint8_t row, uint8_t col);
 void beep(uint16_t duration_ms);
 
+// Relay pulse control
+volatile uint8_t relay_state = 0;    // 0=idle, 1=pulsing
+volatile uint16_t relay_counter = 0; // Countdown in 10ms ticks
+
 // UART functions
 void uart_init(void)
 {
@@ -98,6 +102,24 @@ void system_init(void)
     TRISBbits.TRISB2 = 1; // ENC_B input
     TRISBbits.TRISB6 = 1; // ENC_SW input
     INTCON2bits.RBPU = 0; // Enable PORTB pull-ups
+}
+
+void trigger_relay_pulse(void)
+{
+    extern system_config_t system_config;
+
+    if (relay_state == 0) // Only trigger if not already pulsing
+    {
+        relay_state = 1;
+        relay_counter = system_config.relay_pulse_time * 100; // Convert seconds to 10ms ticks
+
+        // Turn on relay
+        RELAY_PIN = 1;
+
+        char buf[40];
+        sprintf(buf, "Relay pulse started: %d sec", system_config.relay_pulse_time);
+        uart_println(buf);
+    }
 }
 
 // LCD functions
@@ -242,6 +264,10 @@ void main(void)
     // Initialize hardware
     system_init();
     eeprom_init(); // Load config from EEPROM
+
+    // Configure relay output
+    RELAY_TRIS = 0;  // Output
+    RELAY_PIN = 0;   // Start with relay off
 
     // Set the menu timeout reload value
     extern volatile uint16_t menu_timeout_reload;
