@@ -78,7 +78,7 @@ const input_config_t factory_defaults[3] = {
 
 // System defaults
 const system_config_t system_defaults = {
-    1, 120, 0, 0, 1, {0, 0, 0, 0, 0, 0, 0, 0, 0}, // clock enabled, 30s timeout, pulse mode
+    1, 120, 0, 0, 1, 2, {0, 0, 0, 0, 0, 0, 0, 0}, // clock enabled, timeout=120s, pulse mode, relay_pulse=2s
     5,
     5,
     60,

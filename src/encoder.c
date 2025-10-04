@@ -164,6 +164,18 @@ void __interrupt() isr(void)
             }
         }
     }
+
+    // Timer1 interrupt - 1 second tick for relay timer
+    if (PIR1bits.TMR1IF)
+    {
+        PIR1bits.TMR1IF = 0; // Clear flag
+        TMR1H = 0x0B;        // Reload for next second
+        TMR1L = 0xDC;        // @ 32MHz with 1:8 prescaler
+
+        // Call relay timer tick (declared extern)
+        extern void relay_timer_tick(void);
+        relay_timer_tick();
+    }
 }
 
 void encoder_init(void)
@@ -193,4 +205,11 @@ void reset_menu_timeout(void)
     // Use a local constant or make timeout_seconds atomic
     menu_timeout_timer = 30 * 500; // Default 30 seconds * 500 = 2ms units
     menu_timeout_flag = 1;
+}
+
+// Stub function for relay timer - to be implemented in hardware phase
+void relay_timer_tick(void)
+{
+    // TODO: Implement relay pulse timer countdown
+    // This will decrement relay pulse timers when active
 }

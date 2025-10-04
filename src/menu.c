@@ -99,13 +99,14 @@ static char value_high_tbp[10] = "01:00";
 // Clock menu value buffers
 static char value_clock_enable[10] = "Enabled";
 static char value_end_runtime[10] = "Pulse";
+static char value_relay_pulse[10] = "00:02";
 static char value_clock_display[10] = "Show";
 
 // Dynamic input menu - will be populated based on sensor type
 menu_item_t input_menu[15]; // Max 15 items to cover all cases
 
-// Clock menu - static 4 items
-menu_item_t clock_menu[4];
+// Clock menu - static 5 items
+menu_item_t clock_menu[5];
 
 // Menu template for PRESSURE sensor
 const menu_item_t pressure_menu_template[] = {
@@ -167,10 +168,11 @@ const menu_item_t flow_analog_template[] = {
 
 // Menu template for CLOCK configuration
 const menu_item_t clock_menu_template[] = {
-    {"Enable", NULL, 1},  // 0
-    {"End Run", NULL, 1}, // 1 - Changed from "End Runtime" to fit display
-    {"Display", NULL, 1}, // 2
-    {"Back", NULL, 0}     // 3
+    {"Enable", NULL, 1},    // 0
+    {"End Run", NULL, 1},   // 1
+    {"Rly Pulse", NULL, 1}, // 2
+    {"Display", NULL, 1},   // 3
+    {"Back", NULL, 0}       // 4
 };
 
 // Function declarations from header
@@ -459,7 +461,10 @@ void handle_time_rotation(int8_t direction)
         if (direction > 0)
         {
             menu.time_xx++;
-            if (menu.edit_time_mode == 2 && menu.time_xx > 23) // 24hr limit
+            // Special limit for Clock menu relay pulse (120 seconds = 2 minutes max)
+            if (current_menu == 3 && menu.current_line == 2 && menu.time_xx > 2)
+                menu.time_xx = 0;
+            else if (menu.edit_time_mode == 2 && menu.time_xx > 23) // 24hr limit
                 menu.time_xx = 0;
             else if (menu.time_xx > 99)
                 menu.time_xx = 0;
@@ -468,7 +473,11 @@ void handle_time_rotation(int8_t direction)
         {
             if (menu.time_xx == 0)
             {
-                menu.time_xx = (menu.edit_time_mode == 2) ? 23 : 99;
+                // Special limit for Clock menu relay pulse
+                if (current_menu == 3 && menu.current_line == 2)
+                    menu.time_xx = 2;
+                else
+                    menu.time_xx = (menu.edit_time_mode == 2) ? 23 : 99;
             }
             else
             {
@@ -478,6 +487,14 @@ void handle_time_rotation(int8_t direction)
     }
     else if (menu.time_edit_digit == 1) // Editing YY field
     {
+        // Special case: Clock menu relay pulse with minutes=2 cannot change seconds
+        if (current_menu == 3 && menu.current_line == 2 && menu.time_xx == 2)
+        {
+            // Seconds locked at 0 when minutes = 2 (120 second limit)
+            menu.time_yy = 0;
+            return; // Don't allow any changes
+        }
+
         if (direction > 0)
         {
             menu.time_yy++;
@@ -502,34 +519,11 @@ void handle_time_rotation(int8_t direction)
  */
 void menu_update_time_value(void)
 {
-    // Only update if in INPUT menu and edit mode
-    if (current_menu != 1 || !menu.in_edit_mode)
+    if (!menu.in_edit_mode)
         return;
 
-    // Find which line on screen
-    uint8_t screen_line = menu.current_line - menu.top_line;
-    if (screen_line >= 3)
-        return; // Not visible
-
-    uint8_t item_idx = menu.current_line;
-
-    // Get current sensor type and flow type
-    extern input_config_t input_config[3];
-    uint8_t sensor_type = input_config[current_input].sensor_type;
-    uint8_t flow_type = input_config[current_input].flow_type;
-
-    // Only handle time fields
-    if (!is_time_field(item_idx, sensor_type, flow_type))
-        return;
-
-    // Build display string XX:YY with field flashing
+    // Build display string XX:YY with field flashing (used by both INPUT and CLOCK menus)
     char value_buf[6];
-
-    // DEBUG: Show what we're building
-    char debug_before[50];
-    sprintf(debug_before, "Building display: digit=%d, blink=%d, XX=%d, YY=%d",
-            menu.time_edit_digit, menu.blink_state, menu.time_xx, menu.time_yy);
-    uart_println(debug_before);
 
     // Edit position 0: flash both XX digits together
     if (menu.time_edit_digit == 0 && !menu.blink_state)
@@ -559,6 +553,40 @@ void menu_update_time_value(void)
     }
 
     value_buf[5] = '\0';
+
+    // Handle CLOCK menu (Rly Pulse at line 2)
+    if (current_menu == 3 && menu.current_line == 2)
+    {
+        sprintf(value_relay_pulse, "%s", value_buf);
+        menu_draw_clock();
+        return;
+    }
+
+    // Handle INPUT menu time fields
+    if (current_menu != 1)
+        return;
+
+    // Find which line on screen
+    uint8_t screen_line = menu.current_line - menu.top_line;
+    if (screen_line >= 3)
+        return; // Not visible
+
+    uint8_t item_idx = menu.current_line;
+
+    // Get current sensor type and flow type
+    extern input_config_t input_config[3];
+    uint8_t sensor_type = input_config[current_input].sensor_type;
+    uint8_t flow_type = input_config[current_input].flow_type;
+
+    // Only handle time fields
+    if (!is_time_field(item_idx, sensor_type, flow_type))
+        return;
+
+    // DEBUG: Show what we're building
+    char debug_before[50];
+    sprintf(debug_before, "Building display: digit=%d, blink=%d, XX=%d, YY=%d",
+            menu.time_edit_digit, menu.blink_state, menu.time_xx, menu.time_yy);
+    uart_println(debug_before);
 
     // DEBUG: Show final string
     char debug_after[50];
@@ -1285,9 +1313,15 @@ void rebuild_clock_menu(void)
     sprintf(value_clock_enable, "%s", system_config.clock_enabled ? "Enabled" : "Disabled");
     strcpy(value_end_runtime, system_config.end_runtime_mode == 0 ? "Latch" : system_config.end_runtime_mode == 1 ? "Pulse"
                                                                                                                   : "Not Used");
+
+    // Format relay pulse time as MM:SS (same as PLPBP does)
+    sprintf(value_relay_pulse, "%02d:%02d",
+            system_config.relay_pulse_time / 60,
+            system_config.relay_pulse_time % 60);
+
     strcpy(value_clock_display, "Show"); // TODO: Add to system_config if needed
 
-    sprintf(buf, "Values: enable='%s', runtime='%s'", value_clock_enable, value_end_runtime);
+    sprintf(buf, "Values: enable='%s', runtime='%s', pulse='%s'", value_clock_enable, value_end_runtime, value_relay_pulse);
     uart_println(buf);
 
     // Copy template
@@ -1296,10 +1330,11 @@ void rebuild_clock_menu(void)
     // Assign value pointers
     clock_menu[0].value = value_clock_enable;
     clock_menu[1].value = value_end_runtime;
-    clock_menu[2].value = value_clock_display;
-    clock_menu[3].value = value_back;
+    clock_menu[2].value = value_relay_pulse;
+    clock_menu[3].value = value_clock_display;
+    clock_menu[4].value = value_back;
 
-    menu.total_items = 4;
+    menu.total_items = 5;
 
     sprintf(buf, "Clock menu rebuilt: %d items", menu.total_items);
     uart_println(buf);
@@ -1314,7 +1349,7 @@ void menu_draw_clock(void)
     lcd_clear_line(0);
     lcd_print_at(0, 0, "CLOCK");
 
-    // Draw 3 visible items (clock menu only has 4 items total)
+    // Draw 3 visible items (clock menu has 5 items total)
     for (uint8_t i = 0; i < 3 && (menu.top_line + i) < menu.total_items; i++)
     {
         uint8_t item_idx = menu.top_line + i;
@@ -1333,18 +1368,27 @@ void menu_draw_clock(void)
             {
                 show_brackets = 2; // Use parentheses in edit mode
 
-                // For option fields - handle blinking
-                if (menu.blink_state)
+                // Handle blinking for option fields (Enable, End Run, Display)
+                if (item_idx != 2) // Not the time field (Rly Pulse)
                 {
-                    strcpy(value_buf, clock_menu[item_idx].value);
+                    if (menu.blink_state)
+                    {
+                        // Blink on - show value
+                        strcpy(value_buf, clock_menu[item_idx].value);
+                    }
+                    else
+                    {
+                        // Blink off - show spaces
+                        uint8_t val_len = strlen(clock_menu[item_idx].value);
+                        for (uint8_t j = 0; j < val_len; j++)
+                            value_buf[j] = ' ';
+                        value_buf[val_len] = '\0';
+                    }
                 }
                 else
                 {
-                    // Blink off - show spaces
-                    uint8_t val_len = strlen(clock_menu[item_idx].value);
-                    for (uint8_t j = 0; j < val_len; j++)
-                        value_buf[j] = ' ';
-                    value_buf[val_len] = '\0';
+                    // Time field - always show value (blinking handled by menu_update_time_value)
+                    strcpy(value_buf, clock_menu[item_idx].value);
                 }
             }
             else
@@ -1363,26 +1407,27 @@ void menu_draw_clock(void)
 
         // Display the value with proper positioning
         uint8_t val_len = strlen(value_buf);
-        if (val_len > 0 && strcmp(clock_menu[item_idx].value, "") != 0)
-        {
-            if (show_brackets == 0)
-            {
-                // No brackets - value ends at column 19
-                lcd_print_at(i + 1, 19 - val_len, value_buf);
-            }
-            else
-            {
-                // With brackets - print everything in one sequence
-                uint8_t start_pos = 19 - val_len - 1; // Where opening bracket goes
-                lcd_set_cursor(i + 1, start_pos);
 
-                // Print opening bracket
-                lcd_print(show_brackets == 1 ? "[" : "(");
-                // Print value immediately after
-                lcd_print(value_buf);
-                // Print closing bracket immediately after
-                lcd_print(show_brackets == 1 ? "]" : ")");
-            }
+        if (show_brackets == 0)
+        {
+            // No brackets - value ends at column 19
+            if (val_len > 0)
+                lcd_print_at(i + 1, 19 - val_len, value_buf);
+        }
+        else
+        {
+            // With brackets - need to handle both text and spaces
+            uint8_t actual_len = strlen(clock_menu[item_idx].value); // Use actual value length for positioning
+            uint8_t start_pos = 19 - actual_len - 1;                 // Where opening bracket goes
+
+            lcd_set_cursor(i + 1, start_pos);
+            lcd_print(show_brackets == 1 ? "[" : "(");
+
+            // Print value (could be text or spaces for blinking)
+            lcd_print(value_buf);
+
+            lcd_set_cursor(i + 1, 19);
+            lcd_print(show_brackets == 1 ? "]" : ")");
         }
     }
 }
@@ -1407,7 +1452,15 @@ void menu_handle_encoder(int16_t delta)
                 sprintf(buf, "CLOCK edit rotate: line=%d, delta=%d", menu.current_line, delta);
                 uart_println(buf);
 
-                // CLOCK menu option field editing
+                // Rly Pulse is a TIME field (line 2)
+                if (menu.current_line == 2)
+                {
+                    // Handle time rotation for relay pulse
+                    handle_time_rotation(delta);
+                    menu_update_time_value(); // Update display immediately
+                    return;                   // Exit early - time field handled
+                }
+                // CLOCK menu option field editing (lines 0, 1, 3)
                 const item_options_t *clock_opts = NULL;
                 uint8_t *clock_flag = NULL;
 
@@ -1421,7 +1474,7 @@ void menu_handle_encoder(int16_t delta)
                     clock_opts = &menu_item_options[OPT_RELAY_MODE];
                     clock_flag = &relay_high_edit_flag;
                 }
-                else if (menu.current_line == 2) // Display
+                else if (menu.current_line == 3) // Display
                 {
                     clock_opts = &menu_item_options[OPT_DISPLAY];
                     clock_flag = &display_edit_flag;
@@ -1590,12 +1643,10 @@ void menu_handle_button(uint8_t press_type)
                 extern system_config_t system_config;
 
                 char buf[50];
-                sprintf(buf, "CLOCK save: line=%d, flag before=%d", menu.current_line,
-                        menu.current_line == 0 ? enable_edit_flag : menu.current_line == 1 ? relay_high_edit_flag
-                                                                                           : display_edit_flag);
+                sprintf(buf, "CLOCK save: line=%d", menu.current_line);
                 uart_println(buf);
 
-                // Get the option info
+                // Get the option info for option fields
                 const item_options_t *opts = NULL;
                 uint8_t *edit_flag = NULL;
 
@@ -1615,7 +1666,58 @@ void menu_handle_button(uint8_t press_type)
                     sprintf(buf, "Saved end_runtime_mode = %d", system_config.end_runtime_mode);
                     uart_println(buf);
                 }
-                else if (menu.current_line == 2) // Display
+                else if (menu.current_line == 2) // Rly Pulse - TIME FIELD
+                {
+                    // Advance to next digit
+                    menu.time_edit_digit++;
+                    menu.blink_state = 1;
+
+                    // If moving from minutes to seconds and minutes=2, force seconds to 0 (120 sec limit)
+                    if (menu.time_edit_digit == 1 && menu.time_xx == 2)
+                    {
+                        menu.time_yy = 0;
+                    }
+
+                    beep(50);
+
+                    sprintf(buf, "Time button: digit now=%d", menu.time_edit_digit);
+                    uart_println(buf);
+
+                    // Update display buffer
+                    sprintf(value_relay_pulse, "%02d:%02d", menu.time_xx, menu.time_yy);
+                    menu_draw_clock();
+
+                    if (menu.time_edit_digit > 1)
+                    {
+                        // Calculate total seconds from time editor (MM:SS format)
+                        uint16_t new_value = (menu.time_xx * 60) + menu.time_yy;
+
+                        // Clamp to valid range (1-120 seconds)
+                        if (new_value < 1)
+                            new_value = 1;
+                        if (new_value > 120)
+                            new_value = 120;
+
+                        system_config.relay_pulse_time = (uint8_t)new_value;
+                        sprintf(value_relay_pulse, "%02d:%02d",
+                                system_config.relay_pulse_time / 60,
+                                system_config.relay_pulse_time % 60);
+                        strcpy(clock_menu[2].value, value_relay_pulse);
+
+                        sprintf(buf, "Saved relay_pulse_time = %d sec", system_config.relay_pulse_time);
+                        uart_println(buf);
+                        save_pending = 1;
+                        menu.in_edit_mode = 0;
+                        menu_draw_clock(); // Redraw with square brackets
+                    }
+                    else
+                    {
+                        return; // Stay in edit mode, don't exit yet
+                    }
+
+                    return; // Exit early for time field
+                }
+                else if (menu.current_line == 3) // Display
                 {
                     opts = &menu_item_options[OPT_DISPLAY];
                     edit_flag = &display_edit_flag;
@@ -2059,10 +2161,10 @@ void menu_handle_button(uint8_t press_type)
             {
                 char buf[50];
                 sprintf(buf, "CLOCK btn: line=%d, editable=%d", menu.current_line,
-                        menu.current_line < 4 ? clock_menu[menu.current_line].editable : 0);
+                        menu.current_line < 5 ? clock_menu[menu.current_line].editable : 0);
                 uart_println(buf);
 
-                if (menu.current_line == 3) // Back
+                if (menu.current_line == 4) // Back (now at index 4)
                 {
                     beep(50);
                     // Go back to SETUP menu
@@ -2076,10 +2178,10 @@ void menu_handle_button(uint8_t press_type)
                 {
                     uart_println("Entering CLOCK edit mode");
 
-                    // Enter edit mode for clock option fields (all are options)
+                    // Save original value for cancel
                     strcpy(original_value, clock_menu[menu.current_line].value);
 
-                    // Initialize the edit flag based on current value
+                    // Initialize based on field type
                     if (menu.current_line == 0) // Enable
                     {
                         enable_edit_flag = (strcmp(clock_menu[0].value, "Enabled") == 0) ? 1 : 0;
@@ -2093,9 +2195,15 @@ void menu_handle_button(uint8_t press_type)
                         else
                             relay_high_edit_flag = 2; // Not Used
                     }
-                    else if (menu.current_line == 2) // Display
+                    else if (menu.current_line == 2) // Rly Pulse - TIME FIELD
                     {
-                        display_edit_flag = (strcmp(clock_menu[2].value, "Show") == 0) ? 1 : 0;
+                        // Initialize time editor for relay pulse (stored in seconds)
+                        menu.original_value = system_config.relay_pulse_time;
+                        init_time_editor(system_config.relay_pulse_time, 0); // Mode 0 = MM:SS
+                    }
+                    else if (menu.current_line == 3) // Display
+                    {
+                        display_edit_flag = (strcmp(clock_menu[3].value, "Show") == 0) ? 1 : 0;
                     }
 
                     menu.in_edit_mode = 1;

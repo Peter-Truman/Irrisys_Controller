@@ -70,6 +70,19 @@ void lcd_print_at(uint8_t row, uint8_t col, const char *str);
 void lcd_clear_line(uint8_t row);
 void init_time_editor(uint16_t value_seconds, uint8_t mode);
 void menu_update_time_value(void);
+// Function prototypes
+void menu_init(void);
+void menu_draw_options(void);
+void menu_draw_input(void);
+void menu_draw_setup(void);
+void menu_draw_clock(void);
+void menu_update_edit_value(void);
+void menu_handle_encoder(int16_t delta);
+void menu_handle_button(uint8_t press_type);
+void lcd_print_at(uint8_t row, uint8_t col, const char *str);
+void lcd_clear_line(uint8_t row);
+void init_time_editor(uint16_t value_seconds, uint8_t mode);
+void menu_update_time_value(void);
 
 // NEW: Helper function to get the edit flag pointer for current field
 uint8_t *get_option_edit_flag(uint8_t line, uint8_t sensor_type, uint8_t flow_type);

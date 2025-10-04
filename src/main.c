@@ -13,24 +13,17 @@
 // External variables from encoder
 extern volatile uint16_t button_hold_ms;
 extern volatile uint8_t button_event;
-// Function declarations for numeric editing
+
+// External function declarations for menu editing
 extern void handle_numeric_rotation(int8_t direction);
 extern void menu_update_numeric_value(void);
-extern void handle_time_rotation(int8_t direction); // ADD THIS
-extern void menu_update_time_value(void);           // ADD THIS
+extern void handle_time_rotation(int8_t direction);
+extern void menu_update_time_value(void);
 
-extern uint8_t is_time_field(uint8_t line, uint8_t sensor_type, uint8_t flow_type);
-extern uint8_t is_numeric_field(uint8_t line, uint8_t sensor_type, uint8_t flow_type);
-uint8_t save_pending = 0; // Flag for deferred EEPROM saves
-// Debug flag from ISR extern volatile uint8_t timeout_debug_flag;
+uint8_t save_pending = 0;
 extern volatile uint8_t timeout_debug_flag;
-extern uint8_t current_input; // From menu.c
-
-// External function declarations for numeric editing
-extern void handle_numeric_rotation(int8_t direction);
-extern void menu_update_numeric_value(void);
-
-extern volatile uint8_t long_press_beep_flag; // From encoder ISR
+extern uint8_t current_input;
+extern volatile uint8_t long_press_beep_flag;
 
 // Function prototypes
 void uart_init(void);
@@ -326,16 +319,12 @@ void main(void)
             // Check if we're editing a field
             if (menu.in_edit_mode && current_menu == 1)
             {
-                // Get current sensor context
-                uint8_t sensor_type = input_config[current_input].sensor_type;
-                uint8_t flow_type = input_config[current_input].flow_type;
-
-                if (is_numeric_field(menu.current_line, sensor_type, flow_type))
+                if (is_numeric_field(menu.current_line, input_config[current_input].sensor_type, input_config[current_input].flow_type))
                 {
                     // Handle numeric rotation
                     handle_numeric_rotation(delta);
                 }
-                else if (is_time_field(menu.current_line, sensor_type, flow_type))
+                else if (is_time_field(menu.current_line, input_config[current_input].sensor_type, input_config[current_input].flow_type))
                 {
                     // Handle time rotation
                     handle_time_rotation(delta);
@@ -356,17 +345,13 @@ void main(void)
             // Redraw current menu - optimized for edit mode
             if (menu.in_edit_mode && current_menu == 1)
             {
-                // Get current sensor context
-                uint8_t sensor_type = input_config[current_input].sensor_type;
-                uint8_t flow_type = input_config[current_input].flow_type;
-
                 // Check what type of field we're editing
-                if (is_numeric_field(menu.current_line, sensor_type, flow_type))
+                if (is_numeric_field(menu.current_line, input_config[current_input].sensor_type, input_config[current_input].flow_type))
                 {
                     // Fast update for numeric value
                     menu_update_numeric_value();
                 }
-                else if (is_time_field(menu.current_line, sensor_type, flow_type))
+                else if (is_time_field(menu.current_line, input_config[current_input].sensor_type, input_config[current_input].flow_type))
                 {
                     // Fast update for time value
                     menu_update_time_value();
@@ -526,30 +511,44 @@ void main(void)
                 {
                     menu.blink_state = !menu.blink_state;
 
-                    // Update display for blink
-                    // Update display for blink
-                    if (current_menu == 1)
+                    // Update display for blink - redraw current menu
+                    // Update display for blink - redraw current menu
+                    switch (current_menu)
                     {
-                        // Get current sensor context
-                        uint8_t sensor_type = input_config[current_input].sensor_type;
-                        uint8_t flow_type = input_config[current_input].flow_type;
-
+                    case 0: // OPTIONS menu
+                        menu_draw_options();
+                        break;
+                    case 1: // INPUT menu
+                    {
                         // Check what type of field we're editing
-                        if (is_numeric_field(menu.current_line, sensor_type, flow_type))
+                        if (is_numeric_field(menu.current_line, input_config[current_input].sensor_type, input_config[current_input].flow_type))
                         {
-                            // Fast update for numeric value
                             menu_update_numeric_value();
                         }
-                        else if (is_time_field(menu.current_line, sensor_type, flow_type)) // ADD THIS
+                        else if (is_time_field(menu.current_line, input_config[current_input].sensor_type, input_config[current_input].flow_type))
                         {
-                            // Fast update for time value
                             menu_update_time_value();
                         }
                         else
                         {
-                            // Fast update for option value
-                            menu_update_edit_value();
+                            // Option field - redraw entire menu for blinking
+                            menu_draw_input();
                         }
+                    }
+                    break;
+                    case 2: // SETUP menu
+                        menu_draw_setup();
+                        break;
+                    case 3:                         // CLOCK menu
+                        if (menu.current_line == 2) // Rly Pulse - time field
+                        {
+                            menu_update_time_value();
+                        }
+                        else
+                        {
+                            menu_draw_clock();
+                        }
+                        break;
                     }
                 }
             }
@@ -608,15 +607,17 @@ void main(void)
         }
         // Handle pending EEPROM saves...
 
-        // Handle pending EEPROM saves when back at main screen
-        if (save_pending && current_menu == 255)
+        // // Handle pending EEPROM saves when not in edit mode (MOVED OUTSIDE)
+        if (save_pending && !menu.in_edit_mode)
         {
             uart_println("Saving to EEPROM...");
             save_current_config();
             save_pending = 0;
             uart_println("EEPROM save complete");
         }
+
         // Prevent LCD corruption at high speed
+
         __delay_us(50);
     }
 }
