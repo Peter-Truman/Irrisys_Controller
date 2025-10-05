@@ -18,8 +18,12 @@ volatile uint8_t ms_counter = 0;           // Count milliseconds for 2ms timing
 volatile uint16_t menu_timeout_reload = 0; // Store the reload value (set from main)
 // Debug flag for timeout (defined here, used in main)
 volatile uint8_t timeout_debug_flag = 0;
-
 volatile uint8_t long_press_beep_flag = 0; // Signal main loop to beep
+
+// Relay pulse countdown (defined in main.c)
+extern volatile uint8_t relay_state;
+extern volatile uint16_t relay_counter;
+static uint8_t relay_ms_counter = 0;
 
 // ISR state variables
 static uint8_t enc_state = 0;
@@ -42,6 +46,22 @@ void __interrupt() isr(void)
         // Reload timer for 1ms @ 32MHz
         TMR0L = 6;
         INTCONbits.TMR0IF = 0;
+
+        relay_ms_counter++;
+        if (relay_ms_counter >= 10)
+        {
+            relay_ms_counter = 0;
+
+            if (relay_state == 1 && relay_counter > 0)
+            {
+                relay_counter--;
+            }
+            else if (relay_state == 1 && relay_counter == 0)
+            {
+                LATCbits.LATC1 = 0; // Turn off relay
+                relay_state = 0;
+            }
+        }
 
         // Menu timeout countdown (every 2ms)
         ms_counter++;

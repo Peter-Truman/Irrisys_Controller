@@ -1709,6 +1709,10 @@ void menu_handle_button(uint8_t press_type)
                         save_pending = 1;
                         menu.in_edit_mode = 0;
                         menu_draw_clock(); // Redraw with square brackets
+
+                        // TEST: Trigger relay pulse
+                        //extern void trigger_relay_pulse(void);
+                        //trigger_relay_pulse();
                     }
                     else
                     {

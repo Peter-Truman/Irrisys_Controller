@@ -47,6 +47,10 @@ void uart_println(const char *str);
 #define BUZZER LATCbits.LATC2
 #define BUZZER_TRIS TRISCbits.TRISC2
 
+// Relay output (RC1)
+#define RELAY_PIN LATCbits.LATC1
+#define RELAY_TRIS TRISCbits.TRISC1
+
 // Sensor Input Pins (for future use)
 #define SENSOR1_PIN 0 // AN0
 #define SENSOR2_PIN 1 // AN1

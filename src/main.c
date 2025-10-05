@@ -21,6 +21,9 @@ extern void handle_time_rotation(int8_t direction);
 extern void menu_update_time_value(void);
 
 uint8_t save_pending = 0;
+// Relay pulse control
+volatile uint8_t relay_state = 0;    // 0=idle, 1=pulsing
+volatile uint16_t relay_counter = 0; // Countdown in 10ms ticks
 extern volatile uint8_t timeout_debug_flag;
 extern uint8_t current_input;
 extern volatile uint8_t long_press_beep_flag;
@@ -98,6 +101,29 @@ void system_init(void)
     TRISBbits.TRISB2 = 1; // ENC_B input
     TRISBbits.TRISB6 = 1; // ENC_SW input
     INTCON2bits.RBPU = 0; // Enable PORTB pull-ups
+
+    TRISBbits.TRISB6 = 1; // ENC_SW input
+    INTCON2bits.RBPU = 0; // Enable PORTB pull-ups
+
+    // Configure relay output
+    RELAY_TRIS = 0; // Output
+    RELAY_PIN = 0;  // Start with relay off
+}
+
+void trigger_relay_pulse(void)
+{
+    extern system_config_t system_config;
+
+    if (relay_state == 0) // Only trigger if not already pulsing
+    {
+        relay_state = 1;
+        relay_counter = system_config.relay_pulse_time * 100; // Convert seconds to 10ms ticks
+        RELAY_PIN = 1;                                        // Turn on relay
+
+        char buf[40];
+        sprintf(buf, "Relay ON: %d sec", system_config.relay_pulse_time);
+        uart_println(buf);
+    }
 }
 
 // LCD functions
