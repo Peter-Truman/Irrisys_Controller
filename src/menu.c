@@ -1711,8 +1711,8 @@ void menu_handle_button(uint8_t press_type)
                         menu_draw_clock(); // Redraw with square brackets
 
                         // TEST: Trigger relay pulse
-                        //extern void trigger_relay_pulse(void);
-                        //trigger_relay_pulse();
+                        extern void trigger_relay_pulse(uint8_t latch_mode);
+                        trigger_relay_pulse(0); // 0 = pulse mode for testing
                     }
                     else
                     {

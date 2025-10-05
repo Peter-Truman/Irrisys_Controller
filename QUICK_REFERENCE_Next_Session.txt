@@ -1,0 +1,322 @@
+# QUICK REFERENCE - IRRISYS Development Session Guide
+
+## CRITICAL: Read This First
+
+### Working Code State
+**Last known good commit:** 72b2efd "Added Relay Pulse menu"
+- All menus work perfectly
+- All editing and blinking behaviors functional
+- CLOCK menu with Rly Pulse fully implemented
+- Relay hardware control working
+
+### What We Just Completed
+1. ✅ CLOCK menu with 5 items (Enable, End Run, Rly Pulse, Display, Back)
+2. ✅ Relay pulse time editor (MM:SS format, 1-120 seconds max)
+3. ✅ Non-blocking relay control on pin RC1
+4. ✅ ISR countdown timer (10ms ticks)
+5. ✅ All blinking behaviors working in all menus
+
+---
+
+## Menu Structure
+
+### Current Menu Numbers
+- 0: OPTIONS
+- 1: INPUT (dynamic based on sensor)
+- 2: SETUP
+- 3: CLOCK
+- 255: Main screen
+
+### CLOCK Menu Items (menu index)
+```
+0: Enable      - Option field (Enabled/Disabled)
+1: End Run     - Option field (Latch/Pulse/Not Used)
+2: Rly Pulse   - TIME field (00:00 to 02:00)
+3: Display     - Option field (Show/Hide)
+4: Back        - Non-editable
+```
+
+---
+
+## File Locations
+
+### Key Source Files
+- `src/main.c` - Main loop, initialization, relay trigger function
+- `src/menu.c` - All menu logic and drawing (2192 lines)
+- `src/encoder.c` - ISR with relay countdown
+- `include/config.h` - Pin definitions
+- `include/eeprom.h` - Data structures
+
+### Important Functions
+```c
+// Main.c
+void trigger_relay_pulse(void)          // Starts relay pulse
+void system_init(void)                  // Hardware init (includes relay pin)
+
+// Menu.c  
+void rebuild_clock_menu(void)           // Loads CLOCK values from EEPROM
+void menu_draw_clock(void)              // Draws CLOCK menu
+void handle_time_rotation(int8_t dir)   // Handles time field encoder rotation
+void menu_update_time_value(void)       // Updates time display with blinking
+
+// Encoder.c
+void __interrupt() isr(void)            // ISR with relay countdown
+```
+
+---
+
+## Hardware Connections
+
+### Pin Assignments
+```
+RC1  - Relay output (RELAY_PIN)
+RC2  - Buzzer
+RB1  - Encoder A
+RB2  - Encoder B  
+RB6  - Encoder button (active low)
+RA0-3 - LCD D4-D7
+RA6  - LCD RS
+RA7  - LCD EN
+```
+
+---
+
+## EEPROM Structure
+
+### System Config (system_config_t)
+```c
+typedef struct {
+    uint8_t clock_enabled;        // 0=Disabled, 1=Enabled
+    uint8_t end_runtime_mode;     // 0=Latch, 1=Pulse, 2=Not Used
+    uint8_t relay_pulse_time;     // 1-120 seconds
+    uint8_t menu_timeout;         // Timeout in seconds
+    uint8_t reserved[12];
+} system_config_t;
+```
+
+Address: 0x00
+Size: 16 bytes
+
+---
+
+## Relay Pulse Time Field - Special Handling
+
+### Constraints
+- Range: 1-120 seconds total
+- Display: MM:SS format
+- Minutes: 0-2 only
+- Special rule: When minutes=2, seconds LOCKED at 00
+
+### Implementation Details
+
+**In `handle_time_rotation()` (menu.c ~line 459):**
+```c
+if (menu.time_edit_digit == 0) // Editing minutes
+{
+    // Limit minutes to 0-2 for Clock menu relay pulse
+    if (current_menu == 3 && menu.current_line == 2 && menu.time_xx > 2)
+        menu.time_xx = 0;
+}
+else if (menu.time_edit_digit == 1) // Editing seconds
+{
+    // Lock seconds at 0 when minutes=2
+    if (current_menu == 3 && menu.current_line == 2 && menu.time_xx == 2)
+    {
+        menu.time_yy = 0;
+        return;
+    }
+}
+```
+
+**When advancing from minutes to seconds (menu.c ~line 1656):**
+```c
+if (menu.time_edit_digit == 1 && menu.time_xx == 2)
+{
+    menu.time_yy = 0;  // Force seconds to 0
+}
+```
+
+**Display formatting in `rebuild_clock_menu()` (menu.c ~line 1300):**
+```c
+sprintf(value_relay_pulse, "%02d:%02d",
+        system_config.relay_pulse_time / 60,  // Minutes
+        system_config.relay_pulse_time % 60); // Seconds
+```
+
+---
+
+## Blink Handler Pattern
+
+### Location: main.c ~line 555
+
+```c
+// Inside blink timer block
+if (current_menu == 1) // INPUT menu
+{
+    uint8_t sensor_type = input_config[current_input].sensor_type;
+    uint8_t flow_type = input_config[current_input].flow_type;
+    
+    if (is_numeric_field(...))
+        menu_update_numeric_value();
+    else if (is_time_field(...))
+        menu_update_time_value();
+    else
+        menu_update_edit_value();
+}
+else if (current_menu == 3) // CLOCK menu
+{
+    if (menu.current_line == 2)  // Rly Pulse (time field)
+        menu_update_time_value();
+    else  // Option fields
+        menu_draw_clock();
+}
+```
+
+**CRITICAL:** Each menu type must be handled separately in the blink timer!
+
+---
+
+## Relay Control System
+
+### Global Variables (main.c ~line 24)
+```c
+volatile uint8_t relay_state = 0;      // 0=idle, 1=pulsing
+volatile uint16_t relay_counter = 0;   // Countdown in 10ms ticks
+```
+
+### Trigger Function (main.c ~line 119)
+```c
+void trigger_relay_pulse(void)
+{
+    extern system_config_t system_config;
+    
+    if (relay_state == 0)
+    {
+        relay_state = 1;
+        relay_counter = system_config.relay_pulse_time * 100; // sec → 10ms ticks
+        RELAY_PIN = 1;
+    }
+}
+```
+
+### ISR Countdown (encoder.c ~line 51)
+```c
+// Every 10ms
+relay_ms_counter++;
+if (relay_ms_counter >= 10)
+{
+    relay_ms_counter = 0;
+    
+    if (relay_state == 1 && relay_counter > 0)
+        relay_counter--;
+    else if (relay_state == 1 && relay_counter == 0)
+    {
+        LATCbits.LATC1 = 0;  // Turn off
+        relay_state = 0;
+    }
+}
+```
+
+### Test Code (COMMENTED OUT in menu.c ~line 1678)
+```c
+// TEST: Trigger relay pulse
+// extern void trigger_relay_pulse(void);
+// trigger_relay_pulse();
+```
+Uncomment these lines to test relay after editing Rly Pulse value.
+
+---
+
+## Common Issues & Solutions
+
+### Issue: Blinking Stopped Working
+**Cause:** Blink handler missing menu type case
+**Fix:** Check main.c blink timer has cases for current_menu 1 and 3
+
+### Issue: Time Values Don't Update During Edit
+**Cause:** menu_update_time_value() not being called
+**Fix:** Ensure blink handler calls it for time fields
+
+### Issue: Relay Stays On Forever
+**Cause:** ISR countdown not running or relay_counter not decrementing
+**Fix:** Check encoder.c ISR has relay countdown code after TMR0IF clear
+
+### Issue: Can't Set Values > 99 Seconds
+**Cause:** Forgot special handling for 120-second max
+**Fix:** Check handle_time_rotation() has Clock menu special case
+
+---
+
+## Development Workflow for Next Session
+
+1. **Before ANY changes:**
+   - Commit current working code
+   - Note the commit hash
+   - Verify what's currently working
+
+2. **When adding features:**
+   - Make ONE small change at a time
+   - Test immediately
+   - Commit if it works
+
+3. **If something breaks:**
+   - Use `git diff` to see what changed
+   - Revert with `git reset --hard <hash>`
+   - Start over with smaller changes
+
+4. **When modifying menus:**
+   - Check if similar code exists (Pressure/Temp sensors)
+   - Copy the pattern exactly
+   - Only change what's necessary
+
+---
+
+## What Still Needs Implementation
+
+### Priority 1: Flow Sensor Editing
+- Option fields for Flow Type (Analog/Digital)
+- Option fields for Units, No Flow mode
+- Dynamic menu rebuild when Type changes
+- Edit flags: flow_type_edit_flag, no_flow_edit_flag
+
+### Priority 2: Clock Integration
+- Connect clock events to trigger relay
+- Implement runtime logic
+- Add to main display
+
+### Priority 3: Additional Features
+- Low pressure setpoint (add to EEPROM)
+- Main display screen
+- Alarm handling
+
+---
+
+## Testing Checklist
+
+After making changes, verify:
+- [ ] All menus navigate correctly (OPTIONS → SETUP → INPUT/CLOCK)
+- [ ] Values blink when editing
+- [ ] Can save changes to all fields
+- [ ] EEPROM saves/loads correctly
+- [ ] Menu timeout returns to main screen
+- [ ] Encoder rotation works smoothly
+- [ ] Button short/long press work
+- [ ] Relay pulses for correct duration
+
+---
+
+## Emergency Recovery
+
+If code is completely broken:
+```bash
+# See recent commits
+git log --oneline -10
+
+# Reset to last known good
+git reset --hard 72b2efd
+
+# Or reset to any commit
+git reset --hard <commit-hash>
+```
+
+**Last known good:** 72b2efd "Added Relay Pulse menu"

@@ -28,6 +28,8 @@ extern volatile uint8_t timeout_debug_flag;
 extern uint8_t current_input;
 extern volatile uint8_t long_press_beep_flag;
 
+volatile uint8_t relay_latch_mode = 0;  // 0=pulse, 1=latch
+
 // Function prototypes
 void uart_init(void);
 void uart_write(char c);
@@ -107,22 +109,48 @@ void system_init(void)
 
     // Configure relay output
     RELAY_TRIS = 0; // Output
-    RELAY_PIN = 0;  // Start with relay off
+    RELAY_PIN = 1;  // Start with relay off
 }
 
-void trigger_relay_pulse(void)
+void trigger_relay_pulse(uint8_t latch_mode)
 {
     extern system_config_t system_config;
+    
+    char buf[60];
+    sprintf(buf, "!!! trigger_relay_pulse() CALLED (latch=%d) !!!", latch_mode);
+    uart_println(buf);
 
-    if (relay_state == 0) // Only trigger if not already pulsing
+    if (relay_state == 0) // Only trigger if not already active
     {
         relay_state = 1;
-        relay_counter = system_config.relay_pulse_time * 100; // Convert seconds to 10ms ticks
-        RELAY_PIN = 1;                                        // Turn on relay
+        
+        if (latch_mode)
+        {
+            // Latch mode - open and stay open (counter = 0 means infinite)
+            relay_counter = 0;
+            uart_println("Relay OPEN - LATCHED (waiting for button)");
+        }
+        else
+        {
+            // Pulse mode - open for specified time
+            relay_counter = system_config.relay_pulse_time * 100; // Convert seconds to 10ms ticks
+            sprintf(buf, "Relay OPEN - PULSE: %d sec", system_config.relay_pulse_time);
+            uart_println(buf);
+        }
+        
+        RELAY_PIN = 0; // OPEN relay (de-energize)
+    }
+}
 
-        char buf[40];
-        sprintf(buf, "Relay ON: %d sec", system_config.relay_pulse_time);
-        uart_println(buf);
+// Function to manually close relay (clear fault/latch)
+void relay_close(void)
+{
+    if (relay_state == 1)
+    {
+        relay_state = 0;
+        relay_counter = 0;
+        RELAY_PIN = 1; // CLOSE relay (energize)
+        uart_println("Relay CLOSED - fault cleared");
     }
 }
 
@@ -224,7 +252,7 @@ void lcd_init(void)
     // Clear all ports
     PORTA = 0;
     PORTB = 0;
-    PORTC = 0;
+    // PORTC = 0;
 
     __delay_ms(50);
 
@@ -267,6 +295,7 @@ void main(void)
 {
     // Initialize hardware
     system_init();
+
     eeprom_init(); // Load config from EEPROM
 
     // Set the menu timeout reload value
@@ -277,6 +306,12 @@ void main(void)
     menu_timeout_reload = (uint16_t)get_menu_timeout_seconds() * 500;
 
     uart_init();
+
+    uart_println("=== SYSTEM STARTUP ===");
+    char buf[50];
+    sprintf(buf, "After init: relay_state=%d, counter=%d", relay_state, relay_counter);
+    uart_println(buf);
+
     encoder_init();
     menu_init();
     lcd_init();
@@ -317,8 +352,26 @@ void main(void)
     static uint32_t blink_timer = 0;
     static uint16_t encoder_activity_timer = 0; // Track encoder activity
 
+    // while (1)
+    //{
+
+    // Main loop starts here
     while (1)
     {
+
+        // DEBUG: Check if relay variables change
+        static uint8_t last_relay_state = 0;
+        static uint16_t last_relay_counter = 0;
+
+        if (relay_state != last_relay_state || relay_counter != last_relay_counter)
+        {
+            char buf[60];
+            sprintf(buf, "RELAY CHANGE: state=%d, counter=%d", relay_state, relay_counter);
+            uart_println(buf);
+            last_relay_state = relay_state;
+            last_relay_counter = relay_counter;
+        }
+
         // Check encoder rotation
         if (encoder_count != last_encoder)
         {

@@ -31,6 +31,8 @@ static int8_t enc_accumulator = 0;
 static uint8_t btn_debounce = 0;
 static uint8_t last_btn = 1;
 
+extern volatile uint8_t relay_latch_mode;
+
 // Quadrature state machine lookup table
 static const int8_t enc_table[16] = {
     0, -1, 1, 0,
@@ -52,15 +54,17 @@ void __interrupt() isr(void)
         {
             relay_ms_counter = 0;
 
-            if (relay_state == 1 && relay_counter > 0)
+            if (relay_state == 1 && !relay_latch_mode && relay_counter > 0)
             {
                 relay_counter--;
             }
-            else if (relay_state == 1 && relay_counter == 0)
+            else if (relay_state == 1 && !relay_latch_mode && relay_counter == 0)
             {
-                LATCbits.LATC1 = 0; // Turn off relay
+                // Pulse complete - close relay automatically
+                LATCbits.LATC1 = 1; // CLOSE relay
                 relay_state = 0;
             }
+            // If latch_mode==1, relay stays open until relay_close() called
         }
 
         // Menu timeout countdown (every 2ms)
@@ -186,16 +190,16 @@ void __interrupt() isr(void)
     }
 
     // Timer1 interrupt - 1 second tick for relay timer
-    if (PIR1bits.TMR1IF)
-    {
-        PIR1bits.TMR1IF = 0; // Clear flag
-        TMR1H = 0x0B;        // Reload for next second
-        TMR1L = 0xDC;        // @ 32MHz with 1:8 prescaler
+    // if (PIR1bits.TMR1IF)
+    //{
+    // PIR1bits.TMR1IF = 0; // Clear flag
+    // TMR1H = 0x0B;        // Reload for next second
+    // TMR1L = 0xDC;        // @ 32MHz with 1:8 prescaler
 
-        // Call relay timer tick (declared extern)
-        extern void relay_timer_tick(void);
-        relay_timer_tick();
-    }
+    // Call relay timer tick (declared extern)
+    // extern void relay_timer_tick(void);
+    // relay_timer_tick();
+    //}
 }
 
 void encoder_init(void)
@@ -209,6 +213,7 @@ void encoder_init(void)
     button_pressed = 0;
     button_hold_ms = 0;
     button_event = 0;
+    relay_ms_counter = 0; // ADD THIS LINE
 
     // Enable Timer0 interrupt
     INTCONbits.TMR0IF = 0;
