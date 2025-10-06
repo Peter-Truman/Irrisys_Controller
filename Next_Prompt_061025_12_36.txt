@@ -1,0 +1,37 @@
+IRRISYS Irrigation Controller - Continuation Prompt
+
+CONTEXT:
+Working on PIC18F2525-based irrigation controller. RTC-based 1Hz timer infrastructure is now complete and verified working.
+
+CURRENT STATE:
+✅ DS3231M RTC configured for 1Hz square wave output
+✅ INT0 interrupt working on RB0 (falling edge)
+✅ rtc_second_counter increments every second (0-604800, rolls over at 1 week)
+✅ Logic analyzer verified clean 1Hz pulses
+✅ System stable, no lockups
+
+HARDWARE:
+- RB0 has 4.7kΩ pullup to +5V
+- 500ms startup delay before rtc_init() required for oscillator stabilization
+- RTC VBAT connected to +5V via supercap circuit
+
+NEXT TASKS:
+1. Implement runtime tracking for pump/relay operation
+2. Use rtc_second_counter for irrigation duration timing
+3. Add maximum runtime protection (configurable limit in seconds)
+4. Display runtime on LCD during pump operation
+5. Log/store runtime events
+
+CODE BASE LOCATIONS:
+- RTC driver: src/rtc.c, include/rtc.h
+- Main loop: src/main.c
+- ISR: src/encoder.c (INT0 handler at top of isr() function)
+- Relay control: trigger_relay_pulse() in main.c
+
+CRITICAL NOTES:
+- Never read RTC registers in main loop (causes I2C lockup)
+- INT0 interrupt must remain enabled for counter to work
+- Counter is volatile and interrupt-driven
+- Use rtc_reset_counter() to reset when needed
+
+Ready to implement runtime tracking and pump protection features using the 1Hz counter.

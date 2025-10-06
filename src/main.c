@@ -28,7 +28,7 @@ extern volatile uint8_t timeout_debug_flag;
 extern uint8_t current_input;
 extern volatile uint8_t long_press_beep_flag;
 
-volatile uint8_t relay_latch_mode = 0;  // 0=pulse, 1=latch
+volatile uint8_t relay_latch_mode = 0; // 0=pulse, 1=latch
 
 // Function prototypes
 void uart_init(void);
@@ -115,7 +115,7 @@ void system_init(void)
 void trigger_relay_pulse(uint8_t latch_mode)
 {
     extern system_config_t system_config;
-    
+
     char buf[60];
     sprintf(buf, "!!! trigger_relay_pulse() CALLED (latch=%d) !!!", latch_mode);
     uart_println(buf);
@@ -123,7 +123,7 @@ void trigger_relay_pulse(uint8_t latch_mode)
     if (relay_state == 0) // Only trigger if not already active
     {
         relay_state = 1;
-        
+
         if (latch_mode)
         {
             // Latch mode - open and stay open (counter = 0 means infinite)
@@ -137,7 +137,7 @@ void trigger_relay_pulse(uint8_t latch_mode)
             sprintf(buf, "Relay OPEN - PULSE: %d sec", system_config.relay_pulse_time);
             uart_println(buf);
         }
-        
+
         RELAY_PIN = 0; // OPEN relay (de-energize)
     }
 }
