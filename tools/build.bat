@@ -6,13 +6,14 @@ echo.
 set XC8_PATH=C:\Program Files\Microchip\xc8\v2.46\bin\xc8.exe
 set MEPROG_PATH=C:\Program Files (x86)\MELabs Programmer\meProg.exe
 echo Compiling...
-"%XC8_PATH%" --chip=18F2525 src\main.c src\encoder.c src\menu.c src\eeprom.c -osrc\main -Iinclude
+"%XC8_PATH%" --chip=18F2525 src\main.c src\encoder.c src\menu.c src\eeprom.c src\lcd.c src\i2c.c src\rtc.c -osrc\main -Iinclude
 if %ERRORLEVEL% NEQ 0 (
     echo.
     echo Compilation FAILED!
     pause
     exit /b 1
 )
+
 echo.
 echo Compilation successful!
 echo.

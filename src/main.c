@@ -8,6 +8,8 @@
 #include "../include/encoder.h"
 #include "../include/menu.h"
 #include "../include/eeprom.h"
+#include "../include/i2c.h"
+#include "../include/rtc.h"
 #include <stdio.h>
 
 // External variables from encoder
@@ -28,7 +30,7 @@ extern volatile uint8_t timeout_debug_flag;
 extern uint8_t current_input;
 extern volatile uint8_t long_press_beep_flag;
 
-volatile uint8_t relay_latch_mode = 0;  // 0=pulse, 1=latch
+volatile uint8_t relay_latch_mode = 0; // 0=pulse, 1=latch
 
 // Function prototypes
 void uart_init(void);
@@ -102,6 +104,7 @@ void system_init(void)
     TRISBbits.TRISB1 = 1; // ENC_A input
     TRISBbits.TRISB2 = 1; // ENC_B input
     TRISBbits.TRISB6 = 1; // ENC_SW input
+    TRISBbits.TRISB0 = 1; // RTC 1Hz square wave input (INT0)
     INTCON2bits.RBPU = 0; // Enable PORTB pull-ups
 
     TRISBbits.TRISB6 = 1; // ENC_SW input
@@ -115,7 +118,7 @@ void system_init(void)
 void trigger_relay_pulse(uint8_t latch_mode)
 {
     extern system_config_t system_config;
-    
+
     char buf[60];
     sprintf(buf, "!!! trigger_relay_pulse() CALLED (latch=%d) !!!", latch_mode);
     uart_println(buf);
@@ -123,7 +126,7 @@ void trigger_relay_pulse(uint8_t latch_mode)
     if (relay_state == 0) // Only trigger if not already active
     {
         relay_state = 1;
-        
+
         if (latch_mode)
         {
             // Latch mode - open and stay open (counter = 0 means infinite)
@@ -137,7 +140,7 @@ void trigger_relay_pulse(uint8_t latch_mode)
             sprintf(buf, "Relay OPEN - PULSE: %d sec", system_config.relay_pulse_time);
             uart_println(buf);
         }
-        
+
         RELAY_PIN = 0; // OPEN relay (de-energize)
     }
 }
@@ -152,131 +155,6 @@ void relay_close(void)
         RELAY_PIN = 1; // CLOSE relay (energize)
         uart_println("Relay CLOSED - fault cleared");
     }
-}
-
-// LCD functions
-void lcd_write_nibble(uint8_t nibble)
-{
-    if (nibble & 0x01)
-        LCD_D4 = 1;
-    else
-        LCD_D4 = 0;
-    if (nibble & 0x02)
-        LCD_D5 = 1;
-    else
-        LCD_D5 = 0;
-    if (nibble & 0x04)
-        LCD_D6 = 1;
-    else
-        LCD_D6 = 0;
-    if (nibble & 0x08)
-        LCD_D7 = 1;
-    else
-        LCD_D7 = 0;
-
-    LCD_EN = 1;
-    __delay_us(1);
-    LCD_EN = 0;
-    __delay_us(50);
-}
-
-void lcd_cmd(uint8_t cmd)
-{
-    LCD_RS = 0;
-    lcd_write_nibble(cmd >> 4);
-    lcd_write_nibble(cmd & 0x0F);
-
-    if (cmd == 0x01 || cmd == 0x02)
-    {
-        __delay_ms(2);
-    }
-    else
-    {
-        __delay_us(50);
-    }
-}
-
-void lcd_data(uint8_t data)
-{
-    LCD_RS = 1;
-    lcd_write_nibble(data >> 4);
-    lcd_write_nibble(data & 0x0F);
-    __delay_us(50);
-}
-
-void lcd_print(const char *str)
-{
-    while (*str)
-    {
-        lcd_data(*str++);
-    }
-}
-
-void lcd_clear(void)
-{
-    lcd_cmd(0x01);
-    __delay_ms(2);
-}
-
-void lcd_set_cursor(uint8_t row, uint8_t col)
-{
-    uint8_t address;
-    switch (row)
-    {
-    case 0:
-        address = 0x80;
-        break;
-    case 1:
-        address = 0xC0;
-        break;
-    case 2:
-        address = 0x94;
-        break;
-    case 3:
-        address = 0xD4;
-        break;
-    default:
-        address = 0x80;
-        break;
-    }
-    lcd_cmd(address + col);
-}
-
-void lcd_init(void)
-{
-    // Set TRIS exactly as Positron does
-    TRISA = 0x10; // %00010000
-    TRISB = 0x46; // %01000110
-    TRISC = 0x00; // %00000000
-
-    // Clear all ports
-    PORTA = 0;
-    PORTB = 0;
-    // PORTC = 0;
-
-    __delay_ms(50);
-
-    LCD_RS = 0;
-
-    // Force 8-bit mode three times
-    lcd_write_nibble(0x03);
-    __delay_ms(5);
-    lcd_write_nibble(0x03);
-    __delay_us(150);
-    lcd_write_nibble(0x03);
-    __delay_us(150);
-
-    // Switch to 4-bit
-    lcd_write_nibble(0x02);
-    __delay_us(150);
-
-    // Function set: 4-bit, 2 lines, 5x8
-    lcd_cmd(0x28);
-    lcd_cmd(0x08); // Display OFF - THIS IS KEY
-    lcd_cmd(0x01); // Clear
-    __delay_ms(2);
-    lcd_cmd(0x06); // Entry mode
-    lcd_cmd(0x0C); // Display ON, cursor off
 }
 
 // Buzzer function
@@ -311,6 +189,22 @@ void main(void)
     char buf[50];
     sprintf(buf, "After init: relay_state=%d, counter=%d", relay_state, relay_counter);
     uart_println(buf);
+
+    // Initialize I2C bus
+    uart_println("Initializing I2C...");
+    i2c_init();
+    uart_println("I2C initialized");
+
+    // Initialize RTC (includes 2-second power-up delay)
+    uart_println("Initializing RTC (2-second delay)...");
+    if (rtc_init() == 0)
+    {
+        uart_println("RTC initialized - 1Hz square wave enabled");
+    }
+    else
+    {
+        uart_println("ERROR: RTC initialization failed!");
+    }
 
     encoder_init();
     menu_init();
