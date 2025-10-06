@@ -8,7 +8,7 @@
 	; Compiler options:
 	;
 	; src\main.c src\encoder.c src\menu.c src\eeprom.c src\lcd.c src\i2c.c \
-	; src\rtc.c -osrc\main -Iinclude
+	; src\rtc.c src\ad7994.c -osrc\main -Iinclude
 	;
 
 

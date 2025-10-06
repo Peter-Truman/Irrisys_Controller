@@ -10,6 +10,7 @@
 #include "../include/eeprom.h"
 #include "../include/i2c.h"
 #include "../include/rtc.h"
+#include "ad7994.h"
 #include <stdio.h>
 
 // External variables from encoder
@@ -206,6 +207,22 @@ void main(void)
         uart_println("ERROR: RTC initialization failed!");
     }
 
+    uint8_t adc_error = ad7994_init();
+    if (adc_error)
+    {
+        char buf[30];
+        sprintf(buf, "ADC Init returned error: %u", adc_error);
+        uart_println(buf);
+    }
+
+    /*if (ad7994_init())
+    {
+        lcd_clear();
+        lcd_print("ADC Init Error");
+        while (1)
+            ;
+    }
+*/
     encoder_init();
     menu_init();
     lcd_init();
@@ -246,351 +263,384 @@ void main(void)
     static uint32_t blink_timer = 0;
     static uint16_t encoder_activity_timer = 0; // Track encoder activity
 
+    static uint32_t last_second_update = 0;
+    uint16_t adc_ch1, adc_ch2, adc_ch3;
+    rtc_time_t current_time;
+
     // while (1)
     //{
 
     // Main loop starts here
     while (1)
     {
-
-        // DEBUG: Check if relay variables change
-        static uint8_t last_relay_state = 0;
-        static uint16_t last_relay_counter = 0;
-
-        if (relay_state != last_relay_state || relay_counter != last_relay_counter)
+        // Read RTC time
+        if (rtc_read_time(&current_time) == 0)
         {
-            char buf[60];
-            sprintf(buf, "RELAY CHANGE: state=%d, counter=%d", relay_state, relay_counter);
-            uart_println(buf);
-            last_relay_state = relay_state;
-            last_relay_counter = relay_counter;
+            char time_buf[60];
+            sprintf(time_buf, "RTC: 20%02u-%02u-%02u %02u:%02u:%02u",
+                    current_time.year, current_time.month, current_time.date,
+                    current_time.hours, current_time.minutes, current_time.seconds);
+            uart_println(time_buf);
         }
 
-        // Check encoder rotation
-        if (encoder_count != last_encoder)
+        // Read ADC channels
+        adc_ch1 = ad7994_read_channel(1);
+        adc_ch2 = ad7994_read_channel(2);
+        adc_ch3 = ad7994_read_channel(3);
+
+        // ... rest of loop
+
+        __delay_ms(1000); // Update once per second
+    }
+    // Display CH1 on LCD top line
+    char lcd_buf[17];
+    sprintf(lcd_buf, "CH1:%4u CH2:%4u", adc_ch1, adc_ch2);
+    lcd_set_cursor(0, 0);
+    lcd_print(lcd_buf);
+
+    sprintf(lcd_buf, "CH3:%4u %02u:%02u:%02u", adc_ch3,
+            current_time.hours, current_time.minutes, current_time.seconds);
+    lcd_set_cursor(1, 0);
+    lcd_print(lcd_buf);
+
+    // DEBUG: Check if relay variables change
+    static uint8_t last_relay_state = 0;
+    static uint16_t last_relay_counter = 0;
+
+    if (relay_state != last_relay_state || relay_counter != last_relay_counter)
+    {
+        char buf[60];
+        sprintf(buf, "RELAY CHANGE: state=%d, counter=%d", relay_state, relay_counter);
+        uart_println(buf);
+        last_relay_state = relay_state;
+        last_relay_counter = relay_counter;
+    }
+
+        __delay_ms(500); // Update every 500ms
+    // Check encoder rotation
+    if (encoder_count != last_encoder)
+    {
+        int16_t delta = encoder_count - last_encoder;
+
+        // Add encoder tick sound for all movements
+        beep(1);
+
+        char buf[40];
+        sprintf(buf, "Encoder: %d, Delta: %d", encoder_count, delta);
+        uart_println(buf);
+
+        last_encoder = encoder_count;
+
+        // Track encoder activity - reset timer on movement
+        encoder_activity_timer = 500; // Stay active for 500ms after last movement
+
+        // Force blink state ON during encoder movement for better visibility
+        if (menu.in_edit_mode)
         {
-            int16_t delta = encoder_count - last_encoder;
+            menu.blink_state = 1;
+        }
 
-            // Add encoder tick sound for all movements
-            beep(1);
-
-            char buf[40];
-            sprintf(buf, "Encoder: %d, Delta: %d", encoder_count, delta);
-            uart_println(buf);
-
-            last_encoder = encoder_count;
-
-            // Track encoder activity - reset timer on movement
-            encoder_activity_timer = 500; // Stay active for 500ms after last movement
-
-            // Force blink state ON during encoder movement for better visibility
-            if (menu.in_edit_mode)
+        // Check if we're editing a field
+        if (menu.in_edit_mode && current_menu == 1)
+        {
+            if (is_numeric_field(menu.current_line, input_config[current_input].sensor_type, input_config[current_input].flow_type))
             {
-                menu.blink_state = 1;
+                // Handle numeric rotation
+                handle_numeric_rotation(delta);
             }
-
-            // Check if we're editing a field
-            if (menu.in_edit_mode && current_menu == 1)
+            else if (is_time_field(menu.current_line, input_config[current_input].sensor_type, input_config[current_input].flow_type))
             {
-                if (is_numeric_field(menu.current_line, input_config[current_input].sensor_type, input_config[current_input].flow_type))
-                {
-                    // Handle numeric rotation
-                    handle_numeric_rotation(delta);
-                }
-                else if (is_time_field(menu.current_line, input_config[current_input].sensor_type, input_config[current_input].flow_type))
-                {
-                    // Handle time rotation
-                    handle_time_rotation(delta);
-                    menu_update_time_value(); // ADD THIS - force immediate update
-                }
-                else
-                {
-                    // Handle other editable fields (Enable, Sensor, etc)
-                    menu_handle_encoder(delta);
-                }
+                // Handle time rotation
+                handle_time_rotation(delta);
+                menu_update_time_value(); // ADD THIS - force immediate update
             }
             else
             {
-                // Use existing encoder handler for menu navigation
+                // Handle other editable fields (Enable, Sensor, etc)
                 menu_handle_encoder(delta);
             }
+        }
+        else
+        {
+            // Use existing encoder handler for menu navigation
+            menu_handle_encoder(delta);
+        }
 
-            // Redraw current menu - optimized for edit mode
-            if (menu.in_edit_mode && current_menu == 1)
+        // Redraw current menu - optimized for edit mode
+        if (menu.in_edit_mode && current_menu == 1)
+        {
+            // Check what type of field we're editing
+            if (is_numeric_field(menu.current_line, input_config[current_input].sensor_type, input_config[current_input].flow_type))
             {
-                // Check what type of field we're editing
-                if (is_numeric_field(menu.current_line, input_config[current_input].sensor_type, input_config[current_input].flow_type))
-                {
-                    // Fast update for numeric value
-                    menu_update_numeric_value();
-                }
-                else if (is_time_field(menu.current_line, input_config[current_input].sensor_type, input_config[current_input].flow_type))
-                {
-                    // Fast update for time value
-                    menu_update_time_value();
-                }
-                else
-                {
-                    // Fast update for option value (existing)
-                    menu_update_edit_value();
-                }
+                // Fast update for numeric value
+                menu_update_numeric_value();
+            }
+            else if (is_time_field(menu.current_line, input_config[current_input].sensor_type, input_config[current_input].flow_type))
+            {
+                // Fast update for time value
+                menu_update_time_value();
             }
             else
             {
-                // Full redraw for normal navigation
-                if (current_menu == 0)
-                {
-                    menu_draw_options();
-                }
-                else if (current_menu == 1)
-                {
-                    menu_draw_input();
-                }
-                else if (current_menu == 2)
-                {
-                    menu_draw_setup();
-                }
+                // Fast update for option value (existing)
+                menu_update_edit_value();
             }
         }
-
-        /// Check button events
-        if (button_event != last_button)
+        else
         {
-            if (button_event > 0)
+            // Full redraw for normal navigation
+            if (current_menu == 0)
             {
-                uint8_t current_event = button_event;
-                button_event = 0;
+                menu_draw_options();
+            }
+            else if (current_menu == 1)
+            {
+                menu_draw_input();
+            }
+            else if (current_menu == 2)
+            {
+                menu_draw_setup();
+            }
+        }
+    }
 
-                char buf[30];
-                sprintf(buf, "Button event: %d", current_event);
-                uart_println(buf);
+    /// Check button events
+    if (button_event != last_button)
+    {
+        if (button_event > 0)
+        {
+            uint8_t current_event = button_event;
+            button_event = 0;
 
-                // ADD: Handle long press FIRST
-                if (current_event == 2) // Long press
+            char buf[30];
+            sprintf(buf, "Button event: %d", current_event);
+            uart_println(buf);
+
+            // ADD: Handle long press FIRST
+            if (current_event == 2) // Long press
+            {
+                uart_println("Long press detected");
+
+                // Check if in edit mode
+                if (menu.in_edit_mode)
                 {
-                    uart_println("Long press detected");
+                    // Cancel edit without saving
+                    menu.in_edit_mode = 0;
+                    menu.blink_state = 1;
+                    menu.edit_digit = 0;
 
-                    // Check if in edit mode
-                    if (menu.in_edit_mode)
-                    {
-                        // Cancel edit without saving
-                        menu.in_edit_mode = 0;
-                        menu.blink_state = 1;
-                        menu.edit_digit = 0;
+                    // Reset flags
+                    extern input_config_t input_config[3];
+                    enable_edit_flag = input_config[current_input].enable;
+                    sensor_edit_flag = input_config[current_input].sensor_type;
 
-                        // Reset flags
-                        extern input_config_t input_config[3];
-                        enable_edit_flag = input_config[current_input].enable;
-                        sensor_edit_flag = input_config[current_input].sensor_type;
+                    uart_println("Edit cancelled");
 
-                        uart_println("Edit cancelled");
-
-                        // Redraw
-                        if (current_menu == 1)
-                            menu_draw_input();
-                    }
-                    else
-                    {
-                        // Not in edit - navigate back
-                        // Not in edit - navigate back
-                        if (current_menu == 0) // OPTIONS -> Main
-                        {
-                            current_menu = 255; // Just set the menu state
-                            uart_println("Long press - exit to main");
-                        }
-                        else if (current_menu == 1) // INPUT -> SETUP
-                        {
-                            current_menu = 2;
-                            menu.current_line = 0;
-                            menu.top_line = 0;
-                            menu.total_items = 5;
-                            menu_draw_setup();
-                        }
-                        else if (current_menu == 2) // SETUP -> OPTIONS
-                        {
-                            current_menu = 0;
-                            menu.current_line = 0;
-                            menu.top_line = 0;
-                            menu.total_items = 5;
-                            menu_draw_options();
-                        }
-                    }
+                    // Redraw
+                    if (current_menu == 1)
+                        menu_draw_input();
                 }
-                // Check if we're on main screen (for short press)
-                else if (current_menu == 255)
+                else
                 {
-                    if (current_event == 1) // Short press
+                    // Not in edit - navigate back
+                    // Not in edit - navigate back
+                    if (current_menu == 0) // OPTIONS -> Main
                     {
-                        current_menu = 0; // Enter OPTIONS menu
+                        current_menu = 255; // Just set the menu state
+                        uart_println("Long press - exit to main");
+                    }
+                    else if (current_menu == 1) // INPUT -> SETUP
+                    {
+                        current_menu = 2;
+                        menu.current_line = 0;
+                        menu.top_line = 0;
+                        menu.total_items = 5;
+                        menu_draw_setup();
+                    }
+                    else if (current_menu == 2) // SETUP -> OPTIONS
+                    {
+                        current_menu = 0;
                         menu.current_line = 0;
                         menu.top_line = 0;
                         menu.total_items = 5;
                         menu_draw_options();
-                        beep(50);
                     }
-                }
-                else
-                {
-                    // In a menu - pass to menu handler
-                    menu_handle_button(current_event);
-
-                    // Redraw after button action
-                    if (current_menu == 0)
-                        menu_draw_options();
-                    else if (current_menu == 1)
-                        menu_draw_input();
-                    else if (current_menu == 2)
-                        menu_draw_setup();
                 }
             }
-            last_button = button_event;
-            button_event = 0;
-        }
-
-        // Check if we just returned to main screen
-        static uint8_t last_menu_state = 0;
-        if (current_menu == 255 && last_menu_state != 255)
-        {
-            // Just entered main screen - redraw it
-            lcd_clear();
-            lcd_set_cursor(0, 0);
-            lcd_print("MAIN SCREEN");
-            lcd_set_cursor(1, 0);
-            lcd_print("Ready");
-            uart_println("Main screen displayed");
-
-            uart_println("Saving to EEPROM...");
-            save_current_config();
-            save_pending = 0;
-            uart_println("EEPROM save complete");
-        }
-        last_menu_state = current_menu;
-
-        // Decrement encoder activity timer
-        if (encoder_activity_timer > 0)
-        {
-            encoder_activity_timer--;
-        }
-
-        // Handle blinking in edit mode
-        blink_timer++;
-        if (blink_timer >= 10000)
-        { // Slow 2Hz blinking
-            blink_timer = 0;
-            if (menu.in_edit_mode)
+            // Check if we're on main screen (for short press)
+            else if (current_menu == 255)
             {
-                // Only blink if encoder is not active
-                if (encoder_activity_timer == 0)
+                if (current_event == 1) // Short press
                 {
-                    menu.blink_state = !menu.blink_state;
-
-                    // Update display for blink - redraw current menu
-                    // Update display for blink - redraw current menu
-                    switch (current_menu)
-                    {
-                    case 0: // OPTIONS menu
-                        menu_draw_options();
-                        break;
-                    case 1: // INPUT menu
-                    {
-                        // Check what type of field we're editing
-                        if (is_numeric_field(menu.current_line, input_config[current_input].sensor_type, input_config[current_input].flow_type))
-                        {
-                            menu_update_numeric_value();
-                        }
-                        else if (is_time_field(menu.current_line, input_config[current_input].sensor_type, input_config[current_input].flow_type))
-                        {
-                            menu_update_time_value();
-                        }
-                        else
-                        {
-                            // Option field - redraw entire menu for blinking
-                            menu_draw_input();
-                        }
-                    }
-                    break;
-                    case 2: // SETUP menu
-                        menu_draw_setup();
-                        break;
-                    case 3:                         // CLOCK menu
-                        if (menu.current_line == 2) // Rly Pulse - time field
-                        {
-                            menu_update_time_value();
-                        }
-                        else
-                        {
-                            menu_draw_clock();
-                        }
-                        break;
-                    }
+                    current_menu = 0; // Enter OPTIONS menu
+                    menu.current_line = 0;
+                    menu.top_line = 0;
+                    menu.total_items = 5;
+                    menu_draw_options();
+                    beep(50);
                 }
             }
             else
             {
-                menu.blink_state = 1; // Always on when not editing
+                // In a menu - pass to menu handler
+                menu_handle_button(current_event);
+
+                // Redraw after button action
+                if (current_menu == 0)
+                    menu_draw_options();
+                else if (current_menu == 1)
+                    menu_draw_input();
+                else if (current_menu == 2)
+                    menu_draw_setup();
             }
         }
-
-        // Check timeout debug flag from ISR
-        if (timeout_debug_flag)
-        {
-            // ... your existing debug code ...
-        }
-
-        // ADD THIS: Actually handle the timeout!
-        extern volatile uint8_t menu_timeout_flag;
-        extern volatile uint16_t menu_timeout_timer;
-
-        if (current_menu < 3) // In a menu (0=OPTIONS, 1=INPUT, 2=SETUP)
-        {
-            if (menu_timeout_flag == 0) // Timeout occurred
-            {
-                uart_println("TIMEOUT - Exiting to main screen");
-
-                // Double beep
-                beep(100);
-                __delay_ms(50);
-                beep(100);
-
-                // Exit to main screen
-                current_menu = 255;
-                menu.in_edit_mode = 0;
-                menu.current_line = 0;
-                menu.top_line = 0;
-
-                // Clear display
-                lcd_clear();
-                lcd_set_cursor(0, 0);
-                lcd_print("MAIN SCREEN");
-                lcd_set_cursor(1, 0);
-                lcd_print("Timeout");
-
-                // Reset the flag and timer
-                menu_timeout_flag = 1;
-                menu_timeout_timer = 0;
-            }
-        }
-
-        // Check for long press beep
-        if (long_press_beep_flag)
-        {
-            long_press_beep_flag = 0;
-            beep(500); // Half second beep as feedback
-            uart_println("Long press threshold reached - beep");
-        }
-        // Handle pending EEPROM saves...
-
-        // // Handle pending EEPROM saves when not in edit mode (MOVED OUTSIDE)
-        if (save_pending && !menu.in_edit_mode)
-        {
-            uart_println("Saving to EEPROM...");
-            save_current_config();
-            save_pending = 0;
-            uart_println("EEPROM save complete");
-        }
-
-        // Prevent LCD corruption at high speed
-
-        __delay_us(50);
+        last_button = button_event;
+        button_event = 0;
     }
+
+    // Check if we just returned to main screen
+    static uint8_t last_menu_state = 0;
+    if (current_menu == 255 && last_menu_state != 255)
+    {
+        // Just entered main screen - redraw it
+        lcd_clear();
+        lcd_set_cursor(0, 0);
+        lcd_print("MAIN SCREEN");
+        lcd_set_cursor(1, 0);
+        lcd_print("Ready");
+        uart_println("Main screen displayed");
+
+        uart_println("Saving to EEPROM...");
+        save_current_config();
+        save_pending = 0;
+        uart_println("EEPROM save complete");
+    }
+    last_menu_state = current_menu;
+
+    // Decrement encoder activity timer
+    if (encoder_activity_timer > 0)
+    {
+        encoder_activity_timer--;
+    }
+
+    // Handle blinking in edit mode
+    blink_timer++;
+    if (blink_timer >= 10000)
+    { // Slow 2Hz blinking
+        blink_timer = 0;
+        if (menu.in_edit_mode)
+        {
+            // Only blink if encoder is not active
+            if (encoder_activity_timer == 0)
+            {
+                menu.blink_state = !menu.blink_state;
+
+                // Update display for blink - redraw current menu
+                // Update display for blink - redraw current menu
+                switch (current_menu)
+                {
+                case 0: // OPTIONS menu
+                    menu_draw_options();
+                    break;
+                case 1: // INPUT menu
+                {
+                    // Check what type of field we're editing
+                    if (is_numeric_field(menu.current_line, input_config[current_input].sensor_type, input_config[current_input].flow_type))
+                    {
+                        menu_update_numeric_value();
+                    }
+                    else if (is_time_field(menu.current_line, input_config[current_input].sensor_type, input_config[current_input].flow_type))
+                    {
+                        menu_update_time_value();
+                    }
+                    else
+                    {
+                        // Option field - redraw entire menu for blinking
+                        menu_draw_input();
+                    }
+                }
+                break;
+                case 2: // SETUP menu
+                    menu_draw_setup();
+                    break;
+                case 3:                         // CLOCK menu
+                    if (menu.current_line == 2) // Rly Pulse - time field
+                    {
+                        menu_update_time_value();
+                    }
+                    else
+                    {
+                        menu_draw_clock();
+                    }
+                    break;
+                }
+            }
+        }
+        else
+        {
+            menu.blink_state = 1; // Always on when not editing
+        }
+    }
+
+    // Check timeout debug flag from ISR
+    if (timeout_debug_flag)
+    {
+        // ... your existing debug code ...
+    }
+
+    // ADD THIS: Actually handle the timeout!
+    extern volatile uint8_t menu_timeout_flag;
+    extern volatile uint16_t menu_timeout_timer;
+
+    if (current_menu < 3) // In a menu (0=OPTIONS, 1=INPUT, 2=SETUP)
+    {
+        if (menu_timeout_flag == 0) // Timeout occurred
+        {
+            uart_println("TIMEOUT - Exiting to main screen");
+
+            // Double beep
+            beep(100);
+            __delay_ms(50);
+            beep(100);
+
+            // Exit to main screen
+            current_menu = 255;
+            menu.in_edit_mode = 0;
+            menu.current_line = 0;
+            menu.top_line = 0;
+
+            // Clear display
+            lcd_clear();
+            lcd_set_cursor(0, 0);
+            lcd_print("MAIN SCREEN");
+            lcd_set_cursor(1, 0);
+            lcd_print("Timeout");
+
+            // Reset the flag and timer
+            menu_timeout_flag = 1;
+            menu_timeout_timer = 0;
+        }
+    }
+
+    // Check for long press beep
+    if (long_press_beep_flag)
+    {
+        long_press_beep_flag = 0;
+        beep(500); // Half second beep as feedback
+        uart_println("Long press threshold reached - beep");
+    }
+    // Handle pending EEPROM saves...
+
+    // // Handle pending EEPROM saves when not in edit mode (MOVED OUTSIDE)
+    if (save_pending && !menu.in_edit_mode)
+    {
+        uart_println("Saving to EEPROM...");
+        save_current_config();
+        save_pending = 0;
+        uart_println("EEPROM save complete");
+    }
+
+    // Prevent LCD corruption at high speed
+
+    __delay_us(50);
 }

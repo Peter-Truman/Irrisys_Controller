@@ -118,25 +118,20 @@ void i2c_stop(void)
  */
 uint8_t i2c_write(uint8_t data)
 {
-    if (i2c_wait_idle())
-        return 1;
-
-    SSPBUF = data; // Write data to buffer
+    SSPBUF = data;
 
     // Wait for transmission to complete
-    uint16_t timeout = I2C_TIMEOUT;
-    while (SSPSTATbits.BF)
+    while (!PIR1bits.SSPIF)
+        ;
+    PIR1bits.SSPIF = 0;
+
+    // Check ACK status: 0=ACK received, 1=NAK received
+    if (SSPCON2bits.ACKSTAT)
     {
-        if (--timeout == 0)
-            return 1;
+        return 1; // NAK - error
     }
 
-    // Wait for ACK/NACK
-    if (i2c_wait_idle())
-        return 1;
-
-    // Check for ACK (0 = ACK, 1 = NACK)
-    return SSPCON2bits.ACKSTAT;
+    return 0; // ACK - success
 }
 
 /**
