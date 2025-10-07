@@ -1,156 +1,169 @@
 // lcd.c - LCD implementation for IRRISYS Controller
+// Uses PORTA: RA6=RS, RA5=RW, RA7=EN, RA0-3=D4-D7
+#include "../include/config.h"
 #include <xc.h>
 #include <stdint.h>
-#include <stdarg.h>
-#include <stdio.h>
-#include "lcd.h"
-#include "config.h"
 
-// Define _XTAL_FREQ if not already defined
-#ifndef _XTAL_FREQ
-#define _XTAL_FREQ  8000000     // 8MHz crystal
-#endif
+// Helper function to write a nibble to LCD data pins
+void lcd_write_nibble(uint8_t nibble)
+{
+    LCD_D4 = (nibble & 0x01) ? 1 : 0;
+    LCD_D5 = (nibble & 0x02) ? 1 : 0;
+    LCD_D6 = (nibble & 0x04) ? 1 : 0;
+    LCD_D7 = (nibble & 0x08) ? 1 : 0;
+}
 
 // Send command to LCD (4-bit mode)
-void lcd_command(uint8_t cmd) {
+void lcd_cmd(uint8_t cmd)
+{
     // Upper nibble
-    PORTB = (PORTB & 0x0F) | (cmd & 0xF0);  // Keep lower bits, set upper nibble
-    PORTBbits.RB0 = 0;  // RS=0 for command
-    PORTBbits.RB1 = 0;  // RW=0 for write
-    PORTBbits.RB2 = 1;  // EN high
+    lcd_write_nibble(cmd >> 4);
+    LCD_RS = 0; // Command mode
+    LCD_RW = 0; // Write mode
+    LCD_EN = 1; // Enable high
     __delay_us(1);
-    PORTBbits.RB2 = 0;  // EN low
+    LCD_EN = 0; // Enable low
     __delay_us(50);
-    
+
     // Lower nibble
-    PORTB = (PORTB & 0x0F) | ((cmd << 4) & 0xF0);
-    PORTBbits.RB0 = 0;  // RS=0
-    PORTBbits.RB1 = 0;  // RW=0
-    PORTBbits.RB2 = 1;  // EN high
+    lcd_write_nibble(cmd & 0x0F);
+    LCD_RS = 0; // Command mode
+    LCD_RW = 0; // Write mode
+    LCD_EN = 1; // Enable high
     __delay_us(1);
-    PORTBbits.RB2 = 0;  // EN low
-    
+    LCD_EN = 0; // Enable low
+
     // Longer delay for clear and home commands
-    if (cmd == 0x01 || cmd == 0x02) {
+    if (cmd == 0x01 || cmd == 0x02)
+    {
         __delay_ms(2);
-    } else {
+    }
+    else
+    {
         __delay_us(50);
     }
 }
 
 // Send data to LCD (4-bit mode)
-void lcd_data(uint8_t data) {
+void lcd_data(uint8_t data)
+{
     // Upper nibble
-    PORTB = (PORTB & 0x0F) | (data & 0xF0);
-    PORTBbits.RB0 = 1;  // RS=1 for data
-    PORTBbits.RB1 = 0;  // RW=0 for write
-    PORTBbits.RB2 = 1;  // EN high
+    lcd_write_nibble(data >> 4);
+    LCD_RS = 1; // Data mode
+    LCD_RW = 0; // Write mode
+    LCD_EN = 1; // Enable high
     __delay_us(1);
-    PORTBbits.RB2 = 0;  // EN low
+    LCD_EN = 0; // Enable low
     __delay_us(50);
-    
+
     // Lower nibble
-    PORTB = (PORTB & 0x0F) | ((data << 4) & 0xF0);
-    PORTBbits.RB0 = 1;  // RS=1
-    PORTBbits.RB1 = 0;  // RW=0
-    PORTBbits.RB2 = 1;  // EN high
+    lcd_write_nibble(data & 0x0F);
+    LCD_RS = 1; // Data mode
+    LCD_RW = 0; // Write mode
+    LCD_EN = 1; // Enable high
     __delay_us(1);
-    PORTBbits.RB2 = 0;  // EN low
+    LCD_EN = 0; // Enable low
     __delay_us(50);
 }
 
 // Initialize LCD in 4-bit mode
-void lcd_init(void) {
-    // Configure LCD pins as outputs
-    TRISB &= 0x00;  // RB0-RB7 as outputs
-    PORTB = 0x00;   // Clear all pins
-    
+void lcd_init(void)
+{
+    // Configure LCD pins as outputs (PORTA only - don't touch TRISC!)
+    TRISA &= 0xF0;        // RA0-RA3 as outputs (data)
+    TRISAbits.TRISA5 = 0; // RA5 = RW output
+    TRISAbits.TRISA6 = 0; // RA6 = RS output
+    TRISAbits.TRISA7 = 0; // RA7 = EN output
+
+    // Clear LCD control pins
+    LCD_RS = 0;
+    LCD_RW = 0;
+    LCD_EN = 0;
+    lcd_write_nibble(0);
+
     // Wait for LCD power-up
     __delay_ms(50);
-    
+
     // Initialize sequence for 4-bit mode
-    // Send 0x30 three times
-    PORTB = 0x30;
-    PORTBbits.RB2 = 1;  // EN high
+    lcd_write_nibble(0x3);
+    LCD_RS = 0;
+    LCD_RW = 0;
+    LCD_EN = 1;
     __delay_us(1);
-    PORTBbits.RB2 = 0;  // EN low
+    LCD_EN = 0;
     __delay_ms(5);
-    
-    PORTB = 0x30;
-    PORTBbits.RB2 = 1;
+
+    lcd_write_nibble(0x3);
+    LCD_EN = 1;
     __delay_us(1);
-    PORTBbits.RB2 = 0;
+    LCD_EN = 0;
     __delay_ms(1);
-    
-    PORTB = 0x30;
-    PORTBbits.RB2 = 1;
+
+    lcd_write_nibble(0x3);
+    LCD_EN = 1;
     __delay_us(1);
-    PORTBbits.RB2 = 0;
+    LCD_EN = 0;
     __delay_ms(1);
-    
+
     // Set to 4-bit mode
-    PORTB = 0x20;
-    PORTBbits.RB2 = 1;
+    lcd_write_nibble(0x2);
+    LCD_EN = 1;
     __delay_us(1);
-    PORTBbits.RB2 = 0;
+    LCD_EN = 0;
     __delay_ms(1);
-    
-    // Now we can use the command function
+
     // Function set: 4-bit, 2 lines, 5x8 font
-    lcd_command(0x28);
-    
+    lcd_cmd(0x28);
+
     // Display on, cursor off, blink off
-    lcd_command(0x0C);
-    
+    lcd_cmd(0x0C);
+
     // Clear display
-    lcd_command(0x01);
-    
+    lcd_cmd(0x01);
+
     // Entry mode: increment, no shift
-    lcd_command(0x06);
+    lcd_cmd(0x06);
 }
 
-// Set cursor position
-void lcd_goto(uint8_t x, uint8_t y) {
+// Set cursor position (matches main.c function name)
+void lcd_set_cursor(uint8_t row, uint8_t col)
+{
     uint8_t addr;
-    
-    // Calculate DDRAM address based on line
-    switch(y) {
-        case 0: addr = 0x00 + x; break;  // Line 1
-        case 1: addr = 0x40 + x; break;  // Line 2
-        case 2: addr = 0x14 + x; break;  // Line 3 (20x4 LCD)
-        case 3: addr = 0x54 + x; break;  // Line 4 (20x4 LCD)
-        default: addr = 0x00; break;
+
+    switch (row)
+    {
+    case 0:
+        addr = 0x00 + col;
+        break;
+    case 1:
+        addr = 0x40 + col;
+        break;
+    case 2:
+        addr = 0x94 + col;
+        break;
+    case 3:
+        addr = 0xD4 + col;
+        break;
+    default:
+        addr = 0x00;
+        break;
     }
-    
-    lcd_command(0x80 | addr);
+
+    lcd_cmd(0x80 | addr);
 }
 
-// Write a character to LCD
-void lcd_putc(char c) {
-    lcd_data(c);
-}
-
-// Write a string to LCD
-void lcd_puts(const char* s) {
-    while (*s) {
-        lcd_putc(*s++);
+// Write a string to LCD (matches main.c function name)
+void lcd_print(const char *str)
+{
+    while (*str)
+    {
+        lcd_data(*str++);
     }
 }
 
 // Clear LCD screen
-void lcd_clear(void) {
-    lcd_command(0x01);
-    __delay_ms(2);  // Clear command needs extra time
-}
-
-// Simple printf for LCD (limited implementation)
-void lcd_printf(const char* format, ...) {
-    char buffer[21];  // Max LCD width + 1
-    va_list args;
-    
-    va_start(args, format);
-    vsprintf(buffer, format, args);
-    va_end(args);
-    
-    lcd_puts(buffer);
+void lcd_clear(void)
+{
+    lcd_cmd(0x01);
+    __delay_ms(2);
 }

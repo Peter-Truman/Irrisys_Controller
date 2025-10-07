@@ -1,140 +1,156 @@
-/**
- * DS3231M RTC Implementation
- */
-
-#define _XTAL_FREQ 32000000 // 32MHz (8MHz * 4 PLL)
-
+// rtc.c - DS3231M RTC Driver
 #include "../include/rtc.h"
 #include "../include/i2c.h"
+#include "../include/config.h"
+#include <stdio.h>
+#include <xc.h>
 
-// Global second counter (max 604800 = 1 week)
-volatile uint32_t rtc_second_counter = 0;
-
-// Diagnostic readback values - ADD THESE TWO LINES
-uint8_t rtc_control_readback = 0;
-uint8_t rtc_status_readback = 0;
-
-void rtc_reset_counter(void)
+// Write to RTC register
+uint8_t rtc_write_register(uint8_t reg, uint8_t value)
 {
-    rtc_second_counter = 0;
-}
-
-void rtc_init(void)
-{
-    // Single write to enable 1Hz square wave - nothing else
-    rtc_write_register(RTC_REG_CONTROL, 0x00);
-    __delay_ms(200);
-
-    // Set dummy values for diagnostics
-    rtc_control_readback = 0x00;
-    rtc_status_readback = 0x00;
-}
-uint8_t rtc_read_register(uint8_t reg)
-{
-    uint8_t data;
-
-    i2c_start();
-    i2c_write(RTC_ADDR_WRITE); // Address RTC for write
-    i2c_write(reg);            // Write register address
-    i2c_restart();             // Repeated start
-    i2c_write(RTC_ADDR_READ);  // Address RTC for read
-    data = i2c_read(0);        // Read data with NACK
+    if (i2c_start())
+        return 1;
+    if (i2c_write((RTC_I2C_ADDR << 1) | 0))
+        return 1;
+    if (i2c_write(reg))
+        return 1;
+    if (i2c_write(value))
+        return 1;
     i2c_stop();
-
-    return data;
+    return 0;
 }
 
-void rtc_write_register(uint8_t reg, uint8_t data)
+// Read from RTC register
+uint8_t rtc_read_register(uint8_t reg, uint8_t *value)
 {
-    i2c_start();
-    i2c_write(RTC_ADDR_WRITE); // Address RTC for write
-    i2c_write(reg);            // Write register address
-    i2c_write(data);           // Write data
+    if (i2c_start())
+        return 1;
+    if (i2c_write((RTC_I2C_ADDR << 1) | 0))
+        return 1;
+    if (i2c_write(reg))
+        return 1;
+
+    if (i2c_restart())
+        return 1;
+    if (i2c_write((RTC_I2C_ADDR << 1) | 1))
+        return 1;
+    *value = i2c_read(0);
     i2c_stop();
+    return 0;
 }
 
-void rtc_read_time(uint8_t *hours, uint8_t *minutes, uint8_t *seconds)
+// Initialize RTC for 1Hz square wave output
+uint8_t rtc_init(void)
 {
-    uint8_t data;
+    // CRITICAL: 2-second delay for RTC oscillator to stabilize after power-up
+    // DS3231M datasheet specifies 250-300ms minimum, we use 2000ms for safety
+    __delay_ms(500);
+    __delay_ms(500);
+    __delay_ms(500);
+    __delay_ms(500);
 
-    i2c_start();
-    i2c_write(RTC_ADDR_WRITE);
-    i2c_write(RTC_REG_SECONDS); // Start at seconds register
-    i2c_restart();
-    i2c_write(RTC_ADDR_READ);
+    // Configure Control Register for 1Hz square wave ONLY
+    // Control Register (0x0E) = 0x00
+    if (rtc_write_register(RTC_REG_CONTROL, 0x00))
+    {
+        return 1;
+    }
 
-    // Read seconds (ignore bit 7)
-    data = i2c_read(1); // ACK - more bytes to read
-    *seconds = BCD2BIN(data & 0x7F);
-
-    // Read minutes (ignore bit 7)
-    data = i2c_read(1); // ACK - more bytes to read
-    *minutes = BCD2BIN(data & 0x7F);
-
-    // Read hours (24-hour format)
-    data = i2c_read(0); // NACK - last byte
-    *hours = BCD2BIN(data & 0x3F);
-
-    i2c_stop();
+    return 0;
 }
 
-void rtc_write_time(uint8_t hours, uint8_t minutes, uint8_t seconds)
+// Convert BCD to decimal
+uint8_t bcd_to_dec(uint8_t bcd)
 {
-    i2c_start();
-    i2c_write(RTC_ADDR_WRITE);
-    i2c_write(RTC_REG_SECONDS);
-    i2c_write(BIN2BCD(seconds));
-    i2c_write(BIN2BCD(minutes));
-    i2c_write(BIN2BCD(hours)); // 24-hour format (bit 6 = 0)
-    i2c_stop();
+    return ((bcd >> 4) * 10) + (bcd & 0x0F);
 }
 
-void rtc_read_date(uint8_t *year, uint8_t *month, uint8_t *date, uint8_t *day)
+// Convert decimal to BCD
+uint8_t dec_to_bcd(uint8_t dec)
 {
-    uint8_t data;
+    return ((dec / 10) << 4) | (dec % 10);
+}
 
-    i2c_start();
-    i2c_write(RTC_ADDR_WRITE);
-    i2c_write(RTC_REG_DAY); // Start at day register
-    i2c_restart();
-    i2c_write(RTC_ADDR_READ);
+// Set RTC time
+uint8_t rtc_set_time(rtc_time_t *time)
+{
+    uint8_t data[7];
 
-    data = i2c_read(1); // Day of week (1-7)
-    *day = BCD2BIN(data & 0x07);
+    // Convert to BCD
+    data[0] = dec_to_bcd(time->seconds);
+    data[1] = dec_to_bcd(time->minutes);
+    data[2] = dec_to_bcd(time->hours);
+    data[3] = dec_to_bcd(time->day);
+    data[4] = dec_to_bcd(time->date);
+    data[5] = dec_to_bcd(time->month);
+    data[6] = dec_to_bcd(time->year);
 
-    data = i2c_read(1); // Date (1-31)
-    *date = BCD2BIN(data & 0x3F);
+    // Write all 7 bytes starting at register 0x00
+    if (i2c_start())
+        return 1;
+    if (i2c_write((RTC_I2C_ADDR << 1) | 0))
+        return 1;
+    if (i2c_write(0x00))
+        return 1;
 
-    data = i2c_read(1); // Month (ignore century bit 7)
-    *month = BCD2BIN(data & 0x1F);
-
-    data = i2c_read(0); // Year (00-99)
-    *year = BCD2BIN(data);
+    for (uint8_t i = 0; i < 7; i++)
+    {
+        if (i2c_write(data[i]))
+            return 1;
+    }
 
     i2c_stop();
+    return 0;
 }
 
-void rtc_write_date(uint8_t year, uint8_t month, uint8_t date, uint8_t day)
+// Read current time from RTC
+uint8_t rtc_read_time(rtc_time_t *time)
 {
-    i2c_start();
-    i2c_write(RTC_ADDR_WRITE);
-    i2c_write(RTC_REG_DAY);
-    i2c_write(BIN2BCD(day));
-    i2c_write(BIN2BCD(date));
-    i2c_write(BIN2BCD(month));
-    i2c_write(BIN2BCD(year));
+    uint8_t data[7];
+    uint8_t result;
+    
+    uart_println("RTC: Starting read");
+    
+    result = i2c_start();
+    uart_println(result ? "START FAIL" : "START OK");
+    if (result) return 1;
+    
+    result = i2c_write((RTC_I2C_ADDR << 1) | 0);
+    uart_println(result ? "Addr FAIL" : "Addr OK");
+    if (result) return 1;
+    
+    result = i2c_write(0x00);
+    uart_println(result ? "Reg FAIL" : "Reg OK");
+    if (result) return 1;
+    
+    uart_println("STOP");
     i2c_stop();
-}
-
-uint8_t rtc_check_oscillator(void)
-{
-    uint8_t status = rtc_read_register(RTC_REG_STATUS);
-    return (status & RTC_STAT_OSF) ? 0 : 1; // Return 1 if running, 0 if stopped
-}
-
-void rtc_clear_alarm_flags(void)
-{
-    uint8_t status = rtc_read_register(RTC_REG_STATUS);
-    status &= ~(RTC_STAT_A1F | RTC_STAT_A2F); // Clear both alarm flags
-    rtc_write_register(RTC_REG_STATUS, status);
+    
+    uart_println("Read start");
+    __delay_us(10);
+    
+    if (i2c_start()) return 1;
+    if (i2c_write((RTC_I2C_ADDR << 1) | 1)) return 1;
+    
+    for (uint8_t i = 0; i < 6; i++)
+    {
+        data[i] = i2c_read(1);
+    }
+    data[6] = i2c_read(0);
+    i2c_stop();
+    
+    char debug_buf[80];
+    sprintf(debug_buf, "RAW: %02X %02X %02X %02X %02X %02X %02X",
+            data[0], data[1], data[2], data[3], data[4], data[5], data[6]);
+    uart_println(debug_buf);
+    
+    time->seconds = bcd_to_dec(data[0] & 0x7F);
+    time->minutes = bcd_to_dec(data[1] & 0x7F);
+    time->hours   = bcd_to_dec(data[2] & 0x3F);
+    time->day     = bcd_to_dec(data[3] & 0x07);
+    time->date    = bcd_to_dec(data[4] & 0x3F);
+    time->month   = bcd_to_dec(data[5] & 0x1F);
+    time->year    = bcd_to_dec(data[6]);
+    
+    return 0;
 }

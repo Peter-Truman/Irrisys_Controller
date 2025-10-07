@@ -1,6 +1,7 @@
 /**
- * I2C Master Mode Driver for PIC18F2525
- * Using MSSP module
+ * I2C Driver for DS3231M RTC
+ * PIC18F2525 @ 32MHz
+ * I2C Clock: 100kHz
  */
 
 #ifndef I2C_H
@@ -10,16 +11,16 @@
 #include <stdint.h>
 
 // I2C Configuration
-#define I2C_SPEED_100KHZ 79 // SSPADD value for 100kHz @ 32MHz
-#define I2C_SPEED_400KHZ 19 // SSPADD value for 400kHz @ 32MHz
+#define I2C_CLOCK_FREQ 100000UL // 100kHz I2C bus speed
+#define I2C_TIMEOUT 1000        // Timeout counter limit
 
 // Function prototypes
 void i2c_init(void);
-void i2c_start(void);
-void i2c_restart(void);
+uint8_t i2c_start(void);
+uint8_t i2c_restart(void);
 void i2c_stop(void);
-void i2c_write(uint8_t data);
+uint8_t i2c_write(uint8_t data);
 uint8_t i2c_read(uint8_t ack);
-void i2c_wait(void);
+uint8_t i2c_wait_idle(void);
 
 #endif // I2C_H

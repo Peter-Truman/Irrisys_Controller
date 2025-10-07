@@ -1,95 +1,177 @@
 /**
- * I2C Master Mode Implementation
- * Hardware: RC3 = SCL, RC4 = SDA
+ * I2C Driver Implementation for DS3231M RTC
+ * PIC18F2525 @ 32MHz (Fcy = 8MHz)
+ * I2C Clock: 100kHz
+ *
+ * Conservative blocking implementation with timeout protection
  */
 
+#include "../include/config.h"
 #include "../include/i2c.h"
 
+/**
+ * Initialize I2C in Master Mode
+ * SCL = RC3, SDA = RC4
+ */
 void i2c_init(void)
 {
     // Configure I2C pins
-    TRISCbits.TRISC3 = 1; // SCL as input (I2C will control)
-    TRISCbits.TRISC4 = 1; // SDA as input (I2C will control)
+    TRISCbits.TRISC3 = 1; // SCL as input (becomes output when driven by MSSP)
+    TRISCbits.TRISC4 = 1; // SDA as input (becomes output when driven by MSSP)
 
-    // Configure MSSP module for I2C Master mode
-    SSPSTAT = 0b10000000;      // Slew rate control disabled for 100kHz
-    SSPCON1 = 0b00101000;      // I2C Master mode, SSPEN enabled
-    SSPCON2 = 0x00;            // Clear control bits
-    SSPADD = I2C_SPEED_100KHZ; // Set baud rate to 100kHz
+    // Configure MSSP for I2C Master Mode
+    SSPSTAT = 0x80; // Slew rate control disabled for 100kHz
+    SSPCON1 = 0x28; // I2C Master mode, SSPEN enabled
+    SSPCON2 = 0x00; // Clear control bits
 
-    // Clear any error conditions
-    SSPCON1bits.WCOL = 0;
-    SSPCON1bits.SSPOV = 0;
+    // Set I2C clock frequency: 100kHz
+    // SSPADD = (Fcy / (4 * I2C_freq)) - 1
+    // SSPADD = (8MHz / (4 * 100kHz)) - 1 = 19
+    SSPADD = 19;
+
+    // Small delay for bus to settle
+    __delay_us(10);
 }
 
-void i2c_wait(void)
+/**
+ * Wait for I2C bus to become idle with timeout
+ * Returns: 0 = success, 1 = timeout
+ */
+uint8_t i2c_wait_idle(void)
 {
-    // Wait for I2C operation to complete
+    uint16_t timeout = I2C_TIMEOUT;
+
+    // Wait for idle condition (all control bits clear)
     while ((SSPCON2 & 0x1F) || (SSPSTATbits.R_nW))
-        ;
+    {
+        if (--timeout == 0)
+            return 1; // Timeout error
+    }
+    return 0; // Success
 }
 
-void i2c_start(void)
+/**
+ * Generate I2C START condition
+ * Returns: 0 = success, 1 = error
+ */
+uint8_t i2c_start(void)
 {
-    i2c_wait();
+    if (i2c_wait_idle())
+        return 1;
+
     SSPCON2bits.SEN = 1; // Initiate START condition
+
+    // Wait for START to complete
+    uint16_t timeout = I2C_TIMEOUT;
     while (SSPCON2bits.SEN)
-        ; // Wait for START to complete
+    {
+        if (--timeout == 0)
+            return 1; // Timeout
+    }
+
+    return 0;
 }
 
-void i2c_restart(void)
+/**
+ * Generate I2C Repeated START condition
+ * Returns: 0 = success, 1 = error
+ */
+uint8_t i2c_restart(void)
 {
-    i2c_wait();
+    if (i2c_wait_idle())
+        return 1;
+
     SSPCON2bits.RSEN = 1; // Initiate Repeated START
+
+    uint16_t timeout = I2C_TIMEOUT;
     while (SSPCON2bits.RSEN)
-        ; // Wait for restart to complete
+    {
+        if (--timeout == 0)
+            return 1;
+    }
+
+    return 0;
 }
 
+/**
+ * Generate I2C STOP condition
+ */
 void i2c_stop(void)
 {
-    i2c_wait();
+    if (i2c_wait_idle())
+        return; // Can't stop if bus is stuck
+
     SSPCON2bits.PEN = 1; // Initiate STOP condition
+
+    // Wait for STOP to complete
+    uint16_t timeout = I2C_TIMEOUT;
     while (SSPCON2bits.PEN)
-        ; // Wait for STOP to complete
+    {
+        if (--timeout == 0)
+            break;
+    }
 }
 
-void i2c_write(uint8_t data)
+/**
+ * Write a byte to I2C bus
+ * Returns: 0 = ACK received, 1 = NACK or error
+ */
+uint8_t i2c_write(uint8_t data)
 {
-    i2c_wait();
-    SSPBUF = data; // Write data to buffer
-    while (SSPSTATbits.BF)
-        ; // Wait until write completes
-    i2c_wait();
+    SSPBUF = data;
 
-    // Check for acknowledge
-    // If ACKSTAT = 0, slave acknowledged
-    // If ACKSTAT = 1, slave did not acknowledge (NACK)
+    // Wait for transmission to complete
+    while (!PIR1bits.SSPIF)
+        ;
+    PIR1bits.SSPIF = 0;
+
+    // Check ACK status: 0=ACK received, 1=NAK received
+    if (SSPCON2bits.ACKSTAT)
+    {
+        return 1; // NAK - error
+    }
+
+    return 0; // ACK - success
 }
 
+/**
+ * Read a byte from I2C bus
+ * ack: 1 = send ACK (continue reading), 0 = send NACK (stop reading)
+ * Returns: received byte
+ */
 uint8_t i2c_read(uint8_t ack)
 {
     uint8_t data;
 
-    i2c_wait();
-    SSPCON2bits.RCEN = 1; // Enable receive mode
-    while (!SSPSTATbits.BF)
-        ;          // Wait for receive to complete
-    data = SSPBUF; // Read data from buffer
+    if (i2c_wait_idle())
+        return 0xFF; // Return dummy data on error
 
-    i2c_wait();
+    SSPCON2bits.RCEN = 1; // Enable receive mode
+
+    // Wait for byte to be received
+    uint16_t timeout = I2C_TIMEOUT;
+    while (!SSPSTATbits.BF)
+    {
+        if (--timeout == 0)
+            return 0xFF;
+    }
+
+    data = SSPBUF; // Read received data
+
+    if (i2c_wait_idle())
+        return data;
 
     // Send ACK or NACK
-    if (ack)
-    {
-        SSPCON2bits.ACKDT = 0; // Send ACK
-    }
-    else
-    {
-        SSPCON2bits.ACKDT = 1; // Send NACK
-    }
-    SSPCON2bits.ACKEN = 1; // Initiate ACK/NACK
+    SSPCON2bits.ACKDT = ack ? 0 : 1; // 0 = ACK, 1 = NACK
+    SSPCON2bits.ACKEN = 1;           // Send ACK/NACK
+
+    // Wait for ACK/NACK to complete
+    timeout = I2C_TIMEOUT;
     while (SSPCON2bits.ACKEN)
-        ; // Wait for ACK/NACK to complete
+    {
+        if (--timeout == 0)
+            break;
+    }
 
     return data;
 }

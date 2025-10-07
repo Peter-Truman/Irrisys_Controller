@@ -8,6 +8,9 @@
 #include "../include/encoder.h"
 #include "../include/menu.h"
 #include "../include/eeprom.h"
+#include "../include/i2c.h"
+#include "../include/rtc.h"
+#include "ad7994.h"
 #include <stdio.h>
 
 // External variables from encoder
@@ -102,6 +105,7 @@ void system_init(void)
     TRISBbits.TRISB1 = 1; // ENC_A input
     TRISBbits.TRISB2 = 1; // ENC_B input
     TRISBbits.TRISB6 = 1; // ENC_SW input
+    TRISBbits.TRISB0 = 1; // RTC 1Hz square wave input (INT0)
     INTCON2bits.RBPU = 0; // Enable PORTB pull-ups
 
     TRISBbits.TRISB6 = 1; // ENC_SW input
@@ -154,131 +158,6 @@ void relay_close(void)
     }
 }
 
-// LCD functions
-void lcd_write_nibble(uint8_t nibble)
-{
-    if (nibble & 0x01)
-        LCD_D4 = 1;
-    else
-        LCD_D4 = 0;
-    if (nibble & 0x02)
-        LCD_D5 = 1;
-    else
-        LCD_D5 = 0;
-    if (nibble & 0x04)
-        LCD_D6 = 1;
-    else
-        LCD_D6 = 0;
-    if (nibble & 0x08)
-        LCD_D7 = 1;
-    else
-        LCD_D7 = 0;
-
-    LCD_EN = 1;
-    __delay_us(1);
-    LCD_EN = 0;
-    __delay_us(50);
-}
-
-void lcd_cmd(uint8_t cmd)
-{
-    LCD_RS = 0;
-    lcd_write_nibble(cmd >> 4);
-    lcd_write_nibble(cmd & 0x0F);
-
-    if (cmd == 0x01 || cmd == 0x02)
-    {
-        __delay_ms(2);
-    }
-    else
-    {
-        __delay_us(50);
-    }
-}
-
-void lcd_data(uint8_t data)
-{
-    LCD_RS = 1;
-    lcd_write_nibble(data >> 4);
-    lcd_write_nibble(data & 0x0F);
-    __delay_us(50);
-}
-
-void lcd_print(const char *str)
-{
-    while (*str)
-    {
-        lcd_data(*str++);
-    }
-}
-
-void lcd_clear(void)
-{
-    lcd_cmd(0x01);
-    __delay_ms(2);
-}
-
-void lcd_set_cursor(uint8_t row, uint8_t col)
-{
-    uint8_t address;
-    switch (row)
-    {
-    case 0:
-        address = 0x80;
-        break;
-    case 1:
-        address = 0xC0;
-        break;
-    case 2:
-        address = 0x94;
-        break;
-    case 3:
-        address = 0xD4;
-        break;
-    default:
-        address = 0x80;
-        break;
-    }
-    lcd_cmd(address + col);
-}
-
-void lcd_init(void)
-{
-    // Set TRIS exactly as Positron does
-    TRISA = 0x10; // %00010000
-    TRISB = 0x46; // %01000110
-    TRISC = 0x00; // %00000000
-
-    // Clear all ports
-    PORTA = 0;
-    PORTB = 0;
-    // PORTC = 0;
-
-    __delay_ms(50);
-
-    LCD_RS = 0;
-
-    // Force 8-bit mode three times
-    lcd_write_nibble(0x03);
-    __delay_ms(5);
-    lcd_write_nibble(0x03);
-    __delay_us(150);
-    lcd_write_nibble(0x03);
-    __delay_us(150);
-
-    // Switch to 4-bit
-    lcd_write_nibble(0x02);
-    __delay_us(150);
-
-    // Function set: 4-bit, 2 lines, 5x8
-    lcd_cmd(0x28);
-    lcd_cmd(0x08); // Display OFF - THIS IS KEY
-    lcd_cmd(0x01); // Clear
-    __delay_ms(2);
-    lcd_cmd(0x06); // Entry mode
-    lcd_cmd(0x0C); // Display ON, cursor off
-}
-
 // Buzzer function
 void beep(uint16_t duration_ms)
 {
@@ -312,6 +191,50 @@ void main(void)
     sprintf(buf, "After init: relay_state=%d, counter=%d", relay_state, relay_counter);
     uart_println(buf);
 
+    // Initialize I2C bus
+    uart_println("Initializing I2C...");
+    i2c_init();
+    uart_println("I2C initialized");
+
+    // Initialize RTC (includes 2-second power-up delay)
+    uart_println("Initializing RTC (2-second delay)...");
+    if (rtc_init() == 0)
+    {
+        uart_println("RTC initialized - 1Hz square wave enabled");
+    }
+    else
+    {
+        uart_println("ERROR: RTC initialization failed!");
+    }
+    /*
+        // Set RTC to a known time (ONE TIME ONLY)
+        rtc_time_t set_time;
+        set_time.seconds = 0;
+        set_time.minutes = 0;
+        set_time.hours = 12; // 12:00:00
+        set_time.day = 1;    // Monday
+        set_time.date = 7;   // 7th
+        set_time.month = 10; // October
+        set_time.year = 25;  // 2025
+
+        if (rtc_set_time(&set_time) == 0)
+        {
+            uart_println("RTC time set to 2025-10-07 12:00:00");
+        }
+        else
+        {
+            uart_println("RTC time set FAILED");
+        }
+    */
+
+    uint8_t adc_error = ad7994_init();
+    if (adc_error)
+    {
+        char buf[30];
+        sprintf(buf, "ADC Init returned error: %u", adc_error);
+        uart_println(buf);
+    }
+
     encoder_init();
     menu_init();
     lcd_init();
@@ -336,7 +259,7 @@ void main(void)
     uart_println("Playing startup beeps");
     uart_println("Starting OPTIONS menu");
 
-    __delay_ms(1000);
+    //__delay_ms(2000);
 
     // Start with OPTIONS menu (default behavior)
     extern uint8_t current_menu;
@@ -352,12 +275,61 @@ void main(void)
     static uint32_t blink_timer = 0;
     static uint16_t encoder_activity_timer = 0; // Track encoder activity
 
-    // while (1)
-    //{
+    static uint32_t last_second_update = 0;
+    uint16_t adc_ch1, adc_ch2, adc_ch3;
+    rtc_time_t current_time;
 
     // Main loop starts here
     while (1)
     {
+
+        // Sample ADC/RTC only every 10th loop iteration (not every loop)
+        static uint8_t sample_counter = 0;
+        sample_counter++;
+
+        if (sample_counter >= 10)
+        {
+            sample_counter = 0;
+
+            // Read RTC time
+            if (rtc_read_time(&current_time) == 0)
+            {
+                char time_buf[60];
+                sprintf(time_buf, "RTC: 20%02u-%02u-%02u %02u:%02u:%02u",
+                        current_time.year, current_time.month, current_time.date,
+                        current_time.hours, current_time.minutes, current_time.seconds);
+                uart_println(time_buf);
+            }
+            else
+            {
+                uart_println("RTC: Read error");
+            }
+
+            // Read ADC channels (no debug output)
+            adc_ch1 = ad7994_read_channel(1);
+            adc_ch2 = ad7994_read_channel(2);
+            adc_ch3 = ad7994_read_channel(3);
+
+            // Print to terminal (brief format)
+            char buf[50];
+            sprintf(buf, "ADC: %4u %4u %4u", adc_ch1, adc_ch2, adc_ch3);
+            uart_println(buf);
+        }
+
+        // ... rest of loop
+
+        __delay_ms(50); // Update once per second
+
+        // Display CH1 on LCD top line
+        char lcd_buf[17];
+        // sprintf(lcd_buf, "CH1:%4u CH2:%4u", adc_ch1, adc_ch2);
+        lcd_set_cursor(0, 0);
+        // lcd_print(lcd_buf);
+
+        // sprintf(lcd_buf, "CH3:%4u %02u:%02u:%02u", adc_ch3,
+        // current_time.hours, current_time.minutes, current_time.seconds);
+        // lcd_set_cursor(1, 0);
+        // lcd_print(lcd_buf);
 
         // DEBUG: Check if relay variables change
         static uint8_t last_relay_state = 0;
@@ -372,6 +344,7 @@ void main(void)
             last_relay_counter = relay_counter;
         }
 
+        //__delay_ms(500); // Update every 500ms
         // Check encoder rotation
         if (encoder_count != last_encoder)
         {
@@ -387,7 +360,7 @@ void main(void)
             last_encoder = encoder_count;
 
             // Track encoder activity - reset timer on movement
-            encoder_activity_timer = 500; // Stay active for 500ms after last movement
+            encoder_activity_timer = 10; // 10 iterations × 50ms = 500ms
 
             // Force blink state ON during encoder movement for better visibility
             if (menu.in_edit_mode)
@@ -580,7 +553,7 @@ void main(void)
 
         // Handle blinking in edit mode
         blink_timer++;
-        if (blink_timer >= 10000)
+        if (blink_timer >= 10)
         { // Slow 2Hz blinking
             blink_timer = 0;
             if (menu.in_edit_mode)

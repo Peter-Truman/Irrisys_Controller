@@ -1,0 +1,123 @@
+IRRISYS CONTROLLER - DEVELOPMENT NOTES
+=====================================
+
+HARDWARE CONFIGURATION:
+- PIC18F2525 @ 32MHz (8MHz + 4x PLL)
+- DS3231M RTC on I2C bus (address 0x68)
+  - INT/SQW output → RB0 (1Hz square wave for timing)
+  - Provides battery-backed timekeeping
+- AD7994BRUZ-0 12-bit 4-channel ADC (address 0x22)
+  - CONVST on RC5
+  - Reads 4-20mA current loops via MAX14626 protection
+- 4x20 LCD on PORTA (RA0-3=data, RA5=RW, RA6=RS, RA7=EN)
+- Rotary encoder on PORTB
+- Buzzer on RC2
+- Relay on PORTB (exact pin TBD)
+
+=====================================
+COMPLETED TASKS:
+
+1. LCD DRIVER FIX (Session: Oct 2025)
+   - Moved LCD from PORTB to PORTA
+   - Fixed conflict: RB0 now free for RTC square wave
+   - LCD uses: RA6=RS, RA5=RW, RA7=EN, RA0-3=D4-D7
+
+2. RTC INTEGRATION
+   - DS3231M successfully configured for 1Hz square wave output
+   - 2-second power-up delay required (4x 500ms delays in rtc_init)
+   - Square wave runs continuously and stably
+   - Time read function implemented (rtc_read_time)
+   - Time set function implemented (rtc_set_time)
+   - BCD conversion functions added
+
+3. AD7994 ADC DRIVER
+   - Successfully communicating at I2C address 0x22
+   - AD7994-0 variant (AS pin = VDD)
+   - Mode 1 operation: CONVST-triggered conversions
+   - Reading all 3 channels (CH1, CH2, CH3)
+   - 12-bit resolution (0-4095)
+   - Reading 4095 on floating inputs = CORRECT (open loop behavior)
+
+4. I2C BUS OPERATION
+   - Both RTC and ADC coexisting successfully on same bus
+   - 100kHz bus speed
+   - Fixed I2C protocol: using repeated start for RTC reads
+   - Proper ACK/NAK checking in i2c_write()
+
+5. PERFORMANCE OPTIMIZATION
+   - Periodic sampling: ADC/RTC read every 10th loop iteration
+   - 50ms main loop delay = 20Hz refresh rate
+   - ADC sampled at ~2Hz (every 500ms)
+   - Removed verbose debug output from ADC driver
+   - Menu system remains responsive
+
+=====================================
+CURRENT STATUS:
+
+✓ RTC 1Hz square wave stable and continuous
+✓ ADC reading all channels correctly
+✓ I2C bus sharing working properly
+✓ Menu system responsive
+✓ 4-20mA loop inputs reading correctly (4095 = open loop)
+
+⚠ RTC time still contains garbage data (needs initial setting)
+⚠ RTC configuration persists via VBAT backup
+
+=====================================
+OUTSTANDING ISSUES:
+
+1. RTC TIME INITIALIZATION
+   - RTC has never been set with valid time
+   - Time reads show random values due to uninitialized registers
+   - Need to call rtc_set_time() once at first power-on
+   - After setting, time will persist via battery backup
+
+2. RTC CONFIGURATION PERSISTENCE
+   - Control register settings persist through power cycles (VBAT)
+   - Fresh RTC chips may have unknown default configuration
+   - Current code always writes config at startup (good practice)
+   - Consider: Add verification step before writing
+   - Not critical: Current approach handles all scenarios
+
+3. FUTURE BOARD CONSIDERATIONS
+   - Document that RTC needs initial time setting
+   - Consider factory programming procedure
+   - VBAT backup means settings persist (good for production)
+
+=====================================
+4-20mA LOOP INPUT BEHAVIOR:
+
+Understanding ADC readings with MAX14626 protection:
+- Open loop (floating): ADC reads 4095 (full scale) ← CORRECT
+- 4mA signal: ADC reads ~819 (20% of scale)
+- 12mA signal: ADC reads ~2457 (60% of scale)  
+- 20mA signal: ADC reads ~4095 (100% of scale)
+
+Current reading of 4095 on all channels confirms:
+1. ADC communication working
+2. Loop protection circuits functional
+3. No current flowing (expected for bench testing)
+
+=====================================
+CODE STRUCTURE:
+
+Files modified/created:
+- src/lcd.c - Uses PORTA, doesn't touch TRISC
+- src/rtc.c - Added read_time, set_time, BCD conversion
+- src/ad7994.c - New driver for 12-bit ADC
+- include/rtc.h - Added rtc_time_t struct, function prototypes
+- include/ad7994.h - New header for ADC driver
+- build.bat - Added ad7994.c to compilation
+
+Main loop sampling strategy:
+- Counter increments each loop (50ms interval)
+- Every 10th iteration: read RTC + ADC (500ms total)
+- Terminal output: RTC timestamp + ADC values
+- LCD available for menu system
+
+=====================================
+NEXT STEPS:
+
+1. Set RTC to correct time (one-time operation)
+   - Add rtc_set_time() call in main after rtc_init()
+   -

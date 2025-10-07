@@ -31,6 +31,7 @@ void uart_println(const char *str);
 
 // LCD Pin Definitions (PORTA - 4-bit mode)
 #define LCD_RS LATAbits.LATA6
+#define LCD_RW LATAbits.LATA5
 #define LCD_EN LATAbits.LATA7
 #define LCD_D4 LATAbits.LATA0
 #define LCD_D5 LATAbits.LATA1
