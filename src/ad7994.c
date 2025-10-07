@@ -64,8 +64,8 @@ uint16_t ad7994_read_channel(uint8_t channel)
     uint16_t result;
     char buf[40];
 
-    sprintf(buf, "ADC Read CH%u: Start", channel);
-    uart_println(buf);
+    // sprintf(buf, "ADC Read CH%u: Start", channel);
+    // uart_println(buf);
 
     switch (channel)
     {
@@ -82,7 +82,7 @@ uint16_t ad7994_read_channel(uint8_t channel)
         config_byte = AD7994_CONFIG_DEFAULT | AD7994_CH4;
         break;
     default:
-        uart_println("ADC Read: ERROR - Invalid channel");
+        // uart_println("ADC Read: ERROR - Invalid channel");
         return 0xFFFF;
     }
 
@@ -110,13 +110,13 @@ uint16_t ad7994_read_channel(uint8_t channel)
 
     result = ((uint16_t)msb << 8) | lsb;
 
-    sprintf(buf, "ADC Read: MSB=0x%02X LSB=0x%02X Raw=0x%04X", msb, lsb, result);
-    uart_println(buf);
+    // sprintf(buf, "ADC Read: MSB=0x%02X LSB=0x%02X Raw=0x%04X", msb, lsb, result);
+    // uart_println(buf);
 
     result &= 0x0FFF;
 
-    sprintf(buf, "ADC Read: Final=%u", result);
-    uart_println(buf);
+    // sprintf(buf, "ADC Read: Final=%u", result);
+    // uart_println(buf);
 
     return result;
 }
