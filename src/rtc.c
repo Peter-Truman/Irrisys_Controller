@@ -107,50 +107,53 @@ uint8_t rtc_set_time(rtc_time_t *time)
 uint8_t rtc_read_time(rtc_time_t *time)
 {
     uint8_t data[7];
-    uint8_t result;
-    
-    uart_println("RTC: Starting read");
-    
-    result = i2c_start();
-    uart_println(result ? "START FAIL" : "START OK");
-    if (result) return 1;
-    
-    result = i2c_write((RTC_I2C_ADDR << 1) | 0);
-    uart_println(result ? "Addr FAIL" : "Addr OK");
-    if (result) return 1;
-    
-    result = i2c_write(0x00);
-    uart_println(result ? "Reg FAIL" : "Reg OK");
-    if (result) return 1;
-    
-    uart_println("STOP");
+
+    // Write register address with delays between operations
+    if (i2c_start())
+        return 1;
+    __delay_us(50); // Small delay after start
+
+    if (i2c_write((RTC_I2C_ADDR << 1) | 0))
+        return 1;
+    __delay_us(50); // Small delay after address write
+
+    if (i2c_write(0x00))
+        return 1;
+    __delay_us(50); // Small delay after register write
+
     i2c_stop();
-    
-    uart_println("Read start");
-    __delay_us(10);
-    
-    if (i2c_start()) return 1;
-    if (i2c_write((RTC_I2C_ADDR << 1) | 1)) return 1;
-    
+    __delay_us(200); // Longer delay after stop
+
+    // Start new transaction to read
+    if (i2c_start())
+        return 1;
+    __delay_us(50);
+
+    if (i2c_write((RTC_I2C_ADDR << 1) | 1))
+        return 1;
+    __delay_us(50);
+
     for (uint8_t i = 0; i < 6; i++)
     {
         data[i] = i2c_read(1);
     }
     data[6] = i2c_read(0);
     i2c_stop();
-    
+
+    // Keep RAW output for now
     char debug_buf[80];
     sprintf(debug_buf, "RAW: %02X %02X %02X %02X %02X %02X %02X",
             data[0], data[1], data[2], data[3], data[4], data[5], data[6]);
     uart_println(debug_buf);
-    
+
+    // Convert BCD to decimal
     time->seconds = bcd_to_dec(data[0] & 0x7F);
     time->minutes = bcd_to_dec(data[1] & 0x7F);
-    time->hours   = bcd_to_dec(data[2] & 0x3F);
-    time->day     = bcd_to_dec(data[3] & 0x07);
-    time->date    = bcd_to_dec(data[4] & 0x3F);
-    time->month   = bcd_to_dec(data[5] & 0x1F);
-    time->year    = bcd_to_dec(data[6]);
-    
+    time->hours = bcd_to_dec(data[2] & 0x3F);
+    time->day = bcd_to_dec(data[3] & 0x07);
+    time->date = bcd_to_dec(data[4] & 0x3F);
+    time->month = bcd_to_dec(data[5] & 0x1F);
+    time->year = bcd_to_dec(data[6]);
+
     return 0;
 }
