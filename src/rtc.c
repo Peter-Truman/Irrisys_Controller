@@ -88,18 +88,25 @@ uint8_t rtc_set_time(rtc_time_t *time)
     // Write all 7 bytes starting at register 0x00
     if (i2c_start())
         return 1;
+    __delay_us(50); // <-- ADD: After START
+
     if (i2c_write((RTC_I2C_ADDR << 1) | 0))
         return 1;
+    __delay_us(50); // <-- ADD: After address
+
     if (i2c_write(0x00))
         return 1;
+    __delay_us(50); // <-- ADD: After register address
 
     for (uint8_t i = 0; i < 7; i++)
     {
         if (i2c_write(data[i]))
             return 1;
+        __delay_us(50); // <-- ADD: After each data byte (CRITICAL!)
     }
 
     i2c_stop();
+    __delay_us(200); // <-- ADD: After STOP
     return 0;
 }
 
