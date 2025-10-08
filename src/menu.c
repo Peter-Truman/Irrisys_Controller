@@ -178,15 +178,15 @@ const menu_item_t clock_menu_template[] = {
 
 // Menu template for UTILITY configuration
 const menu_item_t utility_menu_template[] = {
-    {"Set Clock", NULL, 1},    // 0 - Date/Time editor
-    {"View Log", NULL, 0},     // 1 - Future feature
-    {"Clear Log", NULL, 0},    // 2 - Future feature
-    {"Log Entries", NULL, 1},  // 3 - Numeric edit
-    {"Menu Timeout", NULL, 1}, // 4 - Time edit MM:SS
-    {"Contrast", NULL, 1},     // 5 - Numeric edit
-    {"Brightness", NULL, 1},   // 6 - Numeric edit
-    {"Pwr Fail Dly", NULL, 1}, // 7 - Time edit MM:SS
-    {"Back", NULL, 0}          // 8
+    {"Set Clock", NULL, 0},   // 0 - Action: goes to submenu
+    {"View Log", NULL, 0},    // 1 - Action: shows log screen
+    {"Clear Log", NULL, 0},   // 2 - Action: clears log
+    {"Log Entries", NULL, 1}, // 3 - Numeric edit
+    {"Menu T/O", NULL, 1},    // 4 - Time edit MM:SS
+    {"Contrast", NULL, 1},    // 5 - Numeric edit
+    {"Brightness", NULL, 1},  // 6 - Numeric edit
+    {"Pwr Detect", NULL, 1},  // 7 - Time edit MM:SS
+    {"Back", NULL, 0}         // 8
 };
 
 // Utility menu instance
@@ -1621,8 +1621,8 @@ void rebuild_utility_menu(void)
 
     // Assign value pointers
     utility_menu[0].value = ""; // Set Clock - special display
-    utility_menu[1].value = "Not Impl";
-    utility_menu[2].value = "Not Impl";
+    utility_menu[1].value = ""; // View Log - no value
+    utility_menu[2].value = ""; // Clear Log - no value
     utility_menu[3].value = value_log_entries;
     utility_menu[4].value = value_menu_timeout;
     utility_menu[5].value = value_contrast;
@@ -1796,69 +1796,98 @@ void menu_draw_utility(void)
         uint8_t item_idx = menu.top_line + i;
         lcd_clear_line(i + 1);
 
-        // Display label
-        lcd_print_at(i + 1, 0, utility_menu[item_idx].label);
+        // Determine if this item gets brackets (selected)
+        uint8_t is_selected = (item_idx == menu.current_line);
 
-        // Handle brackets and values
-        if (item_idx == 8) // Back - no brackets, no value
+        // Handle special cases
+        if (item_idx == 0) // Set Clock - special handling
         {
-            // Just label
+            if (is_selected)
+            {
+                lcd_print_at(i + 1, 0, "[Set Clock]");
+            }
+            else
+            {
+                lcd_print_at(i + 1, 1, "Set Clock");
+            }
         }
-        else if (item_idx == 0) // Set Clock - brackets only
+        else if (item_idx == 8) // Back - right-justified
         {
-            if (item_idx == menu.current_line)
+            if (is_selected)
+            {
+                lcd_print_at(i + 1, 14, "[Back]");
+            }
+            else
+            {
+                lcd_print_at(i + 1, 15, "Back");
+            }
+        }
+        else if (item_idx == 1 || item_idx == 2) // View Log, Clear Log - action items
+        {
+            if (is_selected)
             {
                 lcd_print_at(i + 1, 0, "[");
                 lcd_print_at(i + 1, 1, utility_menu[item_idx].label);
-                lcd_print_at(i + 1, 10, "]");
+                lcd_print_at(i + 1, 1 + strlen(utility_menu[item_idx].label), "]");
+            }
+            else
+            {
+                lcd_print_at(i + 1, 1, utility_menu[item_idx].label);
             }
         }
-        else // All other items - show value
+        else // Items 3-7 - label left, value right
         {
-            char value_buf[15];
-            uint8_t show_brackets = 0;
+            // Print label at column 1
+            lcd_print_at(i + 1, 1, utility_menu[item_idx].label);
 
-            if (item_idx == menu.current_line)
+            // Print value right-justified with optional brackets
+            if (utility_menu[item_idx].value != NULL && strlen(utility_menu[item_idx].value) > 0)
             {
-                show_brackets = menu.in_edit_mode ? 2 : 1;
+                char value_buf[15];
+                uint8_t show_brackets = 0;
 
-                if (menu.in_edit_mode && menu.blink_state == 0)
+                if (is_selected)
                 {
-                    uint8_t len = strlen(utility_menu[item_idx].value);
-                    for (uint8_t j = 0; j < len; j++)
-                        value_buf[j] = ' ';
-                    value_buf[len] = '\0';
+                    show_brackets = menu.in_edit_mode ? 2 : 1;
+
+                    if (menu.in_edit_mode && menu.blink_state == 0)
+                    {
+                        uint8_t len = strlen(utility_menu[item_idx].value);
+                        for (uint8_t j = 0; j < len; j++)
+                            value_buf[j] = ' ';
+                        value_buf[len] = '\0';
+                    }
+                    else
+                    {
+                        strcpy(value_buf, utility_menu[item_idx].value);
+                    }
                 }
                 else
                 {
                     strcpy(value_buf, utility_menu[item_idx].value);
                 }
-            }
-            else
-            {
-                strcpy(value_buf, utility_menu[item_idx].value);
-            }
 
-            uint8_t val_len = strlen(utility_menu[item_idx].value);
+                uint8_t val_len = strlen(utility_menu[item_idx].value);
 
-            if (show_brackets == 0)
-            {
-                if (val_len > 0)
+                if (show_brackets == 0)
+                {
+                    // Not selected - value ends at column 19
                     lcd_print_at(i + 1, 19 - val_len, value_buf);
-            }
-            else
-            {
-                uint8_t start_pos = 19 - val_len - 1;
-                lcd_set_cursor(i + 1, start_pos);
-                lcd_print(show_brackets == 1 ? "[" : "(");
-                lcd_print(value_buf);
-                lcd_set_cursor(i + 1, 19);
-                lcd_print(show_brackets == 1 ? "]" : ")");
+                }
+                else
+                {
+                    // Selected - add brackets
+                    uint8_t start_pos = 19 - val_len - 1;
+                    lcd_set_cursor(i + 1, start_pos);
+                    lcd_print(show_brackets == 1 ? "[" : "(");
+                    lcd_print(value_buf);
+                    lcd_set_cursor(i + 1, 19);
+                    lcd_print(show_brackets == 1 ? "]" : ")");
+                }
             }
         }
     }
 }
-
 //=============================================================================
 // ENCODER HANDLING
 //=============================================================================
@@ -1988,6 +2017,26 @@ void menu_handle_encoder(int16_t delta)
                 handle_time_rotation(delta > 0 ? 1 : -1);
             }
         }
+        return; // Exit function when in edit mode
+    }
+
+    // Special handling for UTILITY submenu navigation
+    if (current_menu == 4 && menu.in_datetime_submenu && !menu.in_edit_mode && delta != 0)
+    {
+        if (delta > 0)
+        {
+            menu.datetime_field++;
+            if (menu.datetime_field > 2)
+                menu.datetime_field = 0;
+        }
+        else
+        {
+            if (menu.datetime_field == 0)
+                menu.datetime_field = 2;
+            else
+                menu.datetime_field--;
+        }
+        menu_draw_utility();
         return;
     }
 
@@ -2048,6 +2097,8 @@ void menu_handle_encoder(int16_t delta)
             menu_draw_setup();
         else if (current_menu == 3)
             menu_draw_clock();
+        else if (current_menu == 4)
+            menu_draw_utility();
     }
 }
 
