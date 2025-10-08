@@ -2479,6 +2479,10 @@ void menu_handle_button(uint8_t press_type)
                     current_menu = 4; // UTILITY menu is #4
                     menu.current_line = 0;
                     menu.top_line = 0;
+                    // Reset timeout timer
+                    extern volatile uint16_t menu_timeout_timer;
+                    extern volatile uint16_t menu_timeout_reload;
+                    menu_timeout_timer = menu_timeout_reload;
                     menu_draw_utility();
                     break;
 
@@ -2706,11 +2710,30 @@ void menu_handle_button(uint8_t press_type)
                 }
             }
         }
-        else if (press_type == 2) // Long press - factory reset
+        else if (press_type == 2) // Long press - go back one menu level
         {
-            beep(100);
-            __delay_ms(50);
-            beep(100);
+            char buf[50];
+            sprintf(buf, "Long press: current_menu=%d", current_menu);
+            uart_println(buf);
+
+            if (current_menu == 4) // UTILITY menu
+            {
+                beep(100);
+                __delay_ms(50);
+                beep(100); // Double beep
+
+                // Exit back to OPTIONS menu (discard changes)
+                current_menu = 0;
+                menu.current_line = 0;
+                menu.top_line = 0;
+                menu.total_items = 5;
+                menu_draw_options();
+            }
+            else
+            {
+                // Other menus - placeholder for future
+                beep(100);
+            }
         }
     }
 }

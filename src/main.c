@@ -619,7 +619,7 @@ void main(void)
         extern volatile uint8_t menu_timeout_flag;
         extern volatile uint16_t menu_timeout_timer;
 
-        if (current_menu < 3) // In a menu (0=OPTIONS, 1=INPUT, 2=SETUP)
+        if (current_menu < 5) // Include UTILITY menu (4)
         {
             if (menu_timeout_flag == 0) // Timeout occurred
             {
