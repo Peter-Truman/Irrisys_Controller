@@ -8,6 +8,7 @@
 #include "../include/encoder.h"
 #include "../include/menu.h"
 #include "../include/eeprom.h"
+#include "../include/rtc.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -174,6 +175,29 @@ const menu_item_t clock_menu_template[] = {
     {"Display", NULL, 1},   // 3
     {"Back", NULL, 0}       // 4
 };
+
+// Menu template for UTILITY configuration
+const menu_item_t utility_menu_template[] = {
+    {"Set Clock", NULL, 1},    // 0 - Date/Time editor
+    {"View Log", NULL, 0},     // 1 - Future feature
+    {"Clear Log", NULL, 0},    // 2 - Future feature
+    {"Log Entries", NULL, 1},  // 3 - Numeric edit
+    {"Menu Timeout", NULL, 1}, // 4 - Time edit MM:SS
+    {"Contrast", NULL, 1},     // 5 - Numeric edit
+    {"Brightness", NULL, 1},   // 6 - Numeric edit
+    {"Pwr Fail Dly", NULL, 1}, // 7 - Time edit MM:SS
+    {"Back", NULL, 0}          // 8
+};
+
+// Utility menu instance
+menu_item_t utility_menu[9];
+
+// Value buffers for utility menu items
+static char value_log_entries[6] = "10";
+static char value_menu_timeout[6] = "00:30";
+static char value_contrast[4] = "50";
+static char value_brightness[4] = "50";
+static char value_pwr_fail[6] = "00:05";
 
 // Function declarations from header
 extern void lcd_set_cursor(uint8_t row, uint8_t col);
@@ -603,6 +627,247 @@ void menu_update_time_value(void)
     lcd_print("(");
     lcd_print(value_buf);
     lcd_print(")");
+}
+
+//=============================================================================
+// DATE/TIME EDITOR FUNCTIONS (for Set Clock feature)
+//=============================================================================
+
+/**
+ * Initialize date/time editor from RTC
+ */
+void init_datetime_editor(void)
+{
+    rtc_time_t current_time;
+
+    // Read current time from RTC
+    if (rtc_read_time(&current_time) == 0)
+    {
+        menu.date_dd = current_time.date;
+        menu.date_mm = current_time.month;
+        menu.date_yy = current_time.year;
+        menu.time_hh = current_time.hours;
+        menu.time_min = current_time.minutes;
+        menu.time_ss = current_time.seconds;
+
+        char buf[80];
+        sprintf(buf, "DateTime loaded: %02d/%02d/%02d %02d:%02d:%02d",
+                menu.date_dd, menu.date_mm, menu.date_yy,
+                menu.time_hh, menu.time_min, menu.time_ss);
+        uart_println(buf);
+    }
+    else
+    {
+        uart_println("ERROR: Failed to read RTC");
+        menu.date_dd = 1;
+        menu.date_mm = 1;
+        menu.date_yy = 25;
+        menu.time_hh = 12;
+        menu.time_min = 0;
+        menu.time_ss = 0;
+    }
+
+    menu.datetime_field = 0;
+    menu.datetime_edit_digit = 0;
+    menu.blink_state = 1;
+}
+
+/**
+ * Handle encoder rotation for date/time editing
+ */
+void handle_datetime_rotation(int8_t direction)
+{
+    if (menu.datetime_field == 0) // Editing DATE
+    {
+        if (menu.datetime_edit_digit == 0) // Day
+        {
+            if (direction > 0)
+            {
+                menu.date_dd++;
+                if (menu.date_dd > 31)
+                    menu.date_dd = 1;
+            }
+            else
+            {
+                if (menu.date_dd <= 1)
+                    menu.date_dd = 31;
+                else
+                    menu.date_dd--;
+            }
+        }
+        else if (menu.datetime_edit_digit == 1) // Month
+        {
+            if (direction > 0)
+            {
+                menu.date_mm++;
+                if (menu.date_mm > 12)
+                    menu.date_mm = 1;
+            }
+            else
+            {
+                if (menu.date_mm <= 1)
+                    menu.date_mm = 12;
+                else
+                    menu.date_mm--;
+            }
+        }
+        else if (menu.datetime_edit_digit == 2) // Year
+        {
+            if (direction > 0)
+            {
+                menu.date_yy++;
+                if (menu.date_yy > 99)
+                    menu.date_yy = 0;
+            }
+            else
+            {
+                if (menu.date_yy == 0)
+                    menu.date_yy = 99;
+                else
+                    menu.date_yy--;
+            }
+        }
+    }
+    else // Editing TIME
+    {
+        if (menu.datetime_edit_digit == 0) // Hours
+        {
+            if (direction > 0)
+            {
+                menu.time_hh++;
+                if (menu.time_hh > 23)
+                    menu.time_hh = 0;
+            }
+            else
+            {
+                if (menu.time_hh == 0)
+                    menu.time_hh = 23;
+                else
+                    menu.time_hh--;
+            }
+        }
+        else if (menu.datetime_edit_digit == 1) // Minutes
+        {
+            if (direction > 0)
+            {
+                menu.time_min++;
+                if (menu.time_min > 59)
+                    menu.time_min = 0;
+            }
+            else
+            {
+                if (menu.time_min == 0)
+                    menu.time_min = 59;
+                else
+                    menu.time_min--;
+            }
+        }
+        else if (menu.datetime_edit_digit == 2) // Seconds
+        {
+            if (direction > 0)
+            {
+                menu.time_ss++;
+                if (menu.time_ss > 59)
+                    menu.time_ss = 0;
+            }
+            else
+            {
+                if (menu.time_ss == 0)
+                    menu.time_ss = 59;
+                else
+                    menu.time_ss--;
+            }
+        }
+    }
+}
+
+/**
+ * Update date/time display during editing
+ */
+void menu_update_datetime_display(void)
+{
+    char date_buf[9];
+    char time_buf[9];
+
+    // Build date string with blinking
+    if (menu.datetime_field == 0 && menu.in_edit_mode)
+    {
+        if (menu.datetime_edit_digit == 0 && !menu.blink_state)
+            sprintf(date_buf, "  /%02d/%02d", menu.date_mm, menu.date_yy);
+        else if (menu.datetime_edit_digit == 1 && !menu.blink_state)
+            sprintf(date_buf, "%02d/  /%02d", menu.date_dd, menu.date_yy);
+        else if (menu.datetime_edit_digit == 2 && !menu.blink_state)
+            sprintf(date_buf, "%02d/%02d/  ", menu.date_dd, menu.date_mm);
+        else
+            sprintf(date_buf, "%02d/%02d/%02d", menu.date_dd, menu.date_mm, menu.date_yy);
+    }
+    else
+    {
+        sprintf(date_buf, "%02d/%02d/%02d", menu.date_dd, menu.date_mm, menu.date_yy);
+    }
+
+    // Build time string with blinking
+    if (menu.datetime_field == 1 && menu.in_edit_mode)
+    {
+        if (menu.datetime_edit_digit == 0 && !menu.blink_state)
+            sprintf(time_buf, "  :%02d:%02d", menu.time_min, menu.time_ss);
+        else if (menu.datetime_edit_digit == 1 && !menu.blink_state)
+            sprintf(time_buf, "%02d:  :%02d", menu.time_hh, menu.time_ss);
+        else if (menu.datetime_edit_digit == 2 && !menu.blink_state)
+            sprintf(time_buf, "%02d:%02d:  ", menu.time_hh, menu.time_min);
+        else
+            sprintf(time_buf, "%02d:%02d:%02d", menu.time_hh, menu.time_min, menu.time_ss);
+    }
+    else
+    {
+        sprintf(time_buf, "%02d:%02d:%02d", menu.time_hh, menu.time_min, menu.time_ss);
+    }
+
+    // Display date line
+    lcd_clear_line(1);
+    lcd_print_at(1, 0, "Date ");
+    if (menu.datetime_field == 0)
+    {
+        if (menu.in_edit_mode)
+        {
+            lcd_print_at(1, 6, "(");
+            lcd_print_at(1, 7, date_buf);
+            lcd_print_at(1, 15, ")");
+        }
+        else
+        {
+            lcd_print_at(1, 6, "[");
+            lcd_print_at(1, 7, date_buf);
+            lcd_print_at(1, 15, "]");
+        }
+    }
+    else
+    {
+        lcd_print_at(1, 7, date_buf);
+    }
+
+    // Display time line
+    lcd_clear_line(2);
+    lcd_print_at(2, 0, "Time ");
+    if (menu.datetime_field == 1)
+    {
+        if (menu.in_edit_mode)
+        {
+            lcd_print_at(2, 6, "(");
+            lcd_print_at(2, 7, time_buf);
+            lcd_print_at(2, 15, ")");
+        }
+        else
+        {
+            lcd_print_at(2, 6, "[");
+            lcd_print_at(2, 7, time_buf);
+            lcd_print_at(2, 15, "]");
+        }
+    }
+    else
+    {
+        lcd_print_at(2, 7, time_buf);
+    }
 }
 
 //=============================================================================
@@ -1341,6 +1606,45 @@ void rebuild_clock_menu(void)
 }
 
 /**
+ * Build utility menu with current values from system_config
+ */
+void rebuild_utility_menu(void)
+{
+    extern system_config_t system_config;
+
+    // Copy template
+    for (uint8_t i = 0; i < 9; i++)
+    {
+        utility_menu[i].label = utility_menu_template[i].label;
+        utility_menu[i].editable = utility_menu_template[i].editable;
+    }
+
+    // Assign value pointers
+    utility_menu[0].value = ""; // Set Clock - special display
+    utility_menu[1].value = "Not Impl";
+    utility_menu[2].value = "Not Impl";
+    utility_menu[3].value = value_log_entries;
+    utility_menu[4].value = value_menu_timeout;
+    utility_menu[5].value = value_contrast;
+    utility_menu[6].value = value_brightness;
+    utility_menu[7].value = value_pwr_fail;
+    utility_menu[8].value = ""; // Back
+
+    // Sync from system_config
+    sprintf(value_log_entries, "%d", system_config.log_entries);
+    sprintf(value_menu_timeout, "%02d:%02d",
+            system_config.menu_timeout / 60,
+            system_config.menu_timeout % 60);
+    sprintf(value_contrast, "%d", system_config.contrast);
+    sprintf(value_brightness, "%d", system_config.brightness);
+    sprintf(value_pwr_fail, "%02d:%02d",
+            system_config.power_fail_delay / 60,
+            system_config.power_fail_delay % 60);
+
+    menu.total_items = 9;
+}
+
+/**
  * Draw the CLOCK configuration menu
  */
 void menu_draw_clock(void)
@@ -1428,6 +1732,129 @@ void menu_draw_clock(void)
 
             lcd_set_cursor(i + 1, 19);
             lcd_print(show_brackets == 1 ? "]" : ")");
+        }
+    }
+}
+/**
+ * Draw UTILITY menu
+ * Special handling for Set Clock (shows date/time editor when editing)
+ */
+void menu_draw_utility(void)
+{
+    // Fixed title line
+    lcd_clear_line(0);
+
+    // Check if we're in the SET CLOCK submenu
+    if (menu.in_datetime_submenu)
+    {
+        lcd_print_at(0, 0, "SET CLOCK");
+
+        // Line 1: Set Date
+        lcd_clear_line(1);
+        if (menu.datetime_field == 0)
+            lcd_print_at(1, 0, "[Set Date]");
+        else
+            lcd_print_at(1, 0, " Set Date");
+
+        // Line 2: Set Time
+        lcd_clear_line(2);
+        if (menu.datetime_field == 1)
+            lcd_print_at(2, 0, "[Set Time]");
+        else
+            lcd_print_at(2, 0, " Set Time");
+
+        // Line 3: Back
+        lcd_clear_line(3);
+        if (menu.datetime_field == 2)
+            lcd_print_at(3, 0, "[Back]");
+        else
+            lcd_print_at(3, 0, " Back");
+
+        return;
+    }
+
+    // Check if we're editing date/time
+    if (menu.current_line == 0 && menu.in_edit_mode)
+    {
+        // Show date/time editor
+        lcd_print_at(0, 0, "DATE and TIME");
+
+        menu_update_datetime_display();
+
+        // Line 3: Back
+        lcd_clear_line(3);
+        lcd_print_at(3, 0, "Back");
+
+        return;
+    }
+
+    // Normal UTILITY menu list
+    lcd_print_at(0, 0, "UTILITY");
+
+    for (uint8_t i = 0; i < 3 && (menu.top_line + i) < menu.total_items; i++)
+    {
+        uint8_t item_idx = menu.top_line + i;
+        lcd_clear_line(i + 1);
+
+        // Display label
+        lcd_print_at(i + 1, 0, utility_menu[item_idx].label);
+
+        // Handle brackets and values
+        if (item_idx == 8) // Back - no brackets, no value
+        {
+            // Just label
+        }
+        else if (item_idx == 0) // Set Clock - brackets only
+        {
+            if (item_idx == menu.current_line)
+            {
+                lcd_print_at(i + 1, 0, "[");
+                lcd_print_at(i + 1, 1, utility_menu[item_idx].label);
+                lcd_print_at(i + 1, 10, "]");
+            }
+        }
+        else // All other items - show value
+        {
+            char value_buf[15];
+            uint8_t show_brackets = 0;
+
+            if (item_idx == menu.current_line)
+            {
+                show_brackets = menu.in_edit_mode ? 2 : 1;
+
+                if (menu.in_edit_mode && menu.blink_state == 0)
+                {
+                    uint8_t len = strlen(utility_menu[item_idx].value);
+                    for (uint8_t j = 0; j < len; j++)
+                        value_buf[j] = ' ';
+                    value_buf[len] = '\0';
+                }
+                else
+                {
+                    strcpy(value_buf, utility_menu[item_idx].value);
+                }
+            }
+            else
+            {
+                strcpy(value_buf, utility_menu[item_idx].value);
+            }
+
+            uint8_t val_len = strlen(utility_menu[item_idx].value);
+
+            if (show_brackets == 0)
+            {
+                if (val_len > 0)
+                    lcd_print_at(i + 1, 19 - val_len, value_buf);
+            }
+            else
+            {
+                uint8_t start_pos = 19 - val_len - 1;
+                lcd_set_cursor(i + 1, start_pos);
+                lcd_print(show_brackets == 1 ? "[" : "(");
+                lcd_print(value_buf);
+                lcd_set_cursor(i + 1, 19);
+                lcd_print(show_brackets == 1 ? "]" : ")");
+            }
         }
     }
 }
@@ -1997,6 +2424,11 @@ void menu_handle_button(uint8_t press_type)
                     break;
 
                 case 2: // Utility Menu
+                    rebuild_utility_menu();
+                    current_menu = 4; // UTILITY menu is #4
+                    menu.current_line = 0;
+                    menu.top_line = 0;
+                    menu_draw_utility();
                     break;
 
                 case 3: // About
