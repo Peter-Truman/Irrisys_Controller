@@ -2709,6 +2709,24 @@ void menu_handle_button(uint8_t press_type)
                     uart_println("Field not editable!");
                 }
             }
+            else if (current_menu == 4) // UTILITY menu
+            {
+                char buf[50];
+                sprintf(buf, "UTILITY btn: line=%d", menu.current_line);
+                uart_println(buf);
+
+                if (menu.current_line == 8) // Back
+                {
+                    beep(50);
+                    // Go back to OPTIONS menu
+                    current_menu = 0;
+                    menu.current_line = 0;
+                    menu.top_line = 0;
+                    menu.total_items = 5;
+                    menu_draw_options();
+                }
+                // TODO: Handle other UTILITY menu items (Set Clock, View Log, etc.)
+            }
         }
         else if (press_type == 2) // Long press - go back one menu level
         {
@@ -2716,23 +2734,50 @@ void menu_handle_button(uint8_t press_type)
             sprintf(buf, "Long press: current_menu=%d", current_menu);
             uart_println(buf);
 
-            if (current_menu == 4) // UTILITY menu
-            {
-                beep(100);
-                __delay_ms(50);
-                beep(100); // Double beep
+            beep(100);
+            __delay_ms(50);
+            beep(100); // Double beep for all
 
-                // Exit back to OPTIONS menu (discard changes)
+            if (current_menu == 0) // OPTIONS -> Main screen
+            {
+                current_menu = 255;
+                uart_println("Long press - OPTIONS to Main");
+            }
+            else if (current_menu == 1) // INPUT -> SETUP
+            {
+                current_menu = 2;
+                menu.current_line = 0;
+                menu.top_line = 0;
+                menu.total_items = 5;
+                menu_draw_setup();
+                uart_println("Long press - INPUT to SETUP");
+            }
+            else if (current_menu == 2) // SETUP -> OPTIONS
+            {
                 current_menu = 0;
                 menu.current_line = 0;
                 menu.top_line = 0;
                 menu.total_items = 5;
                 menu_draw_options();
+                uart_println("Long press - SETUP to OPTIONS");
             }
-            else
+            else if (current_menu == 3) // CLOCK -> SETUP
             {
-                // Other menus - placeholder for future
-                beep(100);
+                current_menu = 2;
+                menu.current_line = 0;
+                menu.top_line = 0;
+                menu.total_items = 5;
+                menu_draw_setup();
+                uart_println("Long press - CLOCK to SETUP");
+            }
+            else if (current_menu == 4) // UTILITY -> OPTIONS
+            {
+                current_menu = 0;
+                menu.current_line = 0;
+                menu.top_line = 0;
+                menu.total_items = 5;
+                menu_draw_options();
+                uart_println("Long press - UTILITY to OPTIONS");
             }
         }
     }

@@ -262,7 +262,7 @@ void main(void)
 
     // Start with OPTIONS menu (default behavior)
     extern uint8_t current_menu;
-    current_menu = 0;     // 0 = OPTIONS menu
+    current_menu = 255;   // 255 = Main screen (not in menus
     menu.total_items = 5; // OPTIONS menu has 5 items
 
     menu_draw_options(); // Draw OPTIONS menu instead
@@ -443,59 +443,8 @@ void main(void)
                 sprintf(buf, "Button event: %d", current_event);
                 uart_println(buf);
 
-                // ADD: Handle long press FIRST
-                if (current_event == 2) // Long press
-                {
-                    uart_println("Long press detected");
-
-                    // Check if in edit mode
-                    if (menu.in_edit_mode)
-                    {
-                        // Cancel edit without saving
-                        menu.in_edit_mode = 0;
-                        menu.blink_state = 1;
-                        menu.edit_digit = 0;
-
-                        // Reset flags
-                        extern input_config_t input_config[3];
-                        enable_edit_flag = input_config[current_input].enable;
-                        sensor_edit_flag = input_config[current_input].sensor_type;
-
-                        uart_println("Edit cancelled");
-
-                        // Redraw
-                        if (current_menu == 1)
-                            menu_draw_input();
-                    }
-                    else
-                    {
-                        // Not in edit - navigate back
-                        // Not in edit - navigate back
-                        if (current_menu == 0) // OPTIONS -> Main
-                        {
-                            current_menu = 255; // Just set the menu state
-                            uart_println("Long press - exit to main");
-                        }
-                        else if (current_menu == 1) // INPUT -> SETUP
-                        {
-                            current_menu = 2;
-                            menu.current_line = 0;
-                            menu.top_line = 0;
-                            menu.total_items = 5;
-                            menu_draw_setup();
-                        }
-                        else if (current_menu == 2) // SETUP -> OPTIONS
-                        {
-                            current_menu = 0;
-                            menu.current_line = 0;
-                            menu.top_line = 0;
-                            menu.total_items = 5;
-                            menu_draw_options();
-                        }
-                    }
-                }
                 // Check if we're on main screen (for short press)
-                else if (current_menu == 255)
+                if (current_menu == 255)
                 {
                     if (current_event == 1) // Short press
                     {
