@@ -385,7 +385,21 @@ void main(void)
             }
 
             // Check if we're editing a field
-            if (menu.in_edit_mode && current_menu == 1)
+            // Check if we're editing a field
+            if (menu.in_edit_mode && current_menu == 4 && !menu.in_datetime_submenu) // UTILITY numeric fields
+            {
+                extern void handle_utility_numeric_rotation(int8_t direction);
+                handle_utility_numeric_rotation(delta);
+                extern void menu_draw_utility(void);
+                menu_draw_utility();
+            }
+            else if (menu.in_edit_mode && current_menu == 4 && menu.in_datetime_submenu) // Date/Time editing
+            {
+                extern void handle_datetime_rotation(int8_t direction);
+                handle_datetime_rotation(delta);
+                menu_draw_utility();
+            }
+            else if (menu.in_edit_mode && current_menu == 1)
             {
                 if (is_numeric_field(menu.current_line, input_config[current_input].sensor_type, input_config[current_input].flow_type))
                 {
