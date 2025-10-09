@@ -825,49 +825,54 @@ void menu_update_datetime_display(void)
 
     // Display date line
     lcd_clear_line(1);
-    lcd_print_at(1, 0, "Date ");
     if (menu.datetime_field == 0)
     {
         if (menu.in_edit_mode)
         {
-            lcd_print_at(1, 6, "(");
-            lcd_print_at(1, 7, date_buf);
-            lcd_print_at(1, 15, ")");
+            lcd_print_at(1, 0, "(");
+            lcd_print_at(1, 1, date_buf);
+            lcd_print_at(1, 9, ")");
         }
         else
         {
-            lcd_print_at(1, 6, "[");
-            lcd_print_at(1, 7, date_buf);
-            lcd_print_at(1, 15, "]");
+            lcd_print_at(1, 0, "[");
+            lcd_print_at(1, 1, date_buf);
+            lcd_print_at(1, 9, "]");
         }
     }
     else
     {
-        lcd_print_at(1, 7, date_buf);
+        lcd_print_at(1, 1, date_buf);
     }
 
     // Display time line
     lcd_clear_line(2);
-    lcd_print_at(2, 0, "Time ");
     if (menu.datetime_field == 1)
     {
         if (menu.in_edit_mode)
         {
-            lcd_print_at(2, 6, "(");
-            lcd_print_at(2, 7, time_buf);
-            lcd_print_at(2, 15, ")");
+            lcd_print_at(2, 0, "(");
+            lcd_print_at(2, 1, time_buf);
+            lcd_print_at(2, 9, ")");
         }
         else
         {
-            lcd_print_at(2, 6, "[");
-            lcd_print_at(2, 7, time_buf);
-            lcd_print_at(2, 15, "]");
+            lcd_print_at(2, 0, "[");
+            lcd_print_at(2, 1, time_buf);
+            lcd_print_at(2, 9, "]");
         }
     }
     else
     {
-        lcd_print_at(2, 7, time_buf);
+        lcd_print_at(2, 1, time_buf);
     }
+
+    // Display Back line
+    lcd_clear_line(3);
+    if (menu.datetime_field == 2)
+        lcd_print_at(3, 0, "[Back]");
+    else
+        lcd_print_at(3, 0, " Back");
 }
 
 //=============================================================================
@@ -1744,39 +1749,9 @@ void menu_draw_utility(void)
     // Fixed title line
     lcd_clear_line(0);
 
-    // Check if we're in the SET CLOCK submenu
+    // Check if we're on the DATE and TIME screen
     if (menu.in_datetime_submenu)
     {
-        lcd_print_at(0, 0, "SET CLOCK");
-
-        // Line 1: Set Date
-        lcd_clear_line(1);
-        if (menu.datetime_field == 0)
-            lcd_print_at(1, 0, "[Set Date]");
-        else
-            lcd_print_at(1, 0, " Set Date");
-
-        // Line 2: Set Time
-        lcd_clear_line(2);
-        if (menu.datetime_field == 1)
-            lcd_print_at(2, 0, "[Set Time]");
-        else
-            lcd_print_at(2, 0, " Set Time");
-
-        // Line 3: Back
-        lcd_clear_line(3);
-        if (menu.datetime_field == 2)
-            lcd_print_at(3, 0, "[Back]");
-        else
-            lcd_print_at(3, 0, " Back");
-
-        return;
-    }
-
-    // Check if we're editing date/time
-    if (menu.current_line == 0 && menu.in_edit_mode)
-    {
-        // Show date/time editor
         lcd_print_at(0, 0, "DATE and TIME");
 
         menu_update_datetime_display();
@@ -2711,11 +2686,46 @@ void menu_handle_button(uint8_t press_type)
             }
             else if (current_menu == 4) // UTILITY menu
             {
+                beep(50);
                 char buf[50];
-                sprintf(buf, "UTILITY btn: line=%d", menu.current_line);
+                sprintf(buf, "UTILITY btn: line=%d, in_submenu=%d, field=%d",
+                        menu.current_line, menu.in_datetime_submenu, menu.datetime_field);
                 uart_println(buf);
 
-                if (menu.current_line == 8) // Back
+                // Handle Set Clock submenu
+                if (menu.in_datetime_submenu)
+                {
+                    if (menu.datetime_field == 0) // Set Date
+                    {
+                        init_datetime_editor();
+                        menu.datetime_field = 0; // Show date with brackets
+                        menu_draw_utility();
+                        uart_println("Showing Date/Time screen");
+                    }
+                    else if (menu.datetime_field == 1) // Set Time
+                    {
+                        init_datetime_editor();
+                        menu.datetime_field = 1; // Show time with brackets
+                        menu_draw_utility();
+                        uart_println("Showing Date/Time screen");
+                    }
+                    else if (menu.datetime_field == 2) // Back
+                    {
+                        menu.in_datetime_submenu = 0;
+                        menu.current_line = 0; // Return to Set Clock item
+                        menu_draw_utility();
+                        uart_println("Exited Set Clock submenu");
+                    }
+                }
+                else if (menu.current_line == 0) // Set Clock (from main UTILITY menu)
+                {
+                    beep(50);
+                    menu.in_datetime_submenu = 1;
+                    menu.datetime_field = 0; // Start at Set Date
+                    menu_draw_utility();
+                    uart_println("Entered Set Clock submenu");
+                }
+                else if (menu.current_line == 8) // Back
                 {
                     beep(50);
                     // Go back to OPTIONS menu
