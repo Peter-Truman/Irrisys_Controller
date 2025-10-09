@@ -870,9 +870,13 @@ void menu_update_datetime_display(void)
     // Display Back line
     lcd_clear_line(3);
     if (menu.datetime_field == 2)
-        lcd_print_at(3, 0, "[Back]");
+    {
+        lcd_print_at(3, 0, "[");
+        lcd_print_at(3, 1, "Back");
+        lcd_print_at(3, 5, "]");
+    }
     else
-        lcd_print_at(3, 0, " Back");
+        lcd_print_at(3, 1, "Back");
 }
 
 //=============================================================================
@@ -1755,10 +1759,6 @@ void menu_draw_utility(void)
         lcd_print_at(0, 0, "DATE and TIME");
 
         menu_update_datetime_display();
-
-        // Line 3: Back
-        lcd_clear_line(3);
-        lcd_print_at(3, 0, "Back");
 
         return;
     }
