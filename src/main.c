@@ -22,6 +22,7 @@ extern void handle_numeric_rotation(int8_t direction);
 extern void menu_update_numeric_value(void);
 extern void handle_time_rotation(int8_t direction);
 extern void menu_update_time_value(void);
+extern void menu_draw_utility(void);
 
 uint8_t save_pending = 0;
 // Relay pulse control
@@ -201,30 +202,46 @@ void main(void)
     if (rtc_init() == 0)
     {
         uart_println("RTC initialized - 1Hz square wave enabled");
+
+        // Check OSF (Oscillator Stop Flag) in status register
+        uint8_t status;
+        if (rtc_read_register(0x0F, &status) == 0)
+        {
+            char buf[50];
+            sprintf(buf, "RTC Status Register: 0x%02X", status);
+            uart_println(buf);
+
+            if (status & 0x80)
+            {
+                uart_println("WARNING: Oscillator Stop Flag is SET!");
+            }
+        }
     }
     else
     {
         uart_println("ERROR: RTC initialization failed!");
     }
 
-    // Set RTC to a known time (ONE TIME ONLY)
-    rtc_time_t set_time;
-    set_time.seconds = 0;
-    set_time.minutes = 0;
-    set_time.hours = 12; // 12:00:00
-    set_time.day = 1;    // Monday
-    set_time.date = 7;   // 7th
-    set_time.month = 10; // October
-    set_time.year = 25;  // 2025
+    /*
+     // Set RTC to a known time (ONE TIME ONLY)
+     rtc_time_t set_time;
+     set_time.seconds = 0;
+     set_time.minutes = 0;
+     set_time.hours = 12; // 12:00:00
+     set_time.day = 1;    // Monday
+     set_time.date = 7;   // 7th
+     set_time.month = 10; // October
+     set_time.year = 25;  // 2025
 
-    if (rtc_set_time(&set_time) == 0)
-    {
-        uart_println("RTC time set to 2025-10-07 12:00:00");
-    }
-    else
-    {
-        uart_println("RTC time set FAILED");
-    }
+     if (rtc_set_time(&set_time) == 0)
+     {
+         uart_println("RTC time set to 2025-10-07 12:00:00");
+     }
+     else
+     {
+         uart_println("RTC time set FAILED");
+     }
+     */
 
     uint8_t adc_error = ad7994_init();
     if (adc_error)
@@ -387,6 +404,12 @@ void main(void)
                     menu_handle_encoder(delta);
                 }
             }
+            else if (menu.in_edit_mode && current_menu == 4) // Date/Time editing
+            {
+                extern void handle_datetime_rotation(int8_t direction);
+                handle_datetime_rotation(delta);
+                menu_draw_utility(); // Immediate update
+            }
             else
             {
                 // Use existing encoder handler for menu navigation
@@ -548,6 +571,9 @@ void main(void)
                         {
                             menu_draw_clock();
                         }
+                        break;
+                    case 4: // UTILITY menu (date/time editing)
+                        menu_draw_utility();
                         break;
                     }
                 }

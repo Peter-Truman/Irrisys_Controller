@@ -85,6 +85,13 @@ uint8_t rtc_set_time(rtc_time_t *time)
     data[5] = dec_to_bcd(time->month);
     data[6] = dec_to_bcd(time->year);
 
+    // Debug: Show what we're writing
+    char buf[80];
+    sprintf(buf, "RTC write BCD: %02X %02X %02X %02X %02X %02X %02X",
+            data[0], data[1], data[2], data[3], data[4], data[5], data[6]);
+    extern void uart_println(const char *str);
+    uart_println(buf);
+
     // Write all 7 bytes starting at register 0x00
     if (i2c_start())
         return 1;

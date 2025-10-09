@@ -717,11 +717,11 @@ void handle_datetime_rotation(int8_t direction)
             {
                 menu.date_yy++;
                 if (menu.date_yy > 99)
-                    menu.date_yy = 0;
+                    menu.date_yy = 25; // Wrap to 2025
             }
             else
             {
-                if (menu.date_yy == 0)
+                if (menu.date_yy <= 25)
                     menu.date_yy = 99;
                 else
                     menu.date_yy--;
@@ -2194,6 +2194,74 @@ void menu_handle_button(uint8_t press_type)
                 return; // Exit early for CLOCK menu
             }
 
+            // Handle UTILITY menu date/time editing
+            if (current_menu == 4 && menu.in_datetime_submenu)
+            {
+                beep(50);
+                menu.datetime_edit_digit++;
+
+                char buf[50];
+                sprintf(buf, "Digit advance: field=%d, digit=%d",
+                        menu.datetime_field, menu.datetime_edit_digit);
+                uart_println(buf);
+
+                // Check if we've finished editing all digits
+                if (menu.datetime_edit_digit > 2)
+                {
+                    // Save to RTC and exit edit mode
+                    char buf[80];
+                    sprintf(buf, "Saving to RTC: %02d/%02d/%02d %02d:%02d:%02d",
+                            menu.date_dd, menu.date_mm, menu.date_yy,
+                            menu.time_hh, menu.time_min, menu.time_ss);
+                    uart_println(buf);
+
+                    rtc_time_t new_time;
+                    new_time.date = menu.date_dd;
+                    new_time.month = menu.date_mm;
+                    new_time.year = menu.date_yy;
+                    new_time.hours = menu.time_hh;
+                    new_time.minutes = menu.time_min;
+                    new_time.seconds = menu.time_ss;
+                    new_time.day = 1; // Day of week not used
+
+                    if (rtc_set_time(&new_time) == 0)
+                    {
+                        uart_println("RTC write successful - verifying...");
+
+                        // Read back to verify
+                        rtc_time_t verify_time;
+                        if (rtc_read_time(&verify_time) == 0)
+                        {
+                            char buf[80];
+                            sprintf(buf, "RTC readback: %02d/%02d/%02d %02d:%02d:%02d",
+                                    verify_time.date, verify_time.month, verify_time.year,
+                                    verify_time.hours, verify_time.minutes, verify_time.seconds);
+                            uart_println(buf);
+                            uart_println("RTC verified OK");
+                        }
+                        else
+                        {
+                            uart_println("ERROR: RTC readback failed");
+                        }
+                    }
+                    else
+                    {
+                        uart_println("ERROR: RTC write failed");
+                    }
+
+                    menu.in_edit_mode = 0;
+                    menu_draw_utility();
+                }
+                else
+                {
+                    // Move to next digit pair - force display update
+                    menu.blink_state = 1; // Show value immediately
+                    menu_draw_utility();
+                }
+
+                return; // Exit early for UTILITY menu
+            }
+
             // INPUT menu handling (needs sensor context)
             uint8_t sensor_type = input_config[current_input].sensor_type;
             uint8_t flow_type = input_config[current_input].flow_type;
@@ -2422,10 +2490,21 @@ void menu_handle_button(uint8_t press_type)
         }
         else if (press_type == 2) // Long press - cancel edit
         {
+            // Restore original values for UTILITY menu date/time editing
+            if (current_menu == 4 && menu.in_datetime_submenu)
+            {
+                uart_println("Date/time edit cancelled - restoring original values");
+                init_datetime_editor(); // Reload from RTC
+            }
+
             menu.in_edit_mode = 0;
             beep(100);
             __delay_ms(50);
             beep(100); // Double beep for cancel
+
+            // Redraw to show brackets instead of parentheses
+            if (current_menu == 4)
+                menu_draw_utility();
         }
     }
     else // Not in edit mode
@@ -2695,19 +2774,23 @@ void menu_handle_button(uint8_t press_type)
                 // Handle Set Clock submenu
                 if (menu.in_datetime_submenu)
                 {
-                    if (menu.datetime_field == 0) // Set Date
+                    if (menu.datetime_field == 0) // Date selected
                     {
-                        init_datetime_editor();
-                        menu.datetime_field = 0; // Show date with brackets
+                        // Enter date edit mode
+                        menu.in_edit_mode = 1;
+                        menu.datetime_edit_digit = 0; // Start with DD
+                        menu.blink_state = 1;
                         menu_draw_utility();
-                        uart_println("Showing Date/Time screen");
+                        uart_println("Entered Date edit mode - DD flashing");
                     }
-                    else if (menu.datetime_field == 1) // Set Time
+                    else if (menu.datetime_field == 1) // Time selected
                     {
-                        init_datetime_editor();
-                        menu.datetime_field = 1; // Show time with brackets
+                        // Enter time edit mode
+                        menu.in_edit_mode = 1;
+                        menu.datetime_edit_digit = 0; // Start with HH
+                        menu.blink_state = 1;
                         menu_draw_utility();
-                        uart_println("Showing Date/Time screen");
+                        uart_println("Entered Time edit mode - HH flashing");
                     }
                     else if (menu.datetime_field == 2) // Back
                     {
@@ -2720,6 +2803,7 @@ void menu_handle_button(uint8_t press_type)
                 else if (menu.current_line == 0) // Set Clock (from main UTILITY menu)
                 {
                     beep(50);
+                    init_datetime_editor(); // Load current RTC values
                     menu.in_datetime_submenu = 1;
                     menu.datetime_field = 0; // Start at Set Date
                     menu_draw_utility();
