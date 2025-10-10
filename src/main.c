@@ -663,7 +663,7 @@ void main(void)
         // Handle pending EEPROM saves...
 
         // // Handle pending EEPROM saves when not in edit mode (MOVED OUTSIDE)
-        if (save_pending && !menu.in_edit_mode)
+        if (save_pending && current_menu == 255)
         {
             uart_println("Saving to EEPROM...");
             save_current_config();

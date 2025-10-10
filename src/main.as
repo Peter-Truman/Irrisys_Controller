@@ -14205,10 +14205,11 @@ u23290:
 	
 l16908:; BSR set to: 5
 
-	movf	(0+(_menu+03h))&0ffh,w
+		incf	((_current_menu))&0ffh,w
 	btfss	status,2
 	goto	u23301
 	goto	u23300
+
 u23301:
 	goto	l16918
 u23300:
