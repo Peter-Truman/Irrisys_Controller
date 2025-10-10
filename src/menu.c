@@ -705,6 +705,25 @@ void handle_utility_numeric_rotation(int8_t direction)
         // Update display immediately
         rebuild_utility_menu();
     }
+    else if (menu.current_line == 5) // Contrast
+    {
+        if (direction > 0)
+        {
+            system_config.contrast++;
+            if (system_config.contrast > 10)
+                system_config.contrast = 1; // Wrap to 1
+        }
+        else
+        {
+            if (system_config.contrast <= 1)
+                system_config.contrast = 10; // Wrap to 10
+            else
+                system_config.contrast--;
+        }
+
+        // Update display immediately
+        rebuild_utility_menu();
+    }
 }
 
 void init_datetime_editor(void)
@@ -2157,6 +2176,11 @@ void menu_handle_button(uint8_t press_type)
     extern uint8_t save_pending;
     extern input_config_t input_config[3];
 
+    char debug_buf[80];
+    sprintf(debug_buf, "BTN HANDLER START: type=%d, edit=%d, menu=%d, line=%d",
+            press_type, menu.in_edit_mode, current_menu, menu.current_line);
+    uart_println(debug_buf);
+
     if (menu.in_edit_mode)
     {
         if (press_type == 1) // Short press - confirm edit
@@ -2271,8 +2295,22 @@ void menu_handle_button(uint8_t press_type)
                 extern system_config_t system_config;
                 extern uint8_t save_pending;
 
+                // Handle Contrast (line 5) - numeric field with cancel support
+                if (menu.current_line == 5)
+                {
+                    beep(50);
+                    save_pending = 1;
+                    menu.in_edit_mode = 0;
+                    menu.blink_state = 1; // Force value visible
+                    rebuild_utility_menu();
+                    menu_draw_utility();
+                    char buf[50];
+                    sprintf(buf, "Saved Contrast=%d", system_config.contrast);
+                    uart_println(buf);
+                    return;
+                }
                 // Handle Menu T/O (line 4) - time field
-                if (menu.current_line == 4)
+                else if (menu.current_line == 4)
                 {
                     menu.time_edit_digit++;
                     menu.blink_state = 1;
@@ -2391,6 +2429,10 @@ void menu_handle_button(uint8_t press_type)
                 return; // Exit early for UTILITY date/time menu
             }
         }
+
+        // Only handle INPUT menu on short press - long press handled elsewhere
+        if (press_type != 1)
+            return;
 
         // INPUT menu handling (needs sensor context)
         uint8_t sensor_type = input_config[current_input].sensor_type;
@@ -2620,11 +2662,32 @@ void menu_handle_button(uint8_t press_type)
     }
     else if (press_type == 2) // Long press - cancel edit
     {
+        char buf[80];
+        sprintf(buf, "CANCEL HANDLER: menu=%d, line=%d, edit_mode=%d",
+                current_menu, menu.current_line, menu.in_edit_mode);
+        uart_println(buf);
+
         // Restore original values for UTILITY menu date/time editing
         if (current_menu == 4 && menu.in_datetime_submenu)
         {
             uart_println("Date/time edit cancelled - restoring original values");
             init_datetime_editor(); // Reload from RTC
+        }
+        // Restore original value for Contrast
+        else if (current_menu == 4 && menu.current_line == 5)
+        {
+            extern system_config_t system_config;
+            system_config.contrast = atoi(original_value);
+            rebuild_utility_menu();
+            uart_println("Cancelled Contrast edit - restored original");
+        }
+        // Restore original value for Contrast
+        else if (current_menu == 4 && menu.current_line == 5)
+        {
+            extern system_config_t system_config;
+            system_config.contrast = atoi(original_value);
+            rebuild_utility_menu();
+            uart_println("Cancelled Contrast edit - restored original");
         }
 
         menu.in_edit_mode = 0;
@@ -2949,6 +3012,22 @@ void menu_handle_button(uint8_t press_type)
                         menu_draw_utility();
                         uart_println("Editing Log Entries");
                     }
+                    else if (menu.current_line == 5) // Contrast
+                    {
+                        beep(50);
+                        extern system_config_t system_config;
+                        // Save original value for cancel
+                        sprintf(original_value, "%d", system_config.contrast);
+                        char buf[50];
+                        sprintf(buf, "Entering Contrast edit: current=%d, saved='%s'",
+                                system_config.contrast, original_value);
+                        uart_println(buf);
+                        init_numeric_editor(system_config.contrast);
+                        menu.in_edit_mode = 1;
+                        menu.blink_state = 1;
+                        menu_draw_utility();
+                        uart_println("Editing Contrast");
+                    }
                     else if (menu.current_line == 4) // Menu T/O
                     {
                         beep(50);
@@ -2972,12 +3051,51 @@ void menu_handle_button(uint8_t press_type)
                     // TODO: Handle other UTILITY menu items (Set Clock, View Log, etc.)
                 }
             }
-            else if (press_type == 2) // Long press - go back one menu level
+            else if (press_type == 2) // Long press - cancel edit OR go back one menu level
             {
                 char buf[50];
-                sprintf(buf, "Long press: current_menu=%d", current_menu);
+                sprintf(buf, "Long press: current_menu=%d, edit_mode=%d", current_menu, menu.in_edit_mode);
                 uart_println(buf);
 
+                // If in edit mode, cancel and restore original value (stay in menu)
+                if (menu.in_edit_mode)
+                {
+                    extern system_config_t system_config;
+
+                    // Restore original value for Contrast
+                    if (current_menu == 4 && menu.current_line == 5)
+                    {
+                        system_config.contrast = atoi(original_value);
+                        uart_println("Cancelled Contrast edit - restored original");
+                    }
+
+                    menu.in_edit_mode = 0;
+                    menu.blink_state = 1; // Force value visible
+
+                    // Rebuild and redraw appropriate menu
+                    if (current_menu == 1)
+                    {
+                        rebuild_input_menu(current_input);
+                        menu_draw_input();
+                    }
+                    else if (current_menu == 3)
+                    {
+                        rebuild_clock_menu();
+                        menu_draw_clock();
+                    }
+                    else if (current_menu == 4)
+                    {
+                        rebuild_utility_menu();
+                        menu_draw_utility();
+                    }
+
+                    beep(100);
+                    __delay_ms(50);
+                    beep(100);
+                    return; // Don't navigate - just cancel edit
+                }
+
+                // Not in edit mode - navigate back
                 beep(100);
                 __delay_ms(50);
                 beep(100); // Double beep for all

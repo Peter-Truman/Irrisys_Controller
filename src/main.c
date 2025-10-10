@@ -310,15 +310,15 @@ void main(void)
             // Read RTC time
             if (rtc_read_time(&current_time) == 0)
             {
-                char time_buf[60];
-                sprintf(time_buf, "RTC: 20%02u-%02u-%02u %02u:%02u:%02u",
-                        current_time.year, current_time.month, current_time.date,
-                        current_time.hours, current_time.minutes, current_time.seconds);
-                uart_println(time_buf);
+                // char time_buf[60];
+                // sprintf(time_buf, "RTC: 20%02u-%02u-%02u %02u:%02u:%02u",
+                //         current_time.year, current_time.month, current_time.date,
+                //         current_time.hours, current_time.minutes, current_time.seconds);
+                // uart_println(time_buf);
             }
             else
             {
-                uart_println("RTC: Read error");
+                // uart_println("RTC: Read error");
             }
 
             // Read ADC channels (no debug output)
@@ -327,9 +327,9 @@ void main(void)
             adc_ch3 = ad7994_read_channel(3);
 
             // Print to terminal (brief format)
-            char buf[50];
-            sprintf(buf, "ADC: %4u %4u %4u", adc_ch1, adc_ch2, adc_ch3);
-            uart_println(buf);
+            // char buf[50];
+            // sprintf(buf, "ADC: %4u %4u %4u", adc_ch1, adc_ch2, adc_ch3);
+            // uart_println(buf);
         }
 
         // ... rest of loop
@@ -393,7 +393,7 @@ void main(void)
                     handle_time_rotation(delta);
                     menu_update_time_value(); // Handles selective blinking - don't call menu_draw_utility!
                 }
-                else if (menu.current_line == 3) // Log Entries - numeric field
+                else if (menu.current_line == 3 || menu.current_line == 5) // Log Entries, Contrast - numeric fields
                 {
                     extern void handle_utility_numeric_rotation(int8_t direction);
                     handle_utility_numeric_rotation(delta);

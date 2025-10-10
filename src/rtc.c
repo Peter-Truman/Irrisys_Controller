@@ -86,11 +86,11 @@ uint8_t rtc_set_time(rtc_time_t *time)
     data[6] = dec_to_bcd(time->year);
 
     // Debug: Show what we're writing
-    char buf[80];
-    sprintf(buf, "RTC write BCD: %02X %02X %02X %02X %02X %02X %02X",
-            data[0], data[1], data[2], data[3], data[4], data[5], data[6]);
-    extern void uart_println(const char *str);
-    uart_println(buf);
+    // char buf[80];
+    // sprintf(buf, "RTC write BCD: %02X %02X %02X %02X %02X %02X %02X",
+    //       data[0], data[1], data[2], data[3], data[4], data[5], data[6]);
+    // extern void uart_println(const char *str);
+    // uart_println(buf);
 
     // Write all 7 bytes starting at register 0x00
     if (i2c_start())
@@ -155,10 +155,10 @@ uint8_t rtc_read_time(rtc_time_t *time)
     i2c_stop();
 
     // Keep RAW output for now
-    char debug_buf[80];
-    sprintf(debug_buf, "RAW: %02X %02X %02X %02X %02X %02X %02X",
-            data[0], data[1], data[2], data[3], data[4], data[5], data[6]);
-    uart_println(debug_buf);
+    // char debug_buf[80];
+    // sprintf(debug_buf, "RAW: %02X %02X %02X %02X %02X %02X %02X",
+    //        data[0], data[1], data[2], data[3], data[4], data[5], data[6]);
+    // uart_println(debug_buf);
 
     // Convert BCD to decimal
     time->seconds = bcd_to_dec(data[0] & 0x7F);
