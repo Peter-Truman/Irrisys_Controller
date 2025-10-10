@@ -386,12 +386,20 @@ void main(void)
 
             // Check if we're editing a field
             // Check if we're editing a field
-            if (menu.in_edit_mode && current_menu == 4 && !menu.in_datetime_submenu) // UTILITY numeric fields
+            if (menu.in_edit_mode && current_menu == 4 && !menu.in_datetime_submenu) // UTILITY fields
             {
-                extern void handle_utility_numeric_rotation(int8_t direction);
-                handle_utility_numeric_rotation(delta);
-                extern void menu_draw_utility(void);
-                menu_draw_utility();
+                if (menu.current_line == 4) // Menu T/O - time field
+                {
+                    handle_time_rotation(delta);
+                    menu_update_time_value(); // Handles selective blinking - don't call menu_draw_utility!
+                }
+                else if (menu.current_line == 3) // Log Entries - numeric field
+                {
+                    extern void handle_utility_numeric_rotation(int8_t direction);
+                    handle_utility_numeric_rotation(delta);
+                    extern void menu_draw_utility(void);
+                    menu_draw_utility();
+                }
             }
             else if (menu.in_edit_mode && current_menu == 4 && menu.in_datetime_submenu) // Date/Time editing
             {
@@ -586,8 +594,15 @@ void main(void)
                             menu_draw_clock();
                         }
                         break;
-                    case 4: // UTILITY menu (date/time editing)
-                        menu_draw_utility();
+                    case 4:                                                      // UTILITY menu
+                        if (menu.current_line == 4 && !menu.in_datetime_submenu) // Menu T/O - time field
+                        {
+                            menu_update_time_value();
+                        }
+                        else
+                        {
+                            menu_draw_utility();
+                        }
                         break;
                     }
                 }

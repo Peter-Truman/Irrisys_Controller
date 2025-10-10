@@ -62,6 +62,9 @@ const item_options_t menu_item_options[] = {
 
 #define NUM_OPTION_TYPES 7
 
+// Forward declaration
+void menu_draw_utility(void);
+
 // Test menu items for OPTIONS menu
 const char *options_menu[] = {
     "Main Menu",
@@ -488,6 +491,9 @@ void handle_time_rotation(int8_t direction)
             // Special limit for Clock menu relay pulse (120 seconds = 2 minutes max)
             if (current_menu == 3 && menu.current_line == 2 && menu.time_xx > 2)
                 menu.time_xx = 0;
+            // Special limit for UTILITY Menu T/O (240 seconds = 4 minutes max)
+            else if (current_menu == 4 && menu.current_line == 4 && menu.time_xx > 4)
+                menu.time_xx = 0;
             else if (menu.edit_time_mode == 2 && menu.time_xx > 23) // 24hr limit
                 menu.time_xx = 0;
             else if (menu.time_xx > 99)
@@ -500,6 +506,9 @@ void handle_time_rotation(int8_t direction)
                 // Special limit for Clock menu relay pulse
                 if (current_menu == 3 && menu.current_line == 2)
                     menu.time_xx = 2;
+                // Special limit for UTILITY Menu T/O
+                else if (current_menu == 4 && menu.current_line == 4)
+                    menu.time_xx = 4;
                 else
                     menu.time_xx = (menu.edit_time_mode == 2) ? 23 : 99;
             }
@@ -515,6 +524,13 @@ void handle_time_rotation(int8_t direction)
         if (current_menu == 3 && menu.current_line == 2 && menu.time_xx == 2)
         {
             // Seconds locked at 0 when minutes = 2 (120 second limit)
+            menu.time_yy = 0;
+            return; // Don't allow any changes
+        }
+        // Special case: UTILITY Menu T/O with minutes=4 cannot change seconds
+        if (current_menu == 4 && menu.current_line == 4 && menu.time_xx == 4)
+        {
+            // Seconds locked at 0 when minutes = 4 (240 second limit)
             menu.time_yy = 0;
             return; // Don't allow any changes
         }
@@ -583,6 +599,29 @@ void menu_update_time_value(void)
     {
         sprintf(value_relay_pulse, "%s", value_buf);
         menu_draw_clock();
+        return;
+    }
+
+    // Handle UTILITY menu (Menu T/O at line 4)
+    if (current_menu == 4 && menu.current_line == 4)
+    {
+        // Update the buffer
+        sprintf(value_menu_timeout, "%s", value_buf);
+
+        // Calculate screen position
+        uint8_t screen_line = menu.current_line - menu.top_line;
+        if (screen_line < 3) // Only if visible
+        {
+            uint8_t start_col = 13; // Position for parentheses
+
+            lcd_set_cursor(screen_line + 1, start_col);
+            lcd_print("       "); // Clear area
+
+            lcd_set_cursor(screen_line + 1, start_col);
+            lcd_print("(");
+            lcd_print(value_buf);
+            lcd_print(")");
+        }
         return;
     }
 
@@ -2226,22 +2265,62 @@ void menu_handle_button(uint8_t press_type)
                 return; // Exit early for CLOCK menu
             }
 
-            // Handle UTILITY menu numeric fields (Log Entries, Contrast, etc.)
+            // Handle UTILITY menu fields
             if (current_menu == 4 && !menu.in_datetime_submenu)
             {
                 extern system_config_t system_config;
                 extern uint8_t save_pending;
 
-                char buf[50];
-                sprintf(buf, "UTILITY save: line=%d, value=%d",
-                        menu.current_line, system_config.log_entries);
-                uart_println(buf);
+                // Handle Menu T/O (line 4) - time field
+                if (menu.current_line == 4)
+                {
+                    menu.time_edit_digit++;
+                    menu.blink_state = 1;
+                    beep(50);
 
-                save_pending = 1; // Mark for EEPROM save
-                menu.in_edit_mode = 0;
-                beep(50);
-                menu_draw_utility();
-                return; // Exit early for UTILITY numeric menu
+                    char buf[50];
+                    sprintf(buf, "Time button: digit now=%d", menu.time_edit_digit);
+                    uart_println(buf);
+
+                    menu_update_time_value();
+
+                    if (menu.time_edit_digit > 1)
+                    {
+                        // Calculate total seconds (MM:SS format)
+                        uint16_t new_seconds = menu.time_xx * 60 + menu.time_yy;
+
+                        // Bounds check: 10-240 seconds
+                        if (new_seconds < 10)
+                            new_seconds = 10;
+                        if (new_seconds > 240)
+                            new_seconds = 240;
+
+                        system_config.menu_timeout = (uint8_t)new_seconds;
+
+                        // Update display string
+                        sprintf(value_menu_timeout, "%02d:%02d",
+                                system_config.menu_timeout / 60,
+                                system_config.menu_timeout % 60);
+
+                        menu.in_edit_mode = 0;
+                        save_pending = 1;
+                        uart_println("Menu T/O edit complete - saved");
+                        menu_draw_utility();
+                    }
+                }
+                else // Handle numeric fields (Log Entries, etc.)
+                {
+                    char buf[50];
+                    sprintf(buf, "UTILITY save: line=%d, value=%d",
+                            menu.current_line, system_config.log_entries);
+                    uart_println(buf);
+
+                    save_pending = 1;
+                    menu.in_edit_mode = 0;
+                    beep(50);
+                    menu_draw_utility();
+                }
+                return;
             }
 
             // Handle UTILITY menu date/time editing
@@ -2869,6 +2948,16 @@ void menu_handle_button(uint8_t press_type)
                         menu.blink_state = 1;
                         menu_draw_utility();
                         uart_println("Editing Log Entries");
+                    }
+                    else if (menu.current_line == 4) // Menu T/O
+                    {
+                        beep(50);
+                        extern system_config_t system_config;
+                        init_time_editor(system_config.menu_timeout, 0);
+                        menu.in_edit_mode = 1;
+                        menu.blink_state = 1;
+                        menu_draw_utility();
+                        uart_println("Editing Menu Timeout");
                     }
                     else if (menu.current_line == 8) // Back
                     {
