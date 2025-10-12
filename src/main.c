@@ -523,10 +523,12 @@ void main(void)
             lcd_print("Ready");
             uart_println("Main screen displayed");
 
-            uart_println("Saving to EEPROM...");
-            save_current_config();
-            save_pending = 0;
-            uart_println("EEPROM save complete");
+            // Auto-save removed - user must explicitly select "Save" in menus
+            if (save_pending)
+            {
+                uart_println("WARNING: Exited to main screen with unsaved changes");
+                save_pending = 0; // Clear the flag
+            }
         }
         last_menu_state = current_menu;
 
@@ -625,6 +627,13 @@ void main(void)
                 menu.current_line = 0;
                 menu.top_line = 0;
 
+                // Discard any unsaved changes
+                if (save_pending)
+                {
+                    uart_println("Timeout - discarding unsaved changes");
+                    save_pending = 0;
+                }
+
                 // Clear display
                 lcd_clear();
                 lcd_set_cursor(0, 0);
@@ -645,16 +654,11 @@ void main(void)
             beep(500); // Half second beep as feedback
             uart_println("Long press threshold reached - beep");
         }
-        // Handle pending EEPROM saves...
-
-        // // Handle pending EEPROM saves when not in edit mode (MOVED OUTSIDE)
-        if (save_pending && !menu.in_edit_mode)
-        {
-            uart_println("Saving to EEPROM...");
-            save_current_config();
-            save_pending = 0;
-            uart_println("EEPROM save complete");
-        }
+        // Auto-save removed - user must explicitly select "Save" menu item
+        // save_pending flag is only cleared when:
+        // 1. User selects "Save" in menu (saves to EEPROM)
+        // 2. User exits to main screen (discards changes)
+        // 3. Menu timeout occurs (discards changes)
 
         // Prevent LCD corruption at high speed
 

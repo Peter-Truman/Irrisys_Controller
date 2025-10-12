@@ -104,10 +104,10 @@ static char value_relay_pulse[10] = "00:02";
 static char value_clock_display[10] = "Show";
 
 // Dynamic input menu - will be populated based on sensor type
-menu_item_t input_menu[15]; // Max 15 items to cover all cases
+menu_item_t input_menu[16]; // Max 16 items to cover all cases (pressure with Save)
 
-// Clock menu - static 5 items
-menu_item_t clock_menu[5];
+// Clock menu - static 6 items (with Save)
+menu_item_t clock_menu[6];
 
 // Menu template for PRESSURE sensor
 const menu_item_t pressure_menu_template[] = {
@@ -124,7 +124,8 @@ const menu_item_t pressure_menu_template[] = {
     {"Rly PLP", NULL, 1},      // 10
     {"Rly SLP", NULL, 1},      // 11
     {"Display", NULL, 1},      // 12
-    {"Back", NULL, 0}          // 13
+    {"Save", NULL, 0},         // 13 - Action: save to EEPROM
+    {"Back", NULL, 0}          // 14
 };
 
 // Menu template for TEMPERATURE sensor
@@ -137,7 +138,8 @@ const menu_item_t temp_menu_template[] = {
     {"High TBP", NULL, 1},   // 5
     {"Rly High", NULL, 1},   // 6
     {"Display", NULL, 1},    // 7
-    {"Back", NULL, 0}        // 8
+    {"Save", NULL, 0},       // 8 - Action: save to EEPROM
+    {"Back", NULL, 0}        // 9
 };
 
 // Menu template for FLOW sensor - Digital
@@ -149,7 +151,8 @@ const menu_item_t flow_digital_template[] = {
     {"No Flow BP", NULL, 1}, // 4
     {"Rly Low", NULL, 1},    // 5
     {"Display", NULL, 1},    // 6
-    {"Back", NULL, 0}        // 7
+    {"Save", NULL, 0},       // 7 - Action: save to EEPROM
+    {"Back", NULL, 0}        // 8
 };
 
 // Menu template for FLOW sensor - Analog
@@ -164,7 +167,8 @@ const menu_item_t flow_analog_template[] = {
     {"Low Flow BP", NULL, 1}, // 7
     {"Rly Low", NULL, 1},     // 8
     {"Display", NULL, 1},     // 9
-    {"Back", NULL, 0}         // 10
+    {"Save", NULL, 0},        // 10 - Action: save to EEPROM
+    {"Back", NULL, 0}         // 11
 };
 
 // Menu template for CLOCK configuration
@@ -173,7 +177,8 @@ const menu_item_t clock_menu_template[] = {
     {"End Run", NULL, 1},   // 1
     {"Rly Pulse", NULL, 1}, // 2
     {"Display", NULL, 1},   // 3
-    {"Back", NULL, 0}       // 4
+    {"Save", NULL, 0},      // 4 - Action: save to EEPROM
+    {"Back", NULL, 0}       // 5
 };
 
 // Menu template for UTILITY configuration
@@ -186,11 +191,12 @@ const menu_item_t utility_menu_template[] = {
     {"Contrast", NULL, 1},    // 5 - Numeric edit
     {"Brightness", NULL, 1},  // 6 - Numeric edit
     {"Pwr Detect", NULL, 1},  // 7 - Time edit MM:SS
-    {"Back", NULL, 0}         // 8
+    {"Save", NULL, 0},        // 8 - Action: save to EEPROM
+    {"Back", NULL, 0}         // 9
 };
 
 // Utility menu instance
-menu_item_t utility_menu[9];
+menu_item_t utility_menu[10];
 
 // Value buffers for utility menu items
 static char value_log_entries[6] = "10";
@@ -998,9 +1004,10 @@ void rebuild_input_menu(uint8_t input_num)
         input_menu[10].value = value_rlyplp;
         input_menu[11].value = value_rlyslp;
         input_menu[12].value = value_display;
-        input_menu[13].value = value_back;
+        input_menu[13].value = "";    // Save - no value displayed
+        input_menu[14].value = "";    // Back - no value displayed
 
-        menu.total_items = 14;
+        menu.total_items = 15;
     }
     else if (sensor == 1) // Temperature
     {
@@ -1027,9 +1034,10 @@ void rebuild_input_menu(uint8_t input_num)
         input_menu[5].value = value_high_tbp;
         input_menu[6].value = value_rlyhigh;
         input_menu[7].value = value_display;
-        input_menu[8].value = value_back;
+        input_menu[8].value = "";    // Save - no value displayed
+        input_menu[9].value = "";    // Back - no value displayed
 
-        menu.total_items = 9;
+        menu.total_items = 10;
     }
     else if (sensor == 2) // Flow - NOW IMPLEMENTED!
     {
@@ -1063,9 +1071,10 @@ void rebuild_input_menu(uint8_t input_num)
             input_menu[7].value = value_low_flow_bp;
             input_menu[8].value = value_rlylow;
             input_menu[9].value = value_display;
-            input_menu[10].value = value_back;
+            input_menu[10].value = "";    // Save - no value displayed
+            input_menu[11].value = "";    // Back - no value displayed
 
-            menu.total_items = 11;
+            menu.total_items = 12;
         }
         else // Digital Flow
         {
@@ -1085,9 +1094,10 @@ void rebuild_input_menu(uint8_t input_num)
             input_menu[4].value = value_no_flow_bp;
             input_menu[5].value = value_rlylow;
             input_menu[6].value = value_display;
-            input_menu[7].value = value_back;
+            input_menu[7].value = "";    // Save - no value displayed
+            input_menu[8].value = "";    // Back - no value displayed
 
-            menu.total_items = 8;
+            menu.total_items = 9;
         }
     }
 
@@ -1638,9 +1648,10 @@ void rebuild_clock_menu(void)
     clock_menu[1].value = value_end_runtime;
     clock_menu[2].value = value_relay_pulse;
     clock_menu[3].value = value_clock_display;
-    clock_menu[4].value = value_back;
+    clock_menu[4].value = "";    // Save - no value displayed
+    clock_menu[5].value = "";    // Back - no value displayed
 
-    menu.total_items = 5;
+    menu.total_items = 6;
 
     sprintf(buf, "Clock menu rebuilt: %d items", menu.total_items);
     uart_println(buf);
@@ -1654,7 +1665,7 @@ void rebuild_utility_menu(void)
     extern system_config_t system_config;
 
     // Copy template
-    for (uint8_t i = 0; i < 9; i++)
+    for (uint8_t i = 0; i < 10; i++)
     {
         utility_menu[i].label = utility_menu_template[i].label;
         utility_menu[i].editable = utility_menu_template[i].editable;
@@ -1669,7 +1680,8 @@ void rebuild_utility_menu(void)
     utility_menu[5].value = value_contrast;
     utility_menu[6].value = value_brightness;
     utility_menu[7].value = value_pwr_fail;
-    utility_menu[8].value = ""; // Back
+    utility_menu[8].value = ""; // Save - no value displayed
+    utility_menu[9].value = ""; // Back - no value displayed
 
     // Sync from system_config
     sprintf(value_log_entries, "%d", system_config.log_entries);
@@ -1682,7 +1694,7 @@ void rebuild_utility_menu(void)
             system_config.power_fail_delay / 60,
             system_config.power_fail_delay % 60);
 
-    menu.total_items = 9;
+    menu.total_items = 10;
 }
 
 /**
@@ -2193,6 +2205,9 @@ void menu_handle_button(uint8_t press_type)
                         uart_println(buf);
                         save_pending = 1;
                         menu.in_edit_mode = 0;
+                        beep(50);
+                        __delay_ms(50);
+                        beep(50);
                         menu_draw_clock(); // Redraw with square brackets
 
                         // TEST: Trigger relay pulse
@@ -2223,6 +2238,8 @@ void menu_handle_button(uint8_t press_type)
 
                 menu.in_edit_mode = 0;
                 beep(50);
+                __delay_ms(50);
+                beep(50);
                 return; // Exit early for CLOCK menu
             }
 
@@ -2239,6 +2256,8 @@ void menu_handle_button(uint8_t press_type)
 
                 save_pending = 1; // Mark for EEPROM save
                 menu.in_edit_mode = 0;
+                beep(50);
+                __delay_ms(50);
                 beep(50);
                 menu_draw_utility();
                 return; // Exit early for UTILITY numeric menu
@@ -2402,6 +2421,8 @@ void menu_handle_button(uint8_t press_type)
 
             menu.in_edit_mode = 0;
             beep(50);
+            __delay_ms(50);
+            beep(50);
         }
         // Handle time fields
         else if (is_time_field(menu.current_line, sensor_type, flow_type))
@@ -2454,6 +2475,9 @@ void menu_handle_button(uint8_t press_type)
 
                 menu.in_edit_mode = 0;
                 save_pending = 1;
+                beep(50);
+                __delay_ms(50);
+                beep(50);
                 uart_println("Time edit complete - saved");
             }
         }
@@ -2536,6 +2560,9 @@ void menu_handle_button(uint8_t press_type)
 
                 save_pending = 1;
                 menu.in_edit_mode = 0;
+                beep(50);
+                __delay_ms(50);
+                beep(50);
             }
         }
     }
@@ -2606,7 +2633,23 @@ void menu_handle_button(uint8_t press_type)
                 }
                 else if (current_menu == 1) // INPUT menu
                 {
-                    if (menu.current_line == menu.total_items - 1) // Back
+                    if (menu.current_line == menu.total_items - 2) // Save
+                    {
+                        if (save_pending)
+                        {
+                            save_current_config();
+                            save_pending = 0;
+                            beep(50);
+                            uart_println("INPUT: Config saved to EEPROM");
+                        }
+                        else
+                        {
+                            beep(50);
+                            uart_println("INPUT: No changes to save");
+                        }
+                        // Stay in current menu
+                    }
+                    else if (menu.current_line == menu.total_items - 1) // Back
                     {
                         beep(50);
                         current_menu = 2;
@@ -2757,10 +2800,26 @@ void menu_handle_button(uint8_t press_type)
                 {
                     char buf[50];
                     sprintf(buf, "CLOCK btn: line=%d, editable=%d", menu.current_line,
-                            menu.current_line < 5 ? clock_menu[menu.current_line].editable : 0);
+                            menu.current_line < menu.total_items ? clock_menu[menu.current_line].editable : 0);
                     uart_println(buf);
 
-                    if (menu.current_line == 4) // Back (now at index 4)
+                    if (menu.current_line == menu.total_items - 2) // Save
+                    {
+                        if (save_pending)
+                        {
+                            save_current_config();
+                            save_pending = 0;
+                            beep(50);
+                            uart_println("CLOCK: Config saved to EEPROM");
+                        }
+                        else
+                        {
+                            beep(50);
+                            uart_println("CLOCK: No changes to save");
+                        }
+                        // Stay in current menu
+                    }
+                    else if (menu.current_line == menu.total_items - 1) // Back
                     {
                         beep(50);
                         // Go back to SETUP menu
@@ -2870,7 +2929,23 @@ void menu_handle_button(uint8_t press_type)
                         menu_draw_utility();
                         uart_println("Editing Log Entries");
                     }
-                    else if (menu.current_line == 8) // Back
+                    else if (menu.current_line == menu.total_items - 2) // Save
+                    {
+                        if (save_pending)
+                        {
+                            save_current_config();
+                            save_pending = 0;
+                            beep(50);
+                            uart_println("UTILITY: Config saved to EEPROM");
+                        }
+                        else
+                        {
+                            beep(50);
+                            uart_println("UTILITY: No changes to save");
+                        }
+                        // Stay in current menu
+                    }
+                    else if (menu.current_line == menu.total_items - 1) // Back
                     {
                         beep(50);
                         // Go back to OPTIONS menu
