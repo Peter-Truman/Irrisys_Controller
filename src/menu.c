@@ -213,6 +213,7 @@ extern void save_current_config(void);
 extern void uart_println(const char *str);
 extern void lcd_clear(void);
 void handle_time_rotation(int8_t direction);
+void menu_draw_utility(void);
 
 //=============================================================================
 // CONTEXT-AWARE FIELD DETECTION FUNCTIONS
@@ -479,12 +480,6 @@ void init_time_editor(uint16_t value_seconds, uint8_t mode)
  */
 void handle_time_rotation(int8_t direction)
 {
-    uart_println("handle_time_rotation called!");
-
-    char buf[50];
-    sprintf(buf, "Rotate start: XX=%d, YY=%d, dir=%d, digit=%d",
-            menu.time_xx, menu.time_yy, direction, menu.time_edit_digit);
-    uart_println(buf);
 
     if (menu.time_edit_digit == 0) // Editing XX field
     {
@@ -493,6 +488,9 @@ void handle_time_rotation(int8_t direction)
             menu.time_xx++;
             // Special limit for Clock menu relay pulse (120 seconds = 2 minutes max)
             if (current_menu == 3 && menu.current_line == 2 && menu.time_xx > 2)
+                menu.time_xx = 0;
+            // Special limit for UTILITY Menu Timeout (240 seconds = 4 minutes max)
+            else if (current_menu == 4 && menu.current_line == 4 && menu.time_xx > 4)
                 menu.time_xx = 0;
             else if (menu.edit_time_mode == 2 && menu.time_xx > 23) // 24hr limit
                 menu.time_xx = 0;
@@ -506,6 +504,9 @@ void handle_time_rotation(int8_t direction)
                 // Special limit for Clock menu relay pulse
                 if (current_menu == 3 && menu.current_line == 2)
                     menu.time_xx = 2;
+                // Special limit for UTILITY Menu Timeout
+                else if (current_menu == 4 && menu.current_line == 4)
+                    menu.time_xx = 4;
                 else
                     menu.time_xx = (menu.edit_time_mode == 2) ? 23 : 99;
             }
@@ -525,6 +526,14 @@ void handle_time_rotation(int8_t direction)
             return; // Don't allow any changes
         }
 
+        // Special case: UTILITY Menu Timeout with minutes=4 cannot change seconds
+        if (current_menu == 4 && menu.current_line == 4 && menu.time_xx == 4)
+        {
+            // Seconds locked at 0 when minutes = 4 (240 second limit)
+            menu.time_yy = 0;
+            return; // Don't allow any changes
+        }
+
         if (direction > 0)
         {
             menu.time_yy++;
@@ -539,9 +548,6 @@ void handle_time_rotation(int8_t direction)
                 menu.time_yy--;
         }
     }
-
-    sprintf(buf, "Rotate end: XX=%d, YY=%d", menu.time_xx, menu.time_yy);
-    uart_println(buf);
 }
 
 /**
@@ -589,6 +595,14 @@ void menu_update_time_value(void)
     {
         sprintf(value_relay_pulse, "%s", value_buf);
         menu_draw_clock();
+        return;
+    }
+
+    // Handle UTILITY menu (Menu Timeout at line 4)
+    if (current_menu == 4 && menu.current_line == 4)
+    {
+        sprintf(value_menu_timeout, "%s", value_buf);
+        menu_draw_utility();
         return;
     }
 
@@ -1412,15 +1426,19 @@ void menu_draw_options(void)
 void menu_draw_input(void)
 {
     extern input_config_t input_config[3];
-
-    // Dynamic title showing which input
-    lcd_clear_line(0);
-    char title[10];
-    sprintf(title, "INPUT %d", current_input + 1);
-    lcd_print_at(0, 0, title);
+    char debug_buf[80];
 
     // Get sensor context for field detection
     uint8_t sensor_type = input_config[current_input].sensor_type;
+
+    // Dynamic title showing sensor type name
+    lcd_clear_line(0);
+    char title[20];
+    const char *sensor_name = (sensor_type == 0) ? "PRESSURE" : (sensor_type == 1) ? "TEMPERATURE" : "FLOW";
+    sprintf(title, "%s", sensor_name);
+    lcd_print_at(0, 0, title);
+    sprintf(debug_buf, "INPUT DRAW: row=0, col=0, text='%s'", sensor_name);
+    uart_println(debug_buf);
     uint8_t flow_type = input_config[current_input].flow_type;
 
     // Draw 3 visible items
@@ -1429,8 +1447,35 @@ void menu_draw_input(void)
         uint8_t item_idx = menu.top_line + i;
         lcd_clear_line(i + 1);
 
-        // Left side - label (no brackets)
+        // Check if this is an action item (Save/Back with empty value)
+        uint8_t is_action_item = (input_menu[item_idx].value == NULL || strcmp(input_menu[item_idx].value, "") == 0);
+        uint8_t is_selected = (item_idx == menu.current_line);
+
+        // Handle action items (Save/Back) - left-justified with brackets at col 0
+        if (is_action_item)
+        {
+            if (is_selected)
+            {
+                lcd_print_at(i + 1, 0, "[");
+                lcd_print_at(i + 1, 1, input_menu[item_idx].label);
+                lcd_print_at(i + 1, 1 + strlen(input_menu[item_idx].label), "]");
+                sprintf(debug_buf, "INPUT DRAW: row=%d, col=0, text='[', col=1, text='%s', col=%d, text=']'",
+                        i + 1, input_menu[item_idx].label, 1 + strlen(input_menu[item_idx].label));
+                uart_println(debug_buf);
+            }
+            else
+            {
+                lcd_print_at(i + 1, 1, input_menu[item_idx].label);
+                sprintf(debug_buf, "INPUT DRAW: row=%d, col=1, text='%s'", i + 1, input_menu[item_idx].label);
+                uart_println(debug_buf);
+            }
+            continue; // Skip value drawing for action items
+        }
+
+        // Left side - label (no brackets) for value items
         lcd_print_at(i + 1, 0, input_menu[item_idx].label);
+        sprintf(debug_buf, "INPUT DRAW: row=%d, col=0, text='%s'", i + 1, input_menu[item_idx].label);
+        uart_println(debug_buf);
 
         // Build and display the value (right-justified)
         char value_buf[15];
@@ -1518,6 +1563,8 @@ void menu_draw_input(void)
             {
                 // No brackets - value ends at column 19
                 lcd_print_at(i + 1, 19 - val_len, value_buf);
+                sprintf(debug_buf, "INPUT DRAW: row=%d, col=%d, text='%s'", i + 1, 19 - val_len, value_buf);
+                uart_println(debug_buf);
             }
             else
             {
@@ -1531,6 +1578,10 @@ void menu_draw_input(void)
                 lcd_print(value_buf);
                 // Print closing bracket immediately after
                 lcd_print(show_brackets == 1 ? "]" : ")");
+                sprintf(debug_buf, "INPUT DRAW: row=%d, col=%d, text='%c', col=%d, text='%s', col=19, text='%c'",
+                        i + 1, start_pos, (show_brackets == 1 ? '[' : '('),
+                        start_pos + 1, value_buf, (show_brackets == 1 ? ']' : ')'));
+                uart_println(debug_buf);
             }
         }
     }
@@ -1794,6 +1845,8 @@ void menu_draw_clock(void)
  */
 void menu_draw_utility(void)
 {
+    char debug_buf[80];
+
     // Fixed title line
     lcd_clear_line(0);
 
@@ -1801,6 +1854,7 @@ void menu_draw_utility(void)
     if (menu.in_datetime_submenu)
     {
         lcd_print_at(0, 0, "DATE and TIME");
+        uart_println("UTILITY DRAW: row=0, col=0, text='DATE and TIME'");
 
         menu_update_datetime_display();
 
@@ -1809,6 +1863,7 @@ void menu_draw_utility(void)
 
     // Normal UTILITY menu list
     lcd_print_at(0, 0, "UTILITY");
+    uart_println("UTILITY DRAW: row=0, col=0, text='UTILITY'");
 
     for (uint8_t i = 0; i < 3 && (menu.top_line + i) < menu.total_items; i++)
     {
@@ -1824,21 +1879,32 @@ void menu_draw_utility(void)
             if (is_selected)
             {
                 lcd_print_at(i + 1, 0, "[Set Clock]");
+                sprintf(debug_buf, "UTILITY DRAW: row=%d, col=0, text='[Set Clock]'", i + 1);
+                uart_println(debug_buf);
             }
             else
             {
                 lcd_print_at(i + 1, 1, "Set Clock");
+                sprintf(debug_buf, "UTILITY DRAW: row=%d, col=1, text='Set Clock'", i + 1);
+                uart_println(debug_buf);
             }
         }
-        else if (item_idx == 8) // Back - right-justified
+        else if (item_idx == 8 || item_idx == 9) // Save and Back - action items left-justified
         {
             if (is_selected)
             {
-                lcd_print_at(i + 1, 14, "[Back]");
+                lcd_print_at(i + 1, 0, "[");
+                lcd_print_at(i + 1, 1, utility_menu[item_idx].label);
+                lcd_print_at(i + 1, 1 + strlen(utility_menu[item_idx].label), "]");
+                sprintf(debug_buf, "UTILITY DRAW: row=%d, col=0, text='[', col=1, text='%s', col=%d, text=']'",
+                        i + 1, utility_menu[item_idx].label, 1 + strlen(utility_menu[item_idx].label));
+                uart_println(debug_buf);
             }
             else
             {
-                lcd_print_at(i + 1, 15, "Back");
+                lcd_print_at(i + 1, 1, utility_menu[item_idx].label);
+                sprintf(debug_buf, "UTILITY DRAW: row=%d, col=1, text='%s'", i + 1, utility_menu[item_idx].label);
+                uart_println(debug_buf);
             }
         }
         else if (item_idx == 1 || item_idx == 2) // View Log, Clear Log - action items
@@ -1848,16 +1914,23 @@ void menu_draw_utility(void)
                 lcd_print_at(i + 1, 0, "[");
                 lcd_print_at(i + 1, 1, utility_menu[item_idx].label);
                 lcd_print_at(i + 1, 1 + strlen(utility_menu[item_idx].label), "]");
+                sprintf(debug_buf, "UTILITY DRAW: row=%d, col=0, text='[', col=1, text='%s', col=%d, text=']'",
+                        i + 1, utility_menu[item_idx].label, 1 + strlen(utility_menu[item_idx].label));
+                uart_println(debug_buf);
             }
             else
             {
                 lcd_print_at(i + 1, 1, utility_menu[item_idx].label);
+                sprintf(debug_buf, "UTILITY DRAW: row=%d, col=1, text='%s'", i + 1, utility_menu[item_idx].label);
+                uart_println(debug_buf);
             }
         }
         else // Items 3-7 - label left, value right
         {
             // Print label at column 1
             lcd_print_at(i + 1, 1, utility_menu[item_idx].label);
+            sprintf(debug_buf, "UTILITY DRAW: row=%d, col=1, text='%s'", i + 1, utility_menu[item_idx].label);
+            uart_println(debug_buf);
 
             // Print value right-justified with optional brackets
             if (utility_menu[item_idx].value != NULL && strlen(utility_menu[item_idx].value) > 0)
@@ -1869,7 +1942,12 @@ void menu_draw_utility(void)
                 {
                     show_brackets = menu.in_edit_mode ? 2 : 1;
 
-                    if (menu.in_edit_mode && menu.blink_state == 0)
+                    // For time fields (Menu T/O at line 4), use value as-is (already formatted with selective blanking)
+                    if (menu.in_edit_mode && item_idx == 4)
+                    {
+                        strcpy(value_buf, utility_menu[item_idx].value);
+                    }
+                    else if (menu.in_edit_mode && menu.blink_state == 0)
                     {
                         uint8_t len = strlen(utility_menu[item_idx].value);
                         for (uint8_t j = 0; j < len; j++)
@@ -1892,6 +1970,8 @@ void menu_draw_utility(void)
                 {
                     // Not selected - value ends at column 19
                     lcd_print_at(i + 1, 19 - val_len, value_buf);
+                    sprintf(debug_buf, "UTILITY DRAW: row=%d, col=%d, text='%s'", i + 1, 19 - val_len, value_buf);
+                    uart_println(debug_buf);
                 }
                 else
                 {
@@ -1902,6 +1982,10 @@ void menu_draw_utility(void)
                     lcd_print(value_buf);
                     lcd_set_cursor(i + 1, 19);
                     lcd_print(show_brackets == 1 ? "]" : ")");
+                    sprintf(debug_buf, "UTILITY DRAW: row=%d, col=%d, text='%c', col=%d, text='%s', col=19, text='%c'",
+                            i + 1, start_pos, (show_brackets == 1 ? '[' : '('),
+                            start_pos + 1, value_buf, (show_brackets == 1 ? ']' : ')'));
+                    uart_println(debug_buf);
                 }
             }
         }
@@ -1987,6 +2071,14 @@ void menu_handle_encoder(int16_t delta)
                 }
 
                 return; // Exit early for clock menu
+            }
+
+            // Handle UTILITY menu Menu Timeout field (time field at line 4)
+            if (current_menu == 4 && !menu.in_datetime_submenu && menu.current_line == 4)
+            {
+                handle_time_rotation(delta > 0 ? 1 : -1);
+                menu_update_time_value();
+                return; // Exit early for UTILITY Menu Timeout
             }
 
             // INPUT menu handling (needs sensor context)
@@ -2243,6 +2335,51 @@ void menu_handle_button(uint8_t press_type)
                 return; // Exit early for CLOCK menu
             }
 
+            // Handle UTILITY menu Menu Timeout field (time field at line 4)
+            if (current_menu == 4 && !menu.in_datetime_submenu && menu.current_line == 4)
+            {
+                extern system_config_t system_config;
+                extern uint8_t save_pending;
+
+                menu.time_edit_digit++;
+                menu.blink_state = 1;
+
+                // If moving from minutes to seconds and minutes=4, force seconds to 0 (240 sec limit)
+                if (menu.time_edit_digit == 1 && menu.time_xx == 4)
+                {
+                    menu.time_yy = 0;
+                }
+
+                beep(50);
+
+                menu_update_time_value();
+
+                if (menu.time_edit_digit > 1)
+                {
+                    uint16_t new_seconds = menu.time_xx * 60 + menu.time_yy;
+
+                    // Clamp to valid range (10-240 seconds)
+                    if (new_seconds < 10)
+                        new_seconds = 10;
+                    if (new_seconds > 240)
+                        new_seconds = 240;
+
+                    system_config.menu_timeout = (uint8_t)new_seconds;
+                    sprintf(value_menu_timeout, "%02d:%02d",
+                            system_config.menu_timeout / 60,
+                            system_config.menu_timeout % 60);
+
+                    save_pending = 1;
+                    menu.in_edit_mode = 0;
+                    beep(50);
+                    __delay_ms(50);
+                    beep(50);
+                    menu_draw_utility(); // Redraw with square brackets
+                }
+
+                return; // Exit early for UTILITY Menu Timeout field
+            }
+
             // Handle UTILITY menu numeric fields (Log Entries, Contrast, etc.)
             if (current_menu == 4 && !menu.in_datetime_submenu)
             {
@@ -2364,6 +2501,7 @@ void menu_handle_button(uint8_t press_type)
 
                     // IMPORTANT: Rebuild menu when sensor type changes
                     rebuild_input_menu(current_input);
+                    menu_draw_input(); // Redraw with new sensor name and items
                 }
                 else if (menu.current_line == 2 && sensor_type == 2) // Flow Type
                 {
@@ -2371,6 +2509,7 @@ void menu_handle_button(uint8_t press_type)
 
                     // IMPORTANT: Rebuild menu when flow type changes
                     rebuild_input_menu(current_input);
+                    menu_draw_input(); // Redraw with updated menu items
                 }
                 else if (menu.current_line == 3 && sensor_type == 2 && flow_type == 1) // No Flow
                 {
@@ -2431,10 +2570,6 @@ void menu_handle_button(uint8_t press_type)
             menu.blink_state = 1;
             beep(50);
 
-            char buf[50];
-            sprintf(buf, "Time button: digit now=%d", menu.time_edit_digit);
-            uart_println(buf);
-
             menu_update_time_value();
 
             if (menu.time_edit_digit > 1)
@@ -2478,7 +2613,6 @@ void menu_handle_button(uint8_t press_type)
                 beep(50);
                 __delay_ms(50);
                 beep(50);
-                uart_println("Time edit complete - saved");
             }
         }
         // Handle numeric fields
@@ -2731,10 +2865,6 @@ void menu_handle_button(uint8_t press_type)
                                     current_val = input_config[current_input].low_flow_bypass;
                             }
 
-                            char buf[50];
-                            sprintf(buf, "Init time editor: seconds=%d, line=%d", current_val, menu.current_line);
-                            uart_println(buf);
-
                             init_time_editor(current_val, 0);
                             menu.in_edit_mode = 1;
                             menu.blink_state = 1;
@@ -2928,6 +3058,27 @@ void menu_handle_button(uint8_t press_type)
                         menu.blink_state = 1;
                         menu_draw_utility();
                         uart_println("Editing Log Entries");
+                    }
+                    else if (menu.current_line == 4) // Menu T/O - Time field
+                    {
+                        beep(50);
+                        extern system_config_t system_config;
+                        uint16_t current_val = system_config.menu_timeout;
+
+                        char buf[80];
+                        sprintf(buf, ">>> UTILITY ENTER EDIT: line=%d, current_value=%d seconds", menu.current_line, current_val);
+                        uart_println(buf);
+
+                        init_time_editor(current_val, 0);
+
+                        sprintf(buf, ">>> After init_time_editor: time_edit_digit=%d, time_xx=%d, time_yy=%d",
+                                menu.time_edit_digit, menu.time_xx, menu.time_yy);
+                        uart_println(buf);
+
+                        menu.in_edit_mode = 1;
+                        menu.blink_state = 1;
+
+                        uart_println(">>> UTILITY ENTER EDIT COMPLETE");
                     }
                     else if (menu.current_line == menu.total_items - 2) // Save
                     {
