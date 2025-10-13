@@ -10,6 +10,7 @@
 #include "../include/eeprom.h"
 #include "../include/i2c.h"
 #include "../include/rtc.h"
+#include "../include/pca9535.h"
 #include "ad7994.h"
 #include <stdio.h>
 
@@ -196,6 +197,11 @@ void main(void)
     uart_println("Initializing I2C...");
     i2c_init();
     uart_println("I2C initialized");
+
+    // Initialize PCA9535 I/O Expander (LEDs) - run Knight Rider ASAP for visual feedback
+    pca9535_init();
+    pca9535_led_init();
+    pca9535_led_test(); // Knight Rider sequence (~4 seconds)
 
     // Initialize RTC (includes 2-second power-up delay)
     uart_println("Initializing RTC (2-second delay)...");
@@ -476,12 +482,30 @@ void main(void)
                 {
                     if (current_event == 1) // Short press
                     {
-                        current_menu = 0; // Enter OPTIONS menu
-                        menu.current_line = 0;
-                        menu.top_line = 0;
-                        menu.total_items = 5;
-                        menu_draw_options();
-                        beep(50);
+                        // Check if power failure flag is set
+                        extern system_config_t system_config;
+                        extern void save_current_config(void);
+
+                        if (system_config.power_failure_flag == 1)
+                        {
+                            // Clear power failure flag and save to EEPROM
+                            system_config.power_failure_flag = 0;
+                            save_current_config();
+                            uart_println("Power failure flag cleared and saved");
+                            beep(50);
+                            __delay_ms(50);
+                            beep(50); // Double beep to confirm
+                        }
+                        else
+                        {
+                            // Normal operation - enter OPTIONS menu
+                            current_menu = 0; // Enter OPTIONS menu
+                            menu.current_line = 0;
+                            menu.top_line = 0;
+                            menu.total_items = 5;
+                            menu_draw_options();
+                            beep(50);
+                        }
                     }
                 }
                 else
@@ -651,6 +675,10 @@ void main(void)
             beep(500); // Half second beep as feedback
             uart_println("Long press threshold reached - beep");
         }
+
+        // Update power LED status (solid ON or flashing at 1Hz based on power_failure_flag)
+        pca9535_update_power_led();
+
         // Auto-save removed - user must explicitly select "Save" menu item
         // save_pending flag is only cleared when:
         // 1. User selects "Save" in menu (saves to EEPROM)

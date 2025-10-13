@@ -58,10 +58,11 @@ typedef struct
     uint8_t reserved_time[8];
 
     // Display settings (16 bytes)
-    uint8_t contrast;          // LCD contrast (3-10)
-    uint8_t brightness;        // LCD brightness (3-10)
-    uint16_t power_fail_delay; // Power fail delay (seconds)
-    uint8_t reserved_display[12];
+    uint8_t contrast;           // LCD contrast (3-10)
+    uint8_t brightness;         // LCD brightness (3-10)
+    uint16_t power_fail_delay;  // Power fail delay (seconds)
+    uint8_t power_failure_flag; // 1=power failure occurred, 0=normal
+    uint8_t reserved_display[11];
 
     // Logging (16 bytes)
     uint16_t log_entries; // Number of log entries to store

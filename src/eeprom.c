@@ -82,10 +82,11 @@ const system_config_t system_defaults = {
     5,
     5,
     60,
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, // contrast=5, brightness=5, power fail=60s
+    1,                                            // power_failure_flag = 1 (TEST MODE - flash PWR LED)
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},           // contrast=5, brightness=5, power fail=60s
     100,
     {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, // 100 log entries
-    {0}                                         // padding
+    {0}                                          // padding
 };
 
 // Calculate checksum for data integrity
