@@ -106,8 +106,8 @@ static char value_clock_display[10] = "Show";
 // Dynamic input menu - will be populated based on sensor type
 menu_item_t input_menu[16]; // Max 16 items to cover all cases (pressure with Save)
 
-// Clock menu - static 6 items (with Save)
-menu_item_t clock_menu[6];
+// Clock menu - static 5 items (with Save)
+menu_item_t clock_menu[5];
 
 // Menu template for PRESSURE sensor
 const menu_item_t pressure_menu_template[] = {
@@ -173,12 +173,11 @@ const menu_item_t flow_analog_template[] = {
 
 // Menu template for CLOCK configuration
 const menu_item_t clock_menu_template[] = {
-    {"Enable", NULL, 1},    // 0
-    {"End Run", NULL, 1},   // 1
-    {"Rly Pulse", NULL, 1}, // 2
-    {"Display", NULL, 1},   // 3
-    {"Save", NULL, 0},      // 4 - Action: save to EEPROM
-    {"Back", NULL, 0}       // 5
+    {"Enable", NULL, 1},      // 0
+    {"Rly Endrun", NULL, 1},  // 1
+    {"Display", NULL, 1},     // 2
+    {"Save", NULL, 0},        // 3 - Action: save to EEPROM
+    {"Back", NULL, 0}         // 4
 };
 
 // Menu template for UTILITY configuration
@@ -188,15 +187,16 @@ const menu_item_t utility_menu_template[] = {
     {"Clear Log", NULL, 0},   // 2 - Action: clears log
     {"Log Entries", NULL, 1}, // 3 - Numeric edit
     {"Menu T/O", NULL, 1},    // 4 - Time edit MM:SS
-    {"Contrast", NULL, 1},    // 5 - Numeric edit
-    {"Brightness", NULL, 1},  // 6 - Numeric edit
-    {"Pwr Detect", NULL, 1},  // 7 - Time edit MM:SS
-    {"Save", NULL, 0},        // 8 - Action: save to EEPROM
-    {"Back", NULL, 0}         // 9
+    {"Pwr Detect", NULL, 1},  // 5 - Time edit MM:SS
+    {"Contrast", NULL, 1},    // 6 - Numeric edit
+    {"Brightness", NULL, 1},  // 7 - Numeric edit
+    {"Rly Pulse", NULL, 1},   // 8 - Time edit MM:SS
+    {"Save", NULL, 0},        // 9 - Action: save to EEPROM
+    {"Back", NULL, 0}         // 10
 };
 
 // Utility menu instance
-menu_item_t utility_menu[10];
+menu_item_t utility_menu[11];
 
 // Value buffers for utility menu items
 static char value_log_entries[6] = "10";
@@ -468,11 +468,6 @@ void init_time_editor(uint16_t value_seconds, uint8_t mode)
     // Start editing at first digit (tens of XX)
     menu.time_edit_digit = 0;
 
-    // DEBUG: Print conversion results
-    char buf[60];
-    sprintf(buf, "Time init: secs=%d -> XX=%d, YY=%d",
-            value_seconds, menu.time_xx, menu.time_yy);
-    uart_println(buf);
 }
 
 /**
@@ -486,11 +481,11 @@ void handle_time_rotation(int8_t direction)
         if (direction > 0)
         {
             menu.time_xx++;
-            // Special limit for Clock menu relay pulse (120 seconds = 2 minutes max)
-            if (current_menu == 3 && menu.current_line == 2 && menu.time_xx > 2)
+            // Special limit for UTILITY Rly Pulse (120 seconds = 2 minutes max)
+            if (current_menu == 4 && menu.current_line == 8 && menu.time_xx > 2)
                 menu.time_xx = 0;
-            // Special limit for UTILITY Menu Timeout (240 seconds = 4 minutes max)
-            else if (current_menu == 4 && menu.current_line == 4 && menu.time_xx > 4)
+            // Special limit for UTILITY Menu Timeout and Pwr Detect (240 seconds = 4 minutes max)
+            else if (current_menu == 4 && (menu.current_line == 4 || menu.current_line == 5) && menu.time_xx > 4)
                 menu.time_xx = 0;
             else if (menu.edit_time_mode == 2 && menu.time_xx > 23) // 24hr limit
                 menu.time_xx = 0;
@@ -501,11 +496,11 @@ void handle_time_rotation(int8_t direction)
         {
             if (menu.time_xx == 0)
             {
-                // Special limit for Clock menu relay pulse
-                if (current_menu == 3 && menu.current_line == 2)
+                // Special limit for UTILITY Rly Pulse
+                if (current_menu == 4 && menu.current_line == 8)
                     menu.time_xx = 2;
-                // Special limit for UTILITY Menu Timeout
-                else if (current_menu == 4 && menu.current_line == 4)
+                // Special limit for UTILITY Menu Timeout and Pwr Detect
+                else if (current_menu == 4 && (menu.current_line == 4 || menu.current_line == 5))
                     menu.time_xx = 4;
                 else
                     menu.time_xx = (menu.edit_time_mode == 2) ? 23 : 99;
@@ -518,16 +513,16 @@ void handle_time_rotation(int8_t direction)
     }
     else if (menu.time_edit_digit == 1) // Editing YY field
     {
-        // Special case: Clock menu relay pulse with minutes=2 cannot change seconds
-        if (current_menu == 3 && menu.current_line == 2 && menu.time_xx == 2)
+        // Special case: UTILITY Rly Pulse with minutes=2 cannot change seconds
+        if (current_menu == 4 && menu.current_line == 8 && menu.time_xx == 2)
         {
             // Seconds locked at 0 when minutes = 2 (120 second limit)
             menu.time_yy = 0;
             return; // Don't allow any changes
         }
 
-        // Special case: UTILITY Menu Timeout with minutes=4 cannot change seconds
-        if (current_menu == 4 && menu.current_line == 4 && menu.time_xx == 4)
+        // Special case: UTILITY time fields with minutes=4 cannot change seconds
+        if (current_menu == 4 && (menu.current_line == 4 || menu.current_line == 5) && menu.time_xx == 4)
         {
             // Seconds locked at 0 when minutes = 4 (240 second limit)
             menu.time_yy = 0;
@@ -590,20 +585,27 @@ void menu_update_time_value(void)
 
     value_buf[5] = '\0';
 
-    // Handle CLOCK menu (Rly Pulse at line 2)
-    if (current_menu == 3 && menu.current_line == 2)
+    // Handle UTILITY menu time fields
+    if (current_menu == 4)
     {
-        sprintf(value_relay_pulse, "%s", value_buf);
-        menu_draw_clock();
-        return;
-    }
-
-    // Handle UTILITY menu (Menu Timeout at line 4)
-    if (current_menu == 4 && menu.current_line == 4)
-    {
-        sprintf(value_menu_timeout, "%s", value_buf);
-        menu_draw_utility();
-        return;
+        if (menu.current_line == 4) // Menu Timeout
+        {
+            sprintf(value_menu_timeout, "%s", value_buf);
+            menu_draw_utility();
+            return;
+        }
+        else if (menu.current_line == 5) // Pwr Detect
+        {
+            sprintf(value_pwr_fail, "%s", value_buf);
+            menu_draw_utility();
+            return;
+        }
+        else if (menu.current_line == 8) // Rly Pulse
+        {
+            sprintf(value_relay_pulse, "%s", value_buf);
+            menu_draw_utility();
+            return;
+        }
     }
 
     // Handle INPUT menu time fields
@@ -660,8 +662,9 @@ void menu_update_time_value(void)
 void rebuild_utility_menu(void);
 
 /**
- * Handle rotation for UTILITY menu numeric fields (Log Entries)
- * Increments/decrements by 10, range 0-250
+ * Handle rotation for UTILITY menu numeric fields (Log Entries, Contrast, Brightness)
+ * Log Entries: Increments/decrements by 10, range 0-250
+ * Contrast/Brightness: Increments/decrements by 1, range 1-9
  */
 void handle_utility_numeric_rotation(int8_t direction)
 {
@@ -685,6 +688,46 @@ void handle_utility_numeric_rotation(int8_t direction)
 
         // Update display immediately
         rebuild_utility_menu();
+    }
+    else if (menu.current_line == 6) // Contrast (1-9)
+    {
+        if (direction > 0)
+        {
+            system_config.contrast++;
+            if (system_config.contrast > 9)
+                system_config.contrast = 1; // Wrap to 1
+        }
+        else
+        {
+            if (system_config.contrast <= 1)
+                system_config.contrast = 9; // Wrap to 9
+            else
+                system_config.contrast--;
+        }
+
+        // Update display immediately
+        sprintf(value_contrast, "%d", system_config.contrast);
+        menu_draw_utility();
+    }
+    else if (menu.current_line == 7) // Brightness (1-9)
+    {
+        if (direction > 0)
+        {
+            system_config.brightness++;
+            if (system_config.brightness > 9)
+                system_config.brightness = 1; // Wrap to 1
+        }
+        else
+        {
+            if (system_config.brightness <= 1)
+                system_config.brightness = 9; // Wrap to 9
+            else
+                system_config.brightness--;
+        }
+
+        // Update display immediately
+        sprintf(value_brightness, "%d", system_config.brightness);
+        menu_draw_utility();
     }
 }
 
@@ -1115,11 +1158,6 @@ void rebuild_input_menu(uint8_t input_num)
         }
     }
 
-    // DEBUG: Verify total items
-    char buf[50];
-    sprintf(buf, "Menu rebuilt: sensor=%d, flow_type=%d, items=%d",
-            sensor, flow_type_val, menu.total_items);
-    uart_println(buf);
 }
 
 //=============================================================================
@@ -1185,12 +1223,6 @@ int16_t get_current_numeric_value(void)
 
 void handle_numeric_rotation(int8_t direction)
 {
-    uart_println("handle_numeric_rotation called");
-
-    char buf[50];
-    sprintf(buf, "edit_digit: %d, unsigned: %d", menu.edit_digit, menu.edit_unsigned);
-    uart_println(buf);
-
     // Skip sign position for unsigned fields
     if (menu.edit_unsigned && menu.edit_digit == 0)
     {
@@ -1426,7 +1458,6 @@ void menu_draw_options(void)
 void menu_draw_input(void)
 {
     extern input_config_t input_config[3];
-    char debug_buf[80];
 
     // Get sensor context for field detection
     uint8_t sensor_type = input_config[current_input].sensor_type;
@@ -1437,8 +1468,6 @@ void menu_draw_input(void)
     const char *sensor_name = (sensor_type == 0) ? "PRESSURE" : (sensor_type == 1) ? "TEMPERATURE" : "FLOW";
     sprintf(title, "%s", sensor_name);
     lcd_print_at(0, 0, title);
-    sprintf(debug_buf, "INPUT DRAW: row=0, col=0, text='%s'", sensor_name);
-    uart_println(debug_buf);
     uint8_t flow_type = input_config[current_input].flow_type;
 
     // Draw 3 visible items
@@ -1459,23 +1488,16 @@ void menu_draw_input(void)
                 lcd_print_at(i + 1, 0, "[");
                 lcd_print_at(i + 1, 1, input_menu[item_idx].label);
                 lcd_print_at(i + 1, 1 + strlen(input_menu[item_idx].label), "]");
-                sprintf(debug_buf, "INPUT DRAW: row=%d, col=0, text='[', col=1, text='%s', col=%d, text=']'",
-                        i + 1, input_menu[item_idx].label, 1 + strlen(input_menu[item_idx].label));
-                uart_println(debug_buf);
             }
             else
             {
                 lcd_print_at(i + 1, 1, input_menu[item_idx].label);
-                sprintf(debug_buf, "INPUT DRAW: row=%d, col=1, text='%s'", i + 1, input_menu[item_idx].label);
-                uart_println(debug_buf);
             }
             continue; // Skip value drawing for action items
         }
 
         // Left side - label (no brackets) for value items
         lcd_print_at(i + 1, 0, input_menu[item_idx].label);
-        sprintf(debug_buf, "INPUT DRAW: row=%d, col=0, text='%s'", i + 1, input_menu[item_idx].label);
-        uart_println(debug_buf);
 
         // Build and display the value (right-justified)
         char value_buf[15];
@@ -1563,8 +1585,6 @@ void menu_draw_input(void)
             {
                 // No brackets - value ends at column 19
                 lcd_print_at(i + 1, 19 - val_len, value_buf);
-                sprintf(debug_buf, "INPUT DRAW: row=%d, col=%d, text='%s'", i + 1, 19 - val_len, value_buf);
-                uart_println(debug_buf);
             }
             else
             {
@@ -1578,10 +1598,6 @@ void menu_draw_input(void)
                 lcd_print(value_buf);
                 // Print closing bracket immediately after
                 lcd_print(show_brackets == 1 ? "]" : ")");
-                sprintf(debug_buf, "INPUT DRAW: row=%d, col=%d, text='%c', col=%d, text='%s', col=19, text='%c'",
-                        i + 1, start_pos, (show_brackets == 1 ? '[' : '('),
-                        start_pos + 1, value_buf, (show_brackets == 1 ? ']' : ')'));
-                uart_println(debug_buf);
             }
         }
     }
@@ -1671,11 +1687,6 @@ void rebuild_clock_menu(void)
 {
     extern system_config_t system_config;
 
-    // Debug: Show what we're loading
-    char buf[50];
-    sprintf(buf, "Rebuild clock: enabled=%d, mode=%d", system_config.clock_enabled, system_config.end_runtime_mode);
-    uart_println(buf);
-
     // Load current values from system_config in RAM
     sprintf(value_clock_enable, "%s", system_config.clock_enabled ? "Enabled" : "Disabled");
     strcpy(value_end_runtime, system_config.end_runtime_mode == 0 ? "Latch" : system_config.end_runtime_mode == 1 ? "Pulse"
@@ -1688,24 +1699,17 @@ void rebuild_clock_menu(void)
 
     strcpy(value_clock_display, "Show"); // TODO: Add to system_config if needed
 
-    sprintf(buf, "Values: enable='%s', runtime='%s', pulse='%s'", value_clock_enable, value_end_runtime, value_relay_pulse);
-    uart_println(buf);
-
     // Copy template
     memcpy(clock_menu, clock_menu_template, sizeof(clock_menu_template));
 
     // Assign value pointers
     clock_menu[0].value = value_clock_enable;
     clock_menu[1].value = value_end_runtime;
-    clock_menu[2].value = value_relay_pulse;
-    clock_menu[3].value = value_clock_display;
-    clock_menu[4].value = "";    // Save - no value displayed
-    clock_menu[5].value = "";    // Back - no value displayed
+    clock_menu[2].value = value_clock_display;
+    clock_menu[3].value = "";    // Save - no value displayed
+    clock_menu[4].value = "";    // Back - no value displayed
 
-    menu.total_items = 6;
-
-    sprintf(buf, "Clock menu rebuilt: %d items", menu.total_items);
-    uart_println(buf);
+    menu.total_items = 5;
 }
 
 /**
@@ -1716,7 +1720,7 @@ void rebuild_utility_menu(void)
     extern system_config_t system_config;
 
     // Copy template
-    for (uint8_t i = 0; i < 10; i++)
+    for (uint8_t i = 0; i < 11; i++)
     {
         utility_menu[i].label = utility_menu_template[i].label;
         utility_menu[i].editable = utility_menu_template[i].editable;
@@ -1728,11 +1732,12 @@ void rebuild_utility_menu(void)
     utility_menu[2].value = ""; // Clear Log - no value
     utility_menu[3].value = value_log_entries;
     utility_menu[4].value = value_menu_timeout;
-    utility_menu[5].value = value_contrast;
-    utility_menu[6].value = value_brightness;
-    utility_menu[7].value = value_pwr_fail;
-    utility_menu[8].value = ""; // Save - no value displayed
-    utility_menu[9].value = ""; // Back - no value displayed
+    utility_menu[5].value = value_pwr_fail;
+    utility_menu[6].value = value_contrast;
+    utility_menu[7].value = value_brightness;
+    utility_menu[8].value = value_relay_pulse;
+    utility_menu[9].value = ""; // Save - no value displayed
+    utility_menu[10].value = ""; // Back - no value displayed
 
     // Sync from system_config
     sprintf(value_log_entries, "%d", system_config.log_entries);
@@ -1744,8 +1749,11 @@ void rebuild_utility_menu(void)
     sprintf(value_pwr_fail, "%02d:%02d",
             system_config.power_fail_delay / 60,
             system_config.power_fail_delay % 60);
+    sprintf(value_relay_pulse, "%02d:%02d",
+            system_config.relay_pulse_time / 60,
+            system_config.relay_pulse_time % 60);
 
-    menu.total_items = 10;
+    menu.total_items = 11;
 }
 
 /**
@@ -1763,7 +1771,25 @@ void menu_draw_clock(void)
         uint8_t item_idx = menu.top_line + i;
         lcd_clear_line(i + 1);
 
-        // Left side - label
+        uint8_t is_selected = (item_idx == menu.current_line);
+
+        // Handle Save and Back items (3 and 4) - action items left-justified
+        if (item_idx == 3 || item_idx == 4)
+        {
+            if (is_selected)
+            {
+                lcd_print_at(i + 1, 0, "[");
+                lcd_print_at(i + 1, 1, clock_menu[item_idx].label);
+                lcd_print_at(i + 1, 1 + strlen(clock_menu[item_idx].label), "]");
+            }
+            else
+            {
+                lcd_print_at(i + 1, 1, clock_menu[item_idx].label);
+            }
+            continue; // Skip value drawing for action items
+        }
+
+        // Left side - label for value items (Enable, Rly Endrun, Display)
         lcd_print_at(i + 1, 0, clock_menu[item_idx].label);
 
         // Build and display the value (right-justified)
@@ -1777,7 +1803,7 @@ void menu_draw_clock(void)
                 show_brackets = 2; // Use parentheses in edit mode
 
                 // Handle blinking for option fields (Enable, End Run, Display)
-                if (item_idx != 2) // Not the time field (Rly Pulse)
+                if (item_idx <= 2) // All are option fields now
                 {
                     if (menu.blink_state)
                     {
@@ -1845,8 +1871,6 @@ void menu_draw_clock(void)
  */
 void menu_draw_utility(void)
 {
-    char debug_buf[80];
-
     // Fixed title line
     lcd_clear_line(0);
 
@@ -1854,7 +1878,6 @@ void menu_draw_utility(void)
     if (menu.in_datetime_submenu)
     {
         lcd_print_at(0, 0, "DATE and TIME");
-        uart_println("UTILITY DRAW: row=0, col=0, text='DATE and TIME'");
 
         menu_update_datetime_display();
 
@@ -1863,7 +1886,6 @@ void menu_draw_utility(void)
 
     // Normal UTILITY menu list
     lcd_print_at(0, 0, "UTILITY");
-    uart_println("UTILITY DRAW: row=0, col=0, text='UTILITY'");
 
     for (uint8_t i = 0; i < 3 && (menu.top_line + i) < menu.total_items; i++)
     {
@@ -1879,32 +1901,23 @@ void menu_draw_utility(void)
             if (is_selected)
             {
                 lcd_print_at(i + 1, 0, "[Set Clock]");
-                sprintf(debug_buf, "UTILITY DRAW: row=%d, col=0, text='[Set Clock]'", i + 1);
-                uart_println(debug_buf);
             }
             else
             {
                 lcd_print_at(i + 1, 1, "Set Clock");
-                sprintf(debug_buf, "UTILITY DRAW: row=%d, col=1, text='Set Clock'", i + 1);
-                uart_println(debug_buf);
             }
         }
-        else if (item_idx == 8 || item_idx == 9) // Save and Back - action items left-justified
+        else if (item_idx == 9 || item_idx == 10) // Save and Back - action items left-justified
         {
             if (is_selected)
             {
                 lcd_print_at(i + 1, 0, "[");
                 lcd_print_at(i + 1, 1, utility_menu[item_idx].label);
                 lcd_print_at(i + 1, 1 + strlen(utility_menu[item_idx].label), "]");
-                sprintf(debug_buf, "UTILITY DRAW: row=%d, col=0, text='[', col=1, text='%s', col=%d, text=']'",
-                        i + 1, utility_menu[item_idx].label, 1 + strlen(utility_menu[item_idx].label));
-                uart_println(debug_buf);
             }
             else
             {
                 lcd_print_at(i + 1, 1, utility_menu[item_idx].label);
-                sprintf(debug_buf, "UTILITY DRAW: row=%d, col=1, text='%s'", i + 1, utility_menu[item_idx].label);
-                uart_println(debug_buf);
             }
         }
         else if (item_idx == 1 || item_idx == 2) // View Log, Clear Log - action items
@@ -1914,23 +1927,16 @@ void menu_draw_utility(void)
                 lcd_print_at(i + 1, 0, "[");
                 lcd_print_at(i + 1, 1, utility_menu[item_idx].label);
                 lcd_print_at(i + 1, 1 + strlen(utility_menu[item_idx].label), "]");
-                sprintf(debug_buf, "UTILITY DRAW: row=%d, col=0, text='[', col=1, text='%s', col=%d, text=']'",
-                        i + 1, utility_menu[item_idx].label, 1 + strlen(utility_menu[item_idx].label));
-                uart_println(debug_buf);
             }
             else
             {
                 lcd_print_at(i + 1, 1, utility_menu[item_idx].label);
-                sprintf(debug_buf, "UTILITY DRAW: row=%d, col=1, text='%s'", i + 1, utility_menu[item_idx].label);
-                uart_println(debug_buf);
             }
         }
         else // Items 3-7 - label left, value right
         {
             // Print label at column 1
             lcd_print_at(i + 1, 1, utility_menu[item_idx].label);
-            sprintf(debug_buf, "UTILITY DRAW: row=%d, col=1, text='%s'", i + 1, utility_menu[item_idx].label);
-            uart_println(debug_buf);
 
             // Print value right-justified with optional brackets
             if (utility_menu[item_idx].value != NULL && strlen(utility_menu[item_idx].value) > 0)
@@ -1942,8 +1948,8 @@ void menu_draw_utility(void)
                 {
                     show_brackets = menu.in_edit_mode ? 2 : 1;
 
-                    // For time fields (Menu T/O at line 4), use value as-is (already formatted with selective blanking)
-                    if (menu.in_edit_mode && item_idx == 4)
+                    // For time fields (Menu T/O at line 4, Pwr Detect at line 5, Rly Pulse at line 8), use value as-is (already formatted with selective blanking)
+                    if (menu.in_edit_mode && (item_idx == 4 || item_idx == 5 || item_idx == 8))
                     {
                         strcpy(value_buf, utility_menu[item_idx].value);
                     }
@@ -1970,8 +1976,6 @@ void menu_draw_utility(void)
                 {
                     // Not selected - value ends at column 19
                     lcd_print_at(i + 1, 19 - val_len, value_buf);
-                    sprintf(debug_buf, "UTILITY DRAW: row=%d, col=%d, text='%s'", i + 1, 19 - val_len, value_buf);
-                    uart_println(debug_buf);
                 }
                 else
                 {
@@ -1982,10 +1986,6 @@ void menu_draw_utility(void)
                     lcd_print(value_buf);
                     lcd_set_cursor(i + 1, 19);
                     lcd_print(show_brackets == 1 ? "]" : ")");
-                    sprintf(debug_buf, "UTILITY DRAW: row=%d, col=%d, text='%c', col=%d, text='%s', col=19, text='%c'",
-                            i + 1, start_pos, (show_brackets == 1 ? '[' : '('),
-                            start_pos + 1, value_buf, (show_brackets == 1 ? ']' : ')'));
-                    uart_println(debug_buf);
                 }
             }
         }
@@ -2011,15 +2011,7 @@ void menu_handle_encoder(int16_t delta)
                 sprintf(buf, "CLOCK edit rotate: line=%d, delta=%d", menu.current_line, delta);
                 uart_println(buf);
 
-                // Rly Pulse is a TIME field (line 2)
-                if (menu.current_line == 2)
-                {
-                    // Handle time rotation for relay pulse
-                    handle_time_rotation(delta);
-                    menu_update_time_value(); // Update display immediately
-                    return;                   // Exit early - time field handled
-                }
-                // CLOCK menu option field editing (lines 0, 1, 3)
+                // CLOCK menu option field editing (lines 0, 1, 2)
                 const item_options_t *clock_opts = NULL;
                 uint8_t *clock_flag = NULL;
 
@@ -2033,7 +2025,7 @@ void menu_handle_encoder(int16_t delta)
                     clock_opts = &menu_item_options[OPT_RELAY_MODE];
                     clock_flag = &relay_high_edit_flag;
                 }
-                else if (menu.current_line == 3) // Display
+                else if (menu.current_line == 2) // Display
                 {
                     clock_opts = &menu_item_options[OPT_DISPLAY];
                     clock_flag = &display_edit_flag;
@@ -2073,12 +2065,12 @@ void menu_handle_encoder(int16_t delta)
                 return; // Exit early for clock menu
             }
 
-            // Handle UTILITY menu Menu Timeout field (time field at line 4)
-            if (current_menu == 4 && !menu.in_datetime_submenu && menu.current_line == 4)
+            // Handle UTILITY menu time fields (Menu Timeout at line 4, Pwr Detect at line 5, Rly Pulse at line 8)
+            if (current_menu == 4 && !menu.in_datetime_submenu && (menu.current_line == 4 || menu.current_line == 5 || menu.current_line == 8))
             {
                 handle_time_rotation(delta > 0 ? 1 : -1);
                 menu_update_time_value();
-                return; // Exit early for UTILITY Menu Timeout
+                return; // Exit early for UTILITY time fields
             }
 
             // INPUT menu handling (needs sensor context)
@@ -2154,11 +2146,6 @@ void menu_handle_encoder(int16_t delta)
     // Normal navigation when not in edit mode
     if (delta > 0)
     {
-        // Debug navigation
-        char buf[50];
-        sprintf(buf, "Nav DOWN: menu=%d, line=%d, total=%d", current_menu, menu.current_line, menu.total_items);
-        uart_println(buf);
-
         // Clockwise - move down
         if (menu.current_line < menu.total_items - 1)
         {
@@ -2170,17 +2157,9 @@ void menu_handle_encoder(int16_t delta)
                 menu.top_line++;
             }
         }
-
-        sprintf(buf, "After DOWN: line=%d, top=%d", menu.current_line, menu.top_line);
-        uart_println(buf);
     }
     else if (delta < 0)
     {
-        // Debug navigation
-        char buf[50];
-        sprintf(buf, "Nav UP: menu=%d, line=%d, total=%d", current_menu, menu.current_line, menu.total_items);
-        uart_println(buf);
-
         // Counter-clockwise - move up
         if (menu.current_line > 0)
         {
@@ -2192,9 +2171,6 @@ void menu_handle_encoder(int16_t delta)
                 menu.top_line--;
             }
         }
-
-        sprintf(buf, "After UP: line=%d, top=%d", menu.current_line, menu.top_line);
-        uart_println(buf);
     }
 
     // Redraw the appropriate menu after navigation
@@ -2255,65 +2231,7 @@ void menu_handle_button(uint8_t press_type)
                     sprintf(buf, "Saved end_runtime_mode = %d", system_config.end_runtime_mode);
                     uart_println(buf);
                 }
-                else if (menu.current_line == 2) // Rly Pulse - TIME FIELD
-                {
-                    // Advance to next digit
-                    menu.time_edit_digit++;
-                    menu.blink_state = 1;
-
-                    // If moving from minutes to seconds and minutes=2, force seconds to 0 (120 sec limit)
-                    if (menu.time_edit_digit == 1 && menu.time_xx == 2)
-                    {
-                        menu.time_yy = 0;
-                    }
-
-                    beep(50);
-
-                    sprintf(buf, "Time button: digit now=%d", menu.time_edit_digit);
-                    uart_println(buf);
-
-                    // Update display buffer
-                    sprintf(value_relay_pulse, "%02d:%02d", menu.time_xx, menu.time_yy);
-                    menu_draw_clock();
-
-                    if (menu.time_edit_digit > 1)
-                    {
-                        // Calculate total seconds from time editor (MM:SS format)
-                        uint16_t new_value = (menu.time_xx * 60) + menu.time_yy;
-
-                        // Clamp to valid range (1-120 seconds)
-                        if (new_value < 1)
-                            new_value = 1;
-                        if (new_value > 120)
-                            new_value = 120;
-
-                        system_config.relay_pulse_time = (uint8_t)new_value;
-                        sprintf(value_relay_pulse, "%02d:%02d",
-                                system_config.relay_pulse_time / 60,
-                                system_config.relay_pulse_time % 60);
-                        strcpy(clock_menu[2].value, value_relay_pulse);
-
-                        sprintf(buf, "Saved relay_pulse_time = %d sec", system_config.relay_pulse_time);
-                        uart_println(buf);
-                        save_pending = 1;
-                        menu.in_edit_mode = 0;
-                        beep(50);
-                        __delay_ms(50);
-                        beep(50);
-                        menu_draw_clock(); // Redraw with square brackets
-
-                        // TEST: Trigger relay pulse
-                        extern void trigger_relay_pulse(uint8_t latch_mode);
-                        trigger_relay_pulse(0); // 0 = pulse mode for testing
-                    }
-                    else
-                    {
-                        return; // Stay in edit mode, don't exit yet
-                    }
-
-                    return; // Exit early for time field
-                }
-                else if (menu.current_line == 3) // Display
+                else if (menu.current_line == 2) // Display
                 {
                     opts = &menu_item_options[OPT_DISPLAY];
                     edit_flag = &display_edit_flag;
@@ -2335,8 +2253,8 @@ void menu_handle_button(uint8_t press_type)
                 return; // Exit early for CLOCK menu
             }
 
-            // Handle UTILITY menu Menu Timeout field (time field at line 4)
-            if (current_menu == 4 && !menu.in_datetime_submenu && menu.current_line == 4)
+            // Handle UTILITY menu time fields (Menu Timeout at line 4, Pwr Detect at line 5, Rly Pulse at line 8)
+            if (current_menu == 4 && !menu.in_datetime_submenu && (menu.current_line == 4 || menu.current_line == 5 || menu.current_line == 8))
             {
                 extern system_config_t system_config;
                 extern uint8_t save_pending;
@@ -2358,16 +2276,33 @@ void menu_handle_button(uint8_t press_type)
                 {
                     uint16_t new_seconds = menu.time_xx * 60 + menu.time_yy;
 
-                    // Clamp to valid range (10-240 seconds)
+                    // Clamp to valid range (10-240 seconds for both fields)
                     if (new_seconds < 10)
                         new_seconds = 10;
                     if (new_seconds > 240)
                         new_seconds = 240;
 
-                    system_config.menu_timeout = (uint8_t)new_seconds;
-                    sprintf(value_menu_timeout, "%02d:%02d",
-                            system_config.menu_timeout / 60,
-                            system_config.menu_timeout % 60);
+                    if (menu.current_line == 4) // Menu Timeout
+                    {
+                        system_config.menu_timeout = (uint8_t)new_seconds;
+                        sprintf(value_menu_timeout, "%02d:%02d",
+                                system_config.menu_timeout / 60,
+                                system_config.menu_timeout % 60);
+                    }
+                    else if (menu.current_line == 5) // Pwr Detect
+                    {
+                        system_config.power_fail_delay = (uint8_t)new_seconds;
+                        sprintf(value_pwr_fail, "%02d:%02d",
+                                system_config.power_fail_delay / 60,
+                                system_config.power_fail_delay % 60);
+                    }
+                    else if (menu.current_line == 8) // Rly Pulse
+                    {
+                        system_config.relay_pulse_time = (uint8_t)new_seconds;
+                        sprintf(value_relay_pulse, "%02d:%02d",
+                                system_config.relay_pulse_time / 60,
+                                system_config.relay_pulse_time % 60);
+                    }
 
                     save_pending = 1;
                     menu.in_edit_mode = 0;
@@ -2377,7 +2312,7 @@ void menu_handle_button(uint8_t press_type)
                     menu_draw_utility(); // Redraw with square brackets
                 }
 
-                return; // Exit early for UTILITY Menu Timeout field
+                return; // Exit early for UTILITY time fields
             }
 
             // Handle UTILITY menu numeric fields (Log Entries, Contrast, etc.)
@@ -2774,12 +2709,10 @@ void menu_handle_button(uint8_t press_type)
                             save_current_config();
                             save_pending = 0;
                             beep(50);
-                            uart_println("INPUT: Config saved to EEPROM");
                         }
                         else
                         {
                             beep(50);
-                            uart_println("INPUT: No changes to save");
                         }
                         // Stay in current menu
                     }
@@ -2928,11 +2861,6 @@ void menu_handle_button(uint8_t press_type)
                 }
                 else if (current_menu == 3) // CLOCK menu
                 {
-                    char buf[50];
-                    sprintf(buf, "CLOCK btn: line=%d, editable=%d", menu.current_line,
-                            menu.current_line < menu.total_items ? clock_menu[menu.current_line].editable : 0);
-                    uart_println(buf);
-
                     if (menu.current_line == menu.total_items - 2) // Save
                     {
                         if (save_pending)
@@ -2940,12 +2868,10 @@ void menu_handle_button(uint8_t press_type)
                             save_current_config();
                             save_pending = 0;
                             beep(50);
-                            uart_println("CLOCK: Config saved to EEPROM");
                         }
                         else
                         {
                             beep(50);
-                            uart_println("CLOCK: No changes to save");
                         }
                         // Stay in current menu
                     }
@@ -2980,15 +2906,9 @@ void menu_handle_button(uint8_t press_type)
                             else
                                 relay_high_edit_flag = 2; // Not Used
                         }
-                        else if (menu.current_line == 2) // Rly Pulse - TIME FIELD
+                        else if (menu.current_line == 2) // Display
                         {
-                            // Initialize time editor for relay pulse (stored in seconds)
-                            menu.original_value = system_config.relay_pulse_time;
-                            init_time_editor(system_config.relay_pulse_time, 0); // Mode 0 = MM:SS
-                        }
-                        else if (menu.current_line == 3) // Display
-                        {
-                            display_edit_flag = (strcmp(clock_menu[3].value, "Show") == 0) ? 1 : 0;
+                            display_edit_flag = (strcmp(clock_menu[2].value, "Show") == 0) ? 1 : 0;
                         }
 
                         menu.in_edit_mode = 1;
@@ -3021,7 +2941,6 @@ void menu_handle_button(uint8_t press_type)
                             menu.datetime_edit_digit = 0; // Start with DD
                             menu.blink_state = 1;
                             menu_draw_utility();
-                            uart_println("Entered Date edit mode - DD flashing");
                         }
                         else if (menu.datetime_field == 1) // Time selected
                         {
@@ -3030,7 +2949,6 @@ void menu_handle_button(uint8_t press_type)
                             menu.datetime_edit_digit = 0; // Start with HH
                             menu.blink_state = 1;
                             menu_draw_utility();
-                            uart_println("Entered Time edit mode - HH flashing");
                         }
                         else if (menu.datetime_field == 2) // Back
                         {
@@ -3057,7 +2975,6 @@ void menu_handle_button(uint8_t press_type)
                         menu.in_edit_mode = 1;
                         menu.blink_state = 1;
                         menu_draw_utility();
-                        uart_println("Editing Log Entries");
                     }
                     else if (menu.current_line == 4) // Menu T/O - Time field
                     {
@@ -3065,20 +2982,48 @@ void menu_handle_button(uint8_t press_type)
                         extern system_config_t system_config;
                         uint16_t current_val = system_config.menu_timeout;
 
-                        char buf[80];
-                        sprintf(buf, ">>> UTILITY ENTER EDIT: line=%d, current_value=%d seconds", menu.current_line, current_val);
-                        uart_println(buf);
-
                         init_time_editor(current_val, 0);
-
-                        sprintf(buf, ">>> After init_time_editor: time_edit_digit=%d, time_xx=%d, time_yy=%d",
-                                menu.time_edit_digit, menu.time_xx, menu.time_yy);
-                        uart_println(buf);
 
                         menu.in_edit_mode = 1;
                         menu.blink_state = 1;
+                    }
+                    else if (menu.current_line == 6) // Contrast (1-9)
+                    {
+                        beep(50);
+                        extern system_config_t system_config;
+                        menu.in_edit_mode = 1;
+                        menu.blink_state = 1;
+                        menu_draw_utility();
+                    }
+                    else if (menu.current_line == 7) // Brightness (1-9)
+                    {
+                        beep(50);
+                        extern system_config_t system_config;
+                        menu.in_edit_mode = 1;
+                        menu.blink_state = 1;
+                        menu_draw_utility();
+                    }
+                    else if (menu.current_line == 8) // Rly Pulse - Time field
+                    {
+                        beep(50);
+                        extern system_config_t system_config;
+                        uint16_t current_val = system_config.relay_pulse_time;
 
-                        uart_println(">>> UTILITY ENTER EDIT COMPLETE");
+                        init_time_editor(current_val, 0);
+
+                        menu.in_edit_mode = 1;
+                        menu.blink_state = 1;
+                    }
+                    else if (menu.current_line == 5) // Pwr Detect - Time field
+                    {
+                        beep(50);
+                        extern system_config_t system_config;
+                        uint16_t current_val = system_config.power_fail_delay;
+
+                        init_time_editor(current_val, 0);
+
+                        menu.in_edit_mode = 1;
+                        menu.blink_state = 1;
                     }
                     else if (menu.current_line == menu.total_items - 2) // Save
                     {
@@ -3087,12 +3032,10 @@ void menu_handle_button(uint8_t press_type)
                             save_current_config();
                             save_pending = 0;
                             beep(50);
-                            uart_println("UTILITY: Config saved to EEPROM");
                         }
                         else
                         {
                             beep(50);
-                            uart_println("UTILITY: No changes to save");
                         }
                         // Stay in current menu
                     }

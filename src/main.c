@@ -256,7 +256,6 @@ void main(void)
     lcd_init();
 
     uart_println("=== IRRISYS Menu System ===");
-    uart_println("LCD Test: Writing TEST");
 
     lcd_clear();
     lcd_set_cursor(0, 0);
@@ -264,16 +263,9 @@ void main(void)
     lcd_set_cursor(1, 0);
     lcd_print("Initializing...");
 
-    uart_println("Encoder init complete");
-    uart_println("Menu init complete");
-    uart_println("Writing welcome message");
-
     beep(100);
     __delay_ms(100);
     beep(100);
-
-    uart_println("Playing startup beeps");
-    uart_println("Starting OPTIONS menu");
 
     //__delay_ms(2000);
 
@@ -283,7 +275,6 @@ void main(void)
     menu.total_items = 5; // OPTIONS menu has 5 items
 
     menu_draw_options(); // Draw OPTIONS menu instead
-    uart_println("Entering main loop");
 
     // Main loop variables
     int16_t last_encoder = 0;
@@ -308,6 +299,7 @@ void main(void)
             sample_counter = 0;
 
             // Read RTC time
+            /*
             if (rtc_read_time(&current_time) == 0)
             {
                 char time_buf[60];
@@ -320,6 +312,7 @@ void main(void)
             {
                 uart_println("RTC: Read error");
             }
+            */
 
             // Read ADC channels (no debug output)
             adc_ch1 = ad7994_read_channel(1);
@@ -327,9 +320,9 @@ void main(void)
             adc_ch3 = ad7994_read_channel(3);
 
             // Print to terminal (brief format)
-            char buf[50];
-            sprintf(buf, "ADC: %4u %4u %4u", adc_ch1, adc_ch2, adc_ch3);
-            uart_println(buf);
+            //char buf[50];
+            //sprintf(buf, "ADC: %4u %4u %4u", adc_ch1, adc_ch2, adc_ch3);
+            //uart_println(buf);
         }
 
         // ... rest of loop
@@ -370,8 +363,6 @@ void main(void)
             beep(1);
 
             char buf[40];
-            sprintf(buf, "Encoder: %d, Delta: %d", encoder_count, delta);
-            uart_println(buf);
 
             last_encoder = encoder_count;
 
@@ -385,8 +376,12 @@ void main(void)
             }
 
             // Check if we're editing a field
-            // Check if we're editing a field
-            if (menu.in_edit_mode && current_menu == 4 && !menu.in_datetime_submenu) // UTILITY numeric fields
+            if (menu.in_edit_mode && current_menu == 4 && !menu.in_datetime_submenu && (menu.current_line == 4 || menu.current_line == 5 || menu.current_line == 8)) // UTILITY time fields
+            {
+                handle_time_rotation(delta > 0 ? 1 : -1);
+                menu_update_time_value();
+            }
+            else if (menu.in_edit_mode && current_menu == 4 && !menu.in_datetime_submenu) // UTILITY numeric fields (Log Entries, etc)
             {
                 extern void handle_utility_numeric_rotation(int8_t direction);
                 handle_utility_numeric_rotation(delta);
@@ -476,10 +471,6 @@ void main(void)
                 uint8_t current_event = button_event;
                 button_event = 0;
 
-                char buf[30];
-                sprintf(buf, "Button event: %d", current_event);
-                uart_println(buf);
-
                 // Check if we're on main screen (for short press)
                 if (current_menu == 255)
                 {
@@ -521,7 +512,6 @@ void main(void)
             lcd_print("MAIN SCREEN");
             lcd_set_cursor(1, 0);
             lcd_print("Ready");
-            uart_println("Main screen displayed");
 
             // Auto-save removed - user must explicitly select "Save" in menus
             if (save_pending)
@@ -588,8 +578,15 @@ void main(void)
                             menu_draw_clock();
                         }
                         break;
-                    case 4: // UTILITY menu (date/time editing)
-                        menu_draw_utility();
+                    case 4: // UTILITY menu
+                        if (!menu.in_datetime_submenu && (menu.current_line == 4 || menu.current_line == 5 || menu.current_line == 8)) // Menu T/O, Pwr Detect, and Rly Pulse - time fields
+                        {
+                            menu_update_time_value();
+                        }
+                        else
+                        {
+                            menu_draw_utility();
+                        }
                         break;
                     }
                 }
