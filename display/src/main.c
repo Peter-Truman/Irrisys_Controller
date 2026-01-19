@@ -5,17 +5,26 @@
  * Phase 1: Minimal test - LCD + LEDs only
  */
 
-#define BUILD_VERSION 11
+#define BUILD_VERSION 24
 
 #include "../include/config.h"
 #include "../include/lcd.h"
+#include "../include/led.h"
+
+// External ISR handler from led.c
+extern void led_timer_isr(void);
 
 /**
  * High-priority interrupt service routine
  */
 void __interrupt(high_priority) isr_high(void)
 {
-    // Unused
+    // Timer0 interrupt - LED PWM and flash timing
+    if (INTCONbits.TMR0IE && INTCONbits.TMR0IF)
+    {
+        INTCONbits.TMR0IF = 0;
+        led_timer_isr();
+    }
 }
 
 /**
@@ -49,8 +58,8 @@ void system_init(void)
     LATC = 0x00;
 
     TRISA = 0b00001011;  // RA0,1,3 inputs, RA2,4,5 outputs (LEDs)
-    TRISB = 0b00100000;  // RB5 input, others output
-    TRISC = 0b00100000;  // RC5 input (hi-Z, pot controls contrast), others output
+    TRISB = 0b00100000;  // RB5 input (serial), others output
+    TRISC = 0x00;        // All outputs (LCD + brightness PWM)
 }
 
 /**
@@ -61,18 +70,15 @@ void main(void)
     // Initialize hardware
     system_init();
 
-    // Interrupts off
-    INTCONbits.GIE = 0;
-    INTCONbits.PEIE = 0;
-
-    // Turn on backlight immediately and leave it on
-    // RC4 = backlight control
+    // Turn on backlight immediately
     LATCbits.LATC4 = 1;  // Backlight ON
 
-    // RC5 = contrast - hi-Z input, pot controls it directly
+    // Initialize LED driver (sets up Timer0 interrupt)
+    led_init();
 
-    // Turn on Power LED (active low on RA2)
-    LATAbits.LATA2 = 0;
+    // Enable interrupts
+    INTCONbits.GIE = 1;
+    INTCONbits.PEIE = 1;
 
     // Long delay for power stabilization
     __delay_ms(500);
@@ -84,15 +90,65 @@ void main(void)
     lcd_clear();
     lcd_print_at(0, 0, "====================");
     lcd_print_at(1, 0, "  IrrisysPG Display ");
-    lcd_print_at(2, 0, "   Build: 11        ");
+    lcd_print_at(2, 0, "   Build: 24        ");
     lcd_print_at(3, 0, "====================");
 
-    // Main loop - blink Signal LED to show we're alive
+    // LED test sequence
+    __delay_ms(2000);
+
+    // Test 1: Power LED on at full brightness
+    lcd_clear();
+    lcd_print_at(0, 0, "LED Test 1:");
+    lcd_print_at(1, 0, "PWR LED 100%");
+    led_set_brightness(LED_ID_PWR, 100);
+    led_on(LED_ID_PWR);
+    __delay_ms(2000);
+
+    // Test 2: Dim power LED to 15%
+    lcd_print_at(1, 0, "PWR LED 15% ");
+    led_set_brightness(LED_ID_PWR, 15);
+    __delay_ms(2000);
+
+    // Test 3: Signal LED flashing fast at 15%
+    lcd_print_at(1, 0, "Signal FLASH");
+    led_set_brightness(LED_ID_SIGNAL, 15);
+    led_set_flash(LED_ID_SIGNAL, FLASH_FAST);
+    led_on(LED_ID_SIGNAL);
+    __delay_ms(3000);
+
+    // Test 4: Fault LED slow flash at 15%
+    lcd_print_at(1, 0, "Fault SLOW  ");
+    led_set_brightness(LED_ID_FAULT, 15);
+    led_set_flash(LED_ID_FAULT, FLASH_SLOW);
+    led_on(LED_ID_FAULT);
+    __delay_ms(3000);
+
+    // Test 5: All LEDs at 15% different flash rates
+    lcd_clear();
+    lcd_print_at(0, 0, "All LEDs 15%:");
+    lcd_print_at(1, 0, "PWR=steady");
+    lcd_print_at(2, 0, "Sig=fast, Flt=slow");
+    led_set_brightness(LED_ID_PWR, 15);
+    led_set_flash(LED_ID_PWR, 0);  // Steady
+    led_on(LED_ID_PWR);
+    __delay_ms(5000);
+
+    // Final state: Power on steady at 15%, others off
+    lcd_clear();
+    lcd_print_at(0, 0, "====================");
+    lcd_print_at(1, 0, "  LED Test Complete ");
+    lcd_print_at(2, 0, "   Build: 24        ");
+    lcd_print_at(3, 0, "====================");
+
+    led_off(LED_ID_SIGNAL);
+    led_off(LED_ID_FAULT);
+    led_set_brightness(LED_ID_PWR, 15);
+    led_set_flash(LED_ID_PWR, 0);
+    led_on(LED_ID_PWR);
+
+    // Main loop - nothing to do, LEDs run via interrupt
     while (1)
     {
-        LATAbits.LATA4 = 0;  // ON
-        __delay_ms(100);
-        LATAbits.LATA4 = 1;  // OFF
-        __delay_ms(900);
+        __delay_ms(1000);
     }
 }

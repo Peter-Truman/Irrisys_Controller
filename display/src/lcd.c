@@ -219,20 +219,23 @@ void lcd_display_off(void)
 }
 
 /**
- * Show cursor (underline)
+ * Show cursor (static underline)
+ * Note: HD44780 doesn't support blinking underline - only static underline or blinking block
  */
 void lcd_cursor_on(void)
 {
     cursor_visible = 1;
+    cursor_blink = 0;  // Static underline (no blink)
     lcd_update_display_ctrl();
 }
 
 /**
- * Hide cursor
+ * Hide cursor (turns off both underline and blink)
  */
 void lcd_cursor_off(void)
 {
     cursor_visible = 0;
+    cursor_blink = 0;
     lcd_update_display_ctrl();
 }
 

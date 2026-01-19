@@ -5,17 +5,17 @@ echo PIC18F14K22 @ 8MHz
 echo ===================================
 echo.
 
-set XC8_PATH=C:\Program Files\Microchip\xc8\v2.46\bin\xc8.exe
+set XC8_PATH=C:\Program Files\Microchip\xc8\v2.46\bin\xc8-cc.exe
 set MEPROG_PATH=C:\Program Files (x86)\MELabs Programmer\meProg.exe
 
 echo Compiling display board firmware...
 echo.
 
-"%XC8_PATH%" --chip=18F14K22 ^
+"%XC8_PATH%" -mcpu=18F14K22 ^
     src\main.c ^
     src\lcd.c ^
-    src\pwm.c ^
-    -osrc\display ^
+    src\led.c ^
+    -o src\display.hex ^
     -Iinclude
 
 if %ERRORLEVEL% NEQ 0 (
