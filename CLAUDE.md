@@ -3,16 +3,30 @@
 ## Project Overview
 
 **Product:** IRRISYS Irrigation Pump Protection System
-**Hardware Version:** Ver_B
-**Repository:** Firmware only (GitHub)
+**Hardware Version:** Ver_B Rev_1
+**Repository:** Firmware only (GitHub) - Two-board system
+
+---
+
+## System Architecture
+
+The system consists of two boards communicating via serial:
+
+| Board | MCU | Function |
+|-------|-----|----------|
+| **Main Board** | PIC18F26K22 @ 32MHz | Control logic, ADC, RTC, relay, encoder, EEPROM |
+| **Display Board** | PIC18F14K22 @ 8MHz | LCD display, LEDs, brightness/contrast PWM |
+
+Communication: Main → Display via serial (19200 baud, 8N1)
 
 ---
 
 ## Changelog
 
-| Date       | FW Ver | Description |
-|------------|--------|-------------|
-| 2026-01-19 | 3      | Baseline - Knight Rider LED sequence, full menu system, AD7994 ADC, RTC, EEPROM config |
+| Date       | Board | FW Ver | Description |
+|------------|-------|--------|-------------|
+| 2026-01-19 | Main  | 3      | Baseline - Knight Rider LED, full menu, AD7994, RTC, EEPROM |
+| 2026-01-19 | Display | 1    | Initial - LCD driver, LED control, PWM, test harness |
 
 ---
 
@@ -37,7 +51,10 @@
 
 ### BUILD_VERSION Increment Policy
 
-Location: `src/main.c` line 7
+Each board has its own BUILD_VERSION in its `main.c`:
+- Main board: `mainboard/src/main.c`
+- Display board: `display/src/main.c`
+
 ```c
 #define BUILD_VERSION X
 ```
@@ -46,8 +63,8 @@ Location: `src/main.c` line 7
 - New features or functionality
 - Bug fixes that change behavior
 - Peripheral driver changes
+- Protocol changes (affects both boards)
 - Menu structure changes
-- EEPROM format changes
 
 **Do NOT increment for:**
 - Code comments or documentation
@@ -59,9 +76,9 @@ Location: `src/main.c` line 7
 1. **Commit regularly** after completing each logical unit of work
 2. **Push to remote** after each working session (never leave unpushed commits overnight)
 3. **Commit message format:**
-   - Short: `Add menu timeout feature (v4)`
+   - Include which board: `[Main] Add feature X (v4)` or `[Display] Fix PWM (v2)`
    - Detailed: Use body for explanation if needed
-4. **Always verify** build compiles before committing
+4. **Always verify** both boards compile before committing
 
 ### Branch Strategy
 - `main` or `irrisys-working` - stable, tested code
@@ -69,97 +86,120 @@ Location: `src/main.c` line 7
 
 ---
 
+## Project Structure (Firmware)
+
+```
+Irrisys_Controller/
+├── mainboard/                  # Main board PIC18F26K22
+│   ├── src/
+│   │   ├── main.c             # Entry point, BUILD_VERSION
+│   │   ├── menu.c             # Menu system logic
+│   │   ├── eeprom.c           # Configuration storage
+│   │   ├── encoder.c          # Rotary encoder driver
+│   │   ├── i2c.c              # I2C bus driver
+│   │   ├── rtc.c              # DS3231 RTC driver
+│   │   ├── ad7994.c           # AD7994 ADC driver
+│   │   └── pca9535.c          # PCA9535 I/O expander (old LED control)
+│   └── include/
+│       ├── config.h           # Pin definitions, system config
+│       └── [peripheral].h     # Driver headers
+│
+├── display/                    # Display board PIC18F14K22
+│   ├── src/
+│   │   ├── main.c             # Entry point, BUILD_VERSION
+│   │   ├── lcd.c              # HD44780 4x20 LCD driver
+│   │   ├── pwm.c              # Brightness/contrast PWM
+│   │   ├── uart.c             # Serial receive (Phase 2)
+│   │   └── protocol.c         # Frame parsing, CRC (Phase 2)
+│   ├── include/
+│   │   ├── config.h           # Pin definitions, oscillator
+│   │   └── [module].h         # Headers
+│   └── CLAUDE.md              # Display-specific protocol spec
+│
+├── CLAUDE.md                   # This file (system overview)
+└── README.md
+```
+
+---
+
 ## Hardware File Management
 
-### Location
+### Location (OneDrive)
 ```
-OneDrive: C:\Users\PeeWee\OneDrive\Documents\DipTrace\PCT_HEADER\ALL_Files\Control_Point_Pump_Guard\IRRISYS_PG_Ver_B\
+C:\Users\PeeWee\OneDrive\Documents\DipTrace\PCT_HEADER\ALL_Files\Control_Point_Pump_Guard\IRRISYS_PG_Ver_B\
 ```
 
 ### Folder Structure
 ```
 IRRISYS_PG_Ver_B/
-├── Irrisys_PG_Ver_B_Rev_0.*      # Mainboard Rev 0
-├── Irrisys_PG_Ver_B_Rev_1/       # Mainboard Rev 1 (current)
-│   ├── IrrisysPG_MainBrd_Ver_B_Rev_1.dch    # Schematic
-│   ├── IrrisysPG_MainBrd_Ver_B.Rev_1.dip    # PCB layout
-│   ├── IrrisysPG_MainBrd_Ver_B_Rev_1.xlsx   # BOM
-│   ├── IrrisysPG_MainBrd_Ver_B_Rev_1_PP.csv # Pick & Place
-│   ├── *_gerberx3.zip                        # Manufacturing files
-│   ├── IrrisysPG_Ver_B_Display_Rev_1.*      # Display board Rev 1
-│   └── IrrisysPG_Ver_B_Display_Rev_2.dip    # Display board Rev 2 (WIP)
-├── Archive/                       # Older versions, experiments
-└── Menu_Layout.txt               # Documentation
+├── Irrisys_PG_Ver_B_Rev_1/                    # Current revision
+│   ├── IrrisysPG_MainBrd_Ver_B_Rev_1.*        # Main board files
+│   ├── IrrisysPG_Ver_B_Display_Rev_1.*        # Display board files
+│   └── IrrisysPG_Ver_B_Display_Rev_2.dip      # Display Rev 2 (WIP)
+├── Archive/                                    # Older versions
+└── Menu_Layout.txt
 ```
 
 ### Hardware Revision Policy
-- **Version (Ver_X):** Major hardware redesign (new board shape, major component changes)
-- **Revision (Rev_Y):** Minor changes (routing fixes, component swaps, silkscreen updates)
+- **Version (Ver_X):** Major hardware redesign
+- **Revision (Rev_Y):** Minor changes (routing, component swaps)
 - Each revision folder contains ALL related files (schematic, PCB, BOM, gerbers, P&P)
 
 ---
 
-## Project Structure (Firmware)
+## Serial Protocol (Main → Display)
 
+See `display/CLAUDE.md` for full protocol specification.
+
+### Frame Structure
 ```
-Irrisys_Controller/
-├── src/                    # C source files
-│   ├── main.c             # Entry point, main loop, BUILD_VERSION
-│   ├── menu.c             # Menu system logic
-│   ├── eeprom.c           # Configuration storage
-│   ├── encoder.c          # Rotary encoder driver
-│   ├── i2c.c              # I2C bus driver
-│   ├── rtc.c              # DS3231 RTC driver
-│   ├── ad7994.c           # AD7994 ADC driver
-│   ├── pca9535.c          # PCA9535 I/O expander driver
-│   └── lcd.c              # LCD display driver
-├── include/               # Header files
-│   ├── config.h           # Pin definitions, system config
-│   ├── menu.h             # Menu structures
-│   └── [peripheral].h     # Driver headers
-├── CLAUDE.md              # This file
-└── README.md              # Project overview
+[STX] [CMD] [LEN] [DATA...] [CRC16-LO] [CRC16-HI] [ETX]
+ 0x02  1 byte 1 byte 0-24 bytes  Fletcher-16       0x03
 ```
+
+### Commands Summary
+
+| CMD | Description |
+|-----|-------------|
+| `1`-`4` | Text for lines 1-4 (with embedded control codes) |
+| `C` | Clear display |
+| `B` | LCD Brightness (0-100) |
+| `K` | LCD Contrast (0-100) |
+| `L` | LED state (bit mask) |
+
+### Embedded Control Codes
+`\x10`-`\x11` Blink on/off, `\x12`-`\x13` Underline on/off, `\x14`-`\x15` Cursor show/hide, `\x16`-`\x17` Cursor left/right, `\x18` Cursor to column, `\x19`-`\x1C` Scroll
 
 ---
 
 ## Hardware Specifications
 
+### Main Board (PIC18F26K22)
+
 | Component | Part | Interface | Notes |
 |-----------|------|-----------|-------|
 | MCU | PIC18F26K22 | - | 32MHz (8MHz + 4x PLL) |
-| LCD | 16x2 character | 4-bit parallel | |
-| Encoder | Rotary + switch | GPIO + interrupt | Short/long press detection |
-| RTC | DS3231 | I2C (0x68) | 1Hz square wave output |
-| ADC | AD7994 | I2C (0x22) | 3 channels used |
-| I/O Expander | PCA9535 | I2C (0x20) | LED control |
+| Encoder | Rotary + switch | GPIO + interrupt | Short/long press |
+| RTC | DS3231 | I2C (0x68) | 1Hz square wave |
+| ADC | AD7994 | I2C (0x22) | 3 channels |
 | Digital Input | MAX22193 | GPIO | 4 channels |
 | Relay | - | GPIO | Pulse/latch modes |
 | Buzzer | - | GPIO | User feedback |
+| Serial TX | - | UART | To display board |
 
----
+### Display Board (PIC18F14K22)
 
-## Menu Structure Reference
-
-```
-MAIN SCREEN (255)
-└── OPTIONS (0)
-    ├── Main Menu → SETUP (2)
-    │   ├── Input 1 → INPUT (1)
-    │   ├── Input 2 → INPUT (1)
-    │   ├── Input 3 → INPUT (1)
-    │   └── Clock → CLOCK (3)
-    ├── Setup Menu → INPUT (1)
-    ├── Utility Menu → UTILITY (4)
-    ├── About
-    └── Exit → MAIN SCREEN
-
-INPUT menu adapts based on sensor type:
-- Pressure: 15 items (scale, thresholds, bypass times, relay modes)
-- Temperature: 10 items
-- Flow Digital: 9 items
-- Flow Analog: 12 items
-```
+| Pin | Function | Notes |
+|-----|----------|-------|
+| RA2 | PWR LED | Active LOW |
+| RA4 | Signal LED | Active LOW |
+| RA5 | Fault LED | Active LOW |
+| RB5 | Serial RX | From main board |
+| RC0-3 | LCD DB4-7 | 4-bit mode |
+| RC4 | Brightness | PWM |
+| RC5 | Contrast | PWM (CCP1) |
+| RC6 | LCD E | Enable |
+| RC7 | LCD RS | Register Select |
 
 ---
 
@@ -167,20 +207,21 @@ INPUT menu adapts based on sensor type:
 
 ### Starting a Session
 1. Pull latest from remote: `git pull`
-2. Note current BUILD_VERSION
+2. Note current BUILD_VERSION for each board
 3. Review recent commits for context
 
 ### Ending a Session
-1. Verify code compiles
+1. Verify both boards compile
 2. Increment BUILD_VERSION if changes were significant
 3. Update changelog in this file
-4. Commit all changes with descriptive message
+4. Commit with descriptive message (indicate which board)
 5. Push to remote: `git push`
 6. Verify push succeeded
 
 ---
 
-## Contact / Reference
+## Reference
 
 - Hardware files: OneDrive (see path above)
-- Datasheets: AD7994, PCA9535, DS3231, MAX22193, PIC18F26K22
+- Datasheets: AD7994, PCA9535, DS3231, MAX22193, PIC18F26K22, PIC18F14K22
+- LCD: NHD-0420AZ-FL-YBW-33V3 (4x20 HD44780)
