@@ -20,14 +20,14 @@ void i2c_init(void)
     TRISCbits.TRISC4 = 1; // SDA as input (becomes output when driven by MSSP)
 
     // Configure MSSP for I2C Master Mode
-    SSPSTAT = 0x80; // Slew rate control disabled for 100kHz
+    SSPSTAT = 0x80; // Slew rate control disabled
     SSPCON1 = 0x28; // I2C Master mode, SSPEN enabled
     SSPCON2 = 0x00; // Clear control bits
 
-    // Set I2C clock frequency: 100kHz
+    // Set I2C clock frequency: 10kHz (ultra-slow for AD7994 timing issues)
     // SSPADD = (Fcy / (4 * I2C_freq)) - 1
-    // SSPADD = (8MHz / (4 * 100kHz)) - 1 = 19
-    SSPADD = 19;
+    // SSPADD = (8MHz / (4 * 10kHz)) - 1 = 199
+    SSPADD = 199;
 
     // Small delay for bus to settle
     __delay_us(10);
@@ -56,6 +56,9 @@ uint8_t i2c_wait_idle(void)
  */
 uint8_t i2c_start(void)
 {
+    // 1ms delay before START for bus recovery
+    __delay_ms(1);
+
     if (i2c_wait_idle())
         return 1;
 
@@ -110,6 +113,9 @@ void i2c_stop(void)
         if (--timeout == 0)
             break;
     }
+
+    // 10ms delay after STOP for device recovery
+    __delay_ms(10);
 }
 
 /**

@@ -4,6 +4,8 @@
  */
 // This commit is - just starting on menu timeout
 
+#define BUILD_VERSION 3  // Increment with each build
+
 #include "../include/config.h"
 #include "../include/encoder.h"
 #include "../include/menu.h"
@@ -110,8 +112,11 @@ void system_init(void)
     TRISBbits.TRISB0 = 1; // RTC 1Hz square wave input (INT0)
     INTCON2bits.RBPU = 0; // Enable PORTB pull-ups
 
-    TRISBbits.TRISB6 = 1; // ENC_SW input
-    INTCON2bits.RBPU = 0; // Enable PORTB pull-ups
+    // Configure digital inputs from MAX22193
+    TRISAbits.TRISA4 = 1; // OP1 input
+    TRISBbits.TRISB4 = 1; // OP2 input
+    TRISBbits.TRISB5 = 1; // OP3 input
+    TRISBbits.TRISB3 = 1; // OP4 input
 
     // Configure relay output
     RELAY_TRIS = 0; // Output
@@ -190,6 +195,8 @@ void main(void)
 
     uart_println("=== SYSTEM STARTUP ===");
     char buf[50];
+    sprintf(buf, "Build: %d", BUILD_VERSION);
+    uart_println(buf);
     sprintf(buf, "After init: relay_state=%d, counter=%d", relay_state, relay_counter);
     uart_println(buf);
 
@@ -290,45 +297,48 @@ void main(void)
 
     static uint32_t last_second_update = 0;
     uint16_t adc_ch1, adc_ch2, adc_ch3;
+    uint8_t dig_in1, dig_in2, dig_in3, dig_in4;
     rtc_time_t current_time;
 
     // Main loop starts here
     while (1)
     {
 
-        // Sample ADC/RTC only every 10th loop iteration (not every loop)
+        // Sample ADC and Digital Inputs every 10th loop iteration (~500ms)
         static uint8_t sample_counter = 0;
+        static uint8_t second_counter = 0;
         sample_counter++;
 
         if (sample_counter >= 10)
         {
             sample_counter = 0;
 
-            // Read RTC time
-            /*
-            if (rtc_read_time(&current_time) == 0)
-            {
-                char time_buf[60];
-                sprintf(time_buf, "RTC: 20%02u-%02u-%02u %02u:%02u:%02u",
-                        current_time.year, current_time.month, current_time.date,
-                        current_time.hours, current_time.minutes, current_time.seconds);
-                uart_println(time_buf);
-            }
-            else
-            {
-                uart_println("RTC: Read error");
-            }
-            */
+            // Read all 3 ADC channels in synchronized set (~3ms total)
+            ad7994_read_all(&adc_ch1, &adc_ch2, &adc_ch3);
 
-            // Read ADC channels (no debug output)
-            adc_ch1 = ad7994_read_channel(1);
-            adc_ch2 = ad7994_read_channel(2);
-            adc_ch3 = ad7994_read_channel(3);
+            // Read digital inputs from MAX22193
+            dig_in1 = PORTAbits.RA4;  // OP1
+            dig_in2 = PORTBbits.RB4;  // OP2
+            dig_in3 = PORTBbits.RB5;  // OP3
+            dig_in4 = PORTBbits.RB3;  // OP4
 
-            // Print to terminal (brief format)
-            //char buf[50];
-            //sprintf(buf, "ADC: %4u %4u %4u", adc_ch1, adc_ch2, adc_ch3);
-            //uart_println(buf);
+            // Clean status line once per second (every 2nd sample)
+            second_counter++;
+            if (second_counter >= 2)
+            {
+                second_counter = 0;
+
+                // Read RTC for timestamp
+                if (rtc_read_time(&current_time) == 0)
+                {
+                    char status_buf[100];
+                    sprintf(status_buf, "Time: %02u:%02u:%02u | ADC: Ch1=%4u Ch2=%4u Ch3=%4u | DIG: D1=%u D2=%u D3=%u D4=%u",
+                            current_time.hours, current_time.minutes, current_time.seconds,
+                            adc_ch1, adc_ch2, adc_ch3,
+                            dig_in1, dig_in2, dig_in3, dig_in4);
+                    uart_println(status_buf);
+                }
+            }
         }
 
         // ... rest of loop

@@ -3,9 +3,10 @@
 
 #include <stdint.h>
 
-// AD7994 I2C Address (from schematic: 0100 100 = 0x24)
-// This is AD7994-1 with AS pin = VDD
-#define AD7994_ADDR 0x22 // Changed from 0x24
+// AD7994 I2C Address - CONFIRMED via logic analyzer
+// AD7994BRUZ-0REEL actual address: 0x21 (7-bit)
+// 8-bit write: 0x42, 8-bit read: 0x43
+#define AD7994_ADDR 0x21
 
 // AD7994 Register Addresses
 #define AD7994_REG_CONVERSION 0x00
@@ -25,5 +26,6 @@
 // Function prototypes
 uint8_t ad7994_init(void);
 uint16_t ad7994_read_channel(uint8_t channel);
+void ad7994_read_all(uint16_t *ch1, uint16_t *ch2, uint16_t *ch3);
 
 #endif // AD7994_H

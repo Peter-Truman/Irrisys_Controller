@@ -2634,24 +2634,24 @@ void menu_handle_button(uint8_t press_type)
                 beep(50);
             }
         }
-    }
-    else if (press_type == 2) // Long press - cancel edit
-    {
-        // Restore original values for UTILITY menu date/time editing
-        if (current_menu == 4 && menu.in_datetime_submenu)
+        else if (press_type == 2) // Long press - cancel edit
         {
-            uart_println("Date/time edit cancelled - restoring original values");
-            init_datetime_editor(); // Reload from RTC
+            // Restore original values for UTILITY menu date/time editing
+            if (current_menu == 4 && menu.in_datetime_submenu)
+            {
+                uart_println("Date/time edit cancelled - restoring original values");
+                init_datetime_editor(); // Reload from RTC
+            }
+
+            menu.in_edit_mode = 0;
+            beep(100);
+            __delay_ms(50);
+            beep(100); // Double beep for cancel
+
+            // Redraw to show brackets instead of parentheses
+            if (current_menu == 4)
+                menu_draw_utility();
         }
-
-        menu.in_edit_mode = 0;
-        beep(100);
-        __delay_ms(50);
-        beep(100); // Double beep for cancel
-
-        // Redraw to show brackets instead of parentheses
-        if (current_menu == 4)
-            menu_draw_utility();
     }
     else // Not in edit mode
     {
@@ -3062,8 +3062,14 @@ void menu_handle_button(uint8_t press_type)
                 __delay_ms(50);
                 beep(100); // Double beep for all
 
-                if (current_menu == 0) // OPTIONS -> Main screen
+                if (current_menu == 0) // OPTIONS -> Main screen (same as Exit)
                 {
+                    // Save pending changes before exiting (same behavior as Exit menu item)
+                    if (save_pending)
+                    {
+                        save_current_config();
+                        save_pending = 0;
+                    }
                     current_menu = 255;
                     uart_println("Long press - OPTIONS to Main");
                 }

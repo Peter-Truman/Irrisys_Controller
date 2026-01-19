@@ -9,10 +9,6 @@
 #include "../include/i2c.h"
 #include "../include/eeprom.h"
 #include <xc.h>
-#include <stdio.h>
-
-// External UART function declaration (defined in main.c)
-extern void uart_println(const char *str);
 
 // Internal state variable to track Port 0 output state
 static uint8_t port0_output_state = 0x00;
@@ -25,57 +21,41 @@ static uint8_t port0_output_state = 0x00;
  */
 uint8_t pca9535_write_register(uint8_t reg_addr, uint8_t value)
 {
-    char buf[60];
-    sprintf(buf, "PCA9535: Write reg 0x%02X = 0x%02X", reg_addr, value);
-    uart_println(buf);
-
     // Start condition
     if (i2c_start())
     {
-        uart_println("PCA9535: I2C start failed");
         i2c_stop();
         return 1;
     }
+    __delay_us(50);
 
     // Send device address with write bit (0)
-    uint8_t addr_byte = (PCA9535_I2C_ADDR << 1) | 0;
-    sprintf(buf, "PCA9535: Sending address 0x%02X", addr_byte);
-    uart_println(buf);
-
-    if (i2c_write(addr_byte))
+    if (i2c_write((PCA9535_I2C_ADDR << 1) | 0))
     {
-        uart_println("PCA9535: Address NACK");
         i2c_stop();
         return 1;
     }
-    uart_println("PCA9535: Address ACK");
+    __delay_us(50);
 
     // Send register address
-    sprintf(buf, "PCA9535: Sending register 0x%02X", reg_addr);
-    uart_println(buf);
-
     if (i2c_write(reg_addr))
     {
-        uart_println("PCA9535: Register NACK");
         i2c_stop();
         return 1;
     }
-    uart_println("PCA9535: Register ACK");
+    __delay_us(50);
 
     // Send data byte
-    sprintf(buf, "PCA9535: Sending data 0x%02X", value);
-    uart_println(buf);
-
     if (i2c_write(value))
     {
-        uart_println("PCA9535: Data NACK");
         i2c_stop();
         return 1;
     }
-    uart_println("PCA9535: Data ACK");
+    __delay_us(50);
 
     // Stop condition
     i2c_stop();
+    __delay_us(100);
 
     return 0; // Success
 }
@@ -138,21 +118,17 @@ uint8_t pca9535_read_register(uint8_t reg_addr, uint8_t *value)
  */
 void pca9535_init(void)
 {
-    uart_println("PCA9535: Initializing I/O expander...");
-
     // Configure Port 0: P00-P02 as outputs (0), rest as inputs (1)
     // Config register: 1 = input, 0 = output
     uint8_t port0_config = 0xFF & ~LED_ALL_MASK; // 11111000 = 0xF8
     if (pca9535_write_register(PCA9535_CONFIG_PORT0, port0_config))
     {
-        uart_println("PCA9535: Port 0 config failed");
         return;
     }
 
     // Configure Port 1: All as inputs (default)
     if (pca9535_write_register(PCA9535_CONFIG_PORT1, 0xFF))
     {
-        uart_println("PCA9535: Port 1 config failed");
         return;
     }
 
@@ -160,31 +136,25 @@ void pca9535_init(void)
     port0_output_state = LED_ALL_MASK; // 0x07 = 0b00000111 (P00, P01, P02 HIGH = LEDs OFF)
     if (pca9535_write_register(PCA9535_OUTPUT_PORT0, port0_output_state))
     {
-        uart_println("PCA9535: Port 0 output init failed");
         return;
     }
 
     // Set Port 1 outputs to 0 (even though they're inputs)
     if (pca9535_write_register(PCA9535_OUTPUT_PORT1, 0x00))
     {
-        uart_println("PCA9535: Port 1 output init failed");
         return;
     }
 
     // Disable polarity inversion on both ports
     if (pca9535_write_register(PCA9535_POL_INV_PORT0, 0x00))
     {
-        uart_println("PCA9535: Port 0 polarity config failed");
         return;
     }
 
     if (pca9535_write_register(PCA9535_POL_INV_PORT1, 0x00))
     {
-        uart_println("PCA9535: Port 1 polarity config failed");
         return;
     }
-
-    uart_println("PCA9535: Initialization complete");
 }
 
 /**
@@ -193,7 +163,6 @@ void pca9535_init(void)
  */
 void pca9535_led_init(void)
 {
-    uart_println("PCA9535: LED initialization");
     // Turn off all LEDs
     pca9535_led_off(LED_ALL_MASK);
 }
