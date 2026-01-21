@@ -2,23 +2,99 @@
  * IrrisysPG Display Board - Main Firmware
  * PIC18F14K22-I/SS @ 8MHz
  *
- * Phase 1: Minimal test - LCD + LEDs only
+ * Phase 2: Serial protocol integration
  */
 
-#define BUILD_VERSION 24
+#define BUILD_VERSION 33
 
 #include "../include/config.h"
 #include "../include/lcd.h"
 #include "../include/led.h"
+#include "../include/uart.h"
+#include "../include/protocol.h"
+#include <stdio.h>
 
-// External ISR handler from led.c
+// External ISR handlers
 extern void led_timer_isr(void);
+extern void uart_rx_isr(void);
+
+// =============================================================================
+// Debug Serial Output on RB4 (bit-banged @ 9600 baud) - NON-INVERTED TTL
+// Note: RC5 is LCD contrast - cannot use for debug!
+// =============================================================================
+#define DEBUG_TX_PIN LATBbits.LATB4
+#define DEBUG_TX_TRIS TRISBbits.TRISB4
+
+void debug_init(void)
+{
+    DEBUG_TX_TRIS = 0;  // Output
+    DEBUG_TX_PIN = 1;   // Idle HIGH (standard TTL UART)
+}
+
+// Bit-bang one character at 9600 baud
+// At 8MHz, Fosc/4 = 2MHz, so 1 cycle = 0.5us
+// 9600 baud = 104.17us per bit = ~208 instruction cycles
+void debug_putc(char c)
+{
+    // Disable interrupts for accurate timing
+    uint8_t gie_save = INTCONbits.GIE;
+    INTCONbits.GIE = 0;
+
+    // Start bit (LOW)
+    DEBUG_TX_PIN = 0;
+    __delay_us(104);
+
+    // Data bits (LSB first)
+    if (c & 0x01) DEBUG_TX_PIN = 1; else DEBUG_TX_PIN = 0; __delay_us(104);
+    if (c & 0x02) DEBUG_TX_PIN = 1; else DEBUG_TX_PIN = 0; __delay_us(104);
+    if (c & 0x04) DEBUG_TX_PIN = 1; else DEBUG_TX_PIN = 0; __delay_us(104);
+    if (c & 0x08) DEBUG_TX_PIN = 1; else DEBUG_TX_PIN = 0; __delay_us(104);
+    if (c & 0x10) DEBUG_TX_PIN = 1; else DEBUG_TX_PIN = 0; __delay_us(104);
+    if (c & 0x20) DEBUG_TX_PIN = 1; else DEBUG_TX_PIN = 0; __delay_us(104);
+    if (c & 0x40) DEBUG_TX_PIN = 1; else DEBUG_TX_PIN = 0; __delay_us(104);
+    if (c & 0x80) DEBUG_TX_PIN = 1; else DEBUG_TX_PIN = 0; __delay_us(104);
+
+    // Stop bit (HIGH)
+    DEBUG_TX_PIN = 1;
+    __delay_us(104);
+
+    // Restore interrupts
+    INTCONbits.GIE = gie_save;
+}
+
+void debug_print(const char *str)
+{
+    while (*str)
+    {
+        debug_putc(*str++);
+    }
+}
+
+void debug_println(const char *str)
+{
+    debug_print(str);
+    debug_putc('\r');
+    debug_putc('\n');
+}
+
+void debug_hex(uint8_t val)
+{
+    const char hex[] = "0123456789ABCDEF";
+    debug_putc(hex[(val >> 4) & 0x0F]);
+    debug_putc(hex[val & 0x0F]);
+}
 
 /**
  * High-priority interrupt service routine
  */
 void __interrupt(high_priority) isr_high(void)
 {
+    // UART receive interrupt
+    if (PIE1bits.RCIE && PIR1bits.RCIF)
+    {
+        uart_rx_isr();
+    }
+
     // Timer0 interrupt - LED PWM and flash timing
     if (INTCONbits.TMR0IE && INTCONbits.TMR0IF)
     {
@@ -70,11 +146,25 @@ void main(void)
     // Initialize hardware
     system_init();
 
+    // Initialize debug serial first
+    debug_init();
+    debug_println("Display Board v33");
+    debug_println("Debug on RB4 @ 9600");
+
     // Turn on backlight immediately
     LATCbits.LATC4 = 1;  // Backlight ON
 
     // Initialize LED driver (sets up Timer0 interrupt)
     led_init();
+    debug_println("LED init OK");
+
+    // Initialize UART for serial receive
+    uart_init();
+    debug_println("UART init OK");
+
+    // Initialize protocol handler
+    protocol_init();
+    debug_println("Protocol init OK");
 
     // Enable interrupts
     INTCONbits.GIE = 1;
@@ -86,69 +176,94 @@ void main(void)
     // Initialize LCD
     lcd_init();
 
-    // Display ready message
+    // Display startup message
     lcd_clear();
     lcd_print_at(0, 0, "====================");
     lcd_print_at(1, 0, "  IrrisysPG Display ");
-    lcd_print_at(2, 0, "   Build: 24        ");
+    lcd_print_at(2, 0, "   Build: 25        ");
     lcd_print_at(3, 0, "====================");
 
-    // LED test sequence
-    __delay_ms(2000);
-
-    // Test 1: Power LED on at full brightness
-    lcd_clear();
-    lcd_print_at(0, 0, "LED Test 1:");
-    lcd_print_at(1, 0, "PWR LED 100%");
+    // Brief LED test - flash all LEDs once
     led_set_brightness(LED_ID_PWR, 100);
+    led_set_brightness(LED_ID_SIGNAL, 100);
+    led_set_brightness(LED_ID_FAULT, 100);
     led_on(LED_ID_PWR);
-    __delay_ms(2000);
-
-    // Test 2: Dim power LED to 15%
-    lcd_print_at(1, 0, "PWR LED 15% ");
-    led_set_brightness(LED_ID_PWR, 15);
-    __delay_ms(2000);
-
-    // Test 3: Signal LED flashing fast at 15%
-    lcd_print_at(1, 0, "Signal FLASH");
-    led_set_brightness(LED_ID_SIGNAL, 15);
-    led_set_flash(LED_ID_SIGNAL, FLASH_FAST);
     led_on(LED_ID_SIGNAL);
-    __delay_ms(3000);
-
-    // Test 4: Fault LED slow flash at 15%
-    lcd_print_at(1, 0, "Fault SLOW  ");
-    led_set_brightness(LED_ID_FAULT, 15);
-    led_set_flash(LED_ID_FAULT, FLASH_SLOW);
     led_on(LED_ID_FAULT);
-    __delay_ms(3000);
-
-    // Test 5: All LEDs at 15% different flash rates
-    lcd_clear();
-    lcd_print_at(0, 0, "All LEDs 15%:");
-    lcd_print_at(1, 0, "PWR=steady");
-    lcd_print_at(2, 0, "Sig=fast, Flt=slow");
-    led_set_brightness(LED_ID_PWR, 15);
-    led_set_flash(LED_ID_PWR, 0);  // Steady
-    led_on(LED_ID_PWR);
-    __delay_ms(5000);
-
-    // Final state: Power on steady at 15%, others off
-    lcd_clear();
-    lcd_print_at(0, 0, "====================");
-    lcd_print_at(1, 0, "  LED Test Complete ");
-    lcd_print_at(2, 0, "   Build: 24        ");
-    lcd_print_at(3, 0, "====================");
-
+    __delay_ms(500);
+    led_off(LED_ID_PWR);
     led_off(LED_ID_SIGNAL);
     led_off(LED_ID_FAULT);
+    __delay_ms(200);
+
+    // Set power LED to dim steady state
     led_set_brightness(LED_ID_PWR, 15);
     led_set_flash(LED_ID_PWR, 0);
     led_on(LED_ID_PWR);
 
-    // Main loop - nothing to do, LEDs run via interrupt
+    // Show ready message - will be overwritten by mainboard commands
+    __delay_ms(1000);
+    lcd_clear();
+    lcd_print_at(0, 0, "Waiting for");
+    lcd_print_at(1, 0, "mainboard...");
+    lcd_print_at(2, 0, "");
+    lcd_print_at(3, 0, "");
+
+    // Debug variables from uart.c
+    extern volatile uint16_t uart_rx_count;
+    extern volatile uint8_t uart_last_byte;
+
+    // Debug variables from protocol.c
+    extern volatile uint16_t frames_received;
+    extern volatile uint16_t frames_error;
+
+    uint16_t last_count = 0;
+    uint16_t last_frames_ok = 0;
+    uint16_t last_frames_err = 0;
+    char debug_buf[21];
+
+    debug_println("Entering main loop");
+
+    // Main loop - process serial protocol
     while (1)
     {
-        __delay_ms(1000);
+        // Process any incoming serial data
+        protocol_process();
+
+        // Update debug display when frame counts change
+        if (frames_received != last_frames_ok || frames_error != last_frames_err)
+        {
+            // Debug output for frame status
+            debug_print("FRAME: ok=");
+            char cnt_buf[8];
+            sprintf(cnt_buf, "%u", frames_received);
+            debug_print(cnt_buf);
+            debug_print(" err=");
+            sprintf(cnt_buf, "%u", frames_error);
+            debug_print(cnt_buf);
+            debug_print(" rx=");
+            sprintf(cnt_buf, "%u", uart_rx_count);
+            debug_println(cnt_buf);
+
+            last_frames_ok = frames_received;
+            last_frames_err = frames_error;
+
+            // Flash Signal LED on valid frame
+            if (frames_received > 0)
+            {
+                LATAbits.LATA4 = 0;  // ON (active low)
+                __delay_ms(10);
+                LATAbits.LATA4 = 1;  // OFF
+            }
+        }
+
+        // Track byte count changes (no LCD update - let mainboard control display)
+        if (uart_rx_count != last_count)
+        {
+            last_count = uart_rx_count;
+        }
+
+        // Small delay to prevent tight loop
+        __delay_ms(10);
     }
 }

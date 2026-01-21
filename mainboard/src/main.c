@@ -4,7 +4,7 @@
  */
 // This commit is - just starting on menu timeout
 
-#define BUILD_VERSION 3  // Increment with each build
+#define BUILD_VERSION 6  // Fix timing - wait for display board init
 
 #include "../include/config.h"
 #include "../include/encoder.h"
@@ -52,25 +52,48 @@ void lcd_clear(void);
 void lcd_set_cursor(uint8_t row, uint8_t col);
 void beep(uint16_t duration_ms);
 
-// UART functions
+// =============================================================================
+// UART Functions
+// Ver_B_Rev_1: EUSART2 (RB6/RB7) for debug, EUSART1 (RC6) for display
+// =============================================================================
+
 void uart_init(void)
 {
-    TRISCbits.TRISC6 = 0; // TX pin as output
-    TRISCbits.TRISC7 = 1; // RX pin as input
+    // =============================================================================
+    // EUSART2 - Debug Serial (RB6=TX, RB7=RX) @ 9600 baud
+    // =============================================================================
+    TRISBbits.TRISB6 = 0; // TX2 pin as output
+    TRISBbits.TRISB7 = 1; // RX2 pin as input
 
-    TXSTA = 0b00100100;   // TX enabled, high speed
-    RCSTA = 0b10010000;   // Serial port enabled, RX enabled
-    BAUDCON = 0b00001000; // 16-bit baud rate generator
+    TXSTA2 = 0b00100100;   // TX enabled, BRGH=1 (high speed)
+    RCSTA2 = 0b10010000;   // Serial port enabled, RX enabled
+    BAUDCON2 = 0b00001000; // BRG16=1 (16-bit baud rate generator)
 
-    SPBRG = 68; // For 115200 baud @ 32MHz
-    SPBRGH = 0;
+    // 9600 baud @ 32MHz: SPBRG = (32000000 / (4 * 9600)) - 1 = 832
+    SPBRG2 = 0x40;   // Low byte of 832 (0x340)
+    SPBRGH2 = 0x03;  // High byte of 832
+
+    // =============================================================================
+    // EUSART1 - Display Serial (RC6=TX) @ 19200 baud
+    // =============================================================================
+    TRISCbits.TRISC6 = 0; // TX1 pin as output
+    TRISCbits.TRISC7 = 1; // RX1 pin as input (not currently used)
+
+    TXSTA1 = 0b00100100;   // TX enabled, high speed
+    RCSTA1 = 0b10010000;   // Serial port enabled, RX enabled
+    BAUDCON1 = 0b00001000; // 16-bit baud rate generator
+
+    // 19200 baud @ 32MHz: SPBRG = (32000000 / (4 * 19200)) - 1 = 416
+    SPBRG1 = 0xA0;  // Low byte of 416
+    SPBRGH1 = 0x01; // High byte of 416
 }
 
 void uart_write(char c)
 {
-    while (!TXSTAbits.TRMT)
+    // Use EUSART2 for debug output (RB6)
+    while (!TXSTA2bits.TRMT)
         ;
-    TXREG = c;
+    TXREG2 = c;
 }
 
 void uart_print(const char *str)
@@ -88,39 +111,185 @@ void uart_println(const char *str)
     uart_write('\n');
 }
 
+// =============================================================================
+// Display Serial Functions (EUSART1 - RC6 @ 19200 baud)
+// Protocol: [STX] [CMD] [LEN] [DATA...] [CRC16-LO] [CRC16-HI] [ETX]
+// =============================================================================
+
+#define DISP_STX 0x02
+#define DISP_ETX 0x03
+
+// Display commands
+#define DISP_CMD_LINE1    '1'  // 0x31 - Text for line 1
+#define DISP_CMD_LINE2    '2'  // 0x32 - Text for line 2
+#define DISP_CMD_LINE3    '3'  // 0x33 - Text for line 3
+#define DISP_CMD_LINE4    '4'  // 0x34 - Text for line 4
+#define DISP_CMD_CLEAR    'C'  // 0x43 - Clear display
+#define DISP_CMD_BRIGHT   'B'  // 0x42 - LCD Brightness (0-100)
+#define DISP_CMD_CONTRAST 'K'  // 0x4B - LCD Contrast (0-100)
+#define DISP_CMD_LED      'L'  // 0x4C - LED state bitmask
+
+// Send a byte to display board via EUSART1
+void disp_write(uint8_t c)
+{
+    while (!TXSTA1bits.TRMT)
+        ;
+    TXREG1 = c;
+}
+
+// Calculate Fletcher-16 checksum
+uint16_t fletcher16(const uint8_t *data, uint8_t len)
+{
+    uint16_t sum1 = 0;
+    uint16_t sum2 = 0;
+
+    for (uint8_t i = 0; i < len; i++)
+    {
+        sum1 = (sum1 + data[i]) % 255;
+        sum2 = (sum2 + sum1) % 255;
+    }
+
+    return (sum2 << 8) | sum1;
+}
+
+// Send a complete frame to display board
+void disp_send_frame(uint8_t cmd, const uint8_t *data, uint8_t len)
+{
+    // Build frame buffer for CRC calculation (cmd + len + data)
+    uint8_t frame[26];  // Max: 1 cmd + 1 len + 24 data
+    frame[0] = cmd;
+    frame[1] = len;
+    for (uint8_t i = 0; i < len; i++)
+    {
+        frame[2 + i] = data[i];
+    }
+
+    // Calculate CRC over cmd + len + data
+    uint16_t crc = fletcher16(frame, 2 + len);
+
+    // Send frame
+    disp_write(DISP_STX);
+    disp_write(cmd);
+    disp_write(len);
+    for (uint8_t i = 0; i < len; i++)
+    {
+        disp_write(data[i]);
+    }
+    disp_write(crc & 0xFF);        // CRC low byte
+    disp_write((crc >> 8) & 0xFF); // CRC high byte
+    disp_write(DISP_ETX);
+}
+
+// Send text to a specific line (1-4)
+void disp_print_line(uint8_t line, const char *text)
+{
+    if (line < 1 || line > 4) return;
+
+    uint8_t cmd = '0' + line;  // '1', '2', '3', or '4'
+    uint8_t len = 0;
+
+    // Count length (max 20 chars)
+    while (text[len] && len < 20)
+    {
+        len++;
+    }
+
+    disp_send_frame(cmd, (const uint8_t *)text, len);
+}
+
+// Clear display
+void disp_clear(void)
+{
+    disp_send_frame(DISP_CMD_CLEAR, NULL, 0);
+}
+
+// Set brightness (0-100%)
+void disp_set_brightness(uint8_t percent)
+{
+    if (percent > 100) percent = 100;
+    disp_send_frame(DISP_CMD_BRIGHT, &percent, 1);
+}
+
+// Set contrast (0-100%)
+void disp_set_contrast(uint8_t percent)
+{
+    if (percent > 100) percent = 100;
+    disp_send_frame(DISP_CMD_CONTRAST, &percent, 1);
+}
+
+// Set LED state (bit 0=PWR, bit 1=Signal, bit 2=Fault)
+void disp_set_leds(uint8_t led_mask)
+{
+    disp_send_frame(DISP_CMD_LED, &led_mask, 1);
+}
+
 // System initialization
 void system_init(void)
 {
-    OSCCON = 0x70;  // 8MHz internal oscillator
-    OSCTUNE = 0x40; // Enable 4x PLL (bit 6 = 1)
+    // Configure oscillator for 32MHz (8MHz HFINTOSC * 4x PLL)
+    OSCCONbits.IRCF = 0b110;   // 8MHz HFINTOSC
+    OSCCONbits.SCS = 0b00;     // Primary clock from config bits
 
-    while (!OSCCONbits.IOFS)
+    // Enable PLL (PLLEN bit in OSCTUNE)
+    OSCTUNEbits.PLLEN = 1;     // Enable 4x PLL
+
+    // Wait for oscillator stable
+    while (!OSCCONbits.HFIOFS)
         ;
 
-    ADCON1 = 0x0F; // All pins digital
+    // =============================================================================
+    // Ver_B_Rev_1 ADC Configuration
+    // =============================================================================
+    // Configure ADC: RA0, RA1, RA2 as analog inputs, rest digital
+    ANSELA = 0x07;  // RA0, RA1, RA2 as analog (AN0, AN1, AN2)
+    ANSELB = 0x00;  // All PORTB digital
+    ANSELC = 0x00;  // All PORTC digital
 
     LATA = 0;
     LATB = 0;
     LATC = 0;
 
+    // =============================================================================
+    // Buzzer Configuration (RC0 - Active High)
+    // =============================================================================
     BUZZER_TRIS = 0;
     BUZZER = 0;
 
-    TRISBbits.TRISB1 = 1; // ENC_A input
-    TRISBbits.TRISB2 = 1; // ENC_B input
-    TRISBbits.TRISB6 = 1; // ENC_SW input
-    TRISBbits.TRISB0 = 1; // RTC 1Hz square wave input (INT0)
+    // =============================================================================
+    // Encoder Configuration (RB1=A, RB2=B, RB3=SW)
+    // =============================================================================
+    ENC_A_TRIS = 1;   // ENC_A input
+    ENC_B_TRIS = 1;   // ENC_B input
+    ENC_SW_TRIS = 1;  // ENC_SW input (RB3)
+
+    // =============================================================================
+    // RTC Interrupt (RB0)
+    // =============================================================================
+    RTC_INT_TRIS = 1; // RTC 1Hz square wave input
+
     INTCON2bits.RBPU = 0; // Enable PORTB pull-ups
 
-    // Configure digital inputs from MAX22193
-    TRISAbits.TRISA4 = 1; // OP1 input
-    TRISBbits.TRISB4 = 1; // OP2 input
-    TRISBbits.TRISB5 = 1; // OP3 input
-    TRISBbits.TRISB3 = 1; // OP4 input
+    // =============================================================================
+    // Digital Inputs (RA4-RA7 - Active High)
+    // =============================================================================
+    DIG_IN1_TRIS = 1; // RA4 - Running/Stopped
+    DIG_IN2_TRIS = 1; // RA5 - PNP1
+    DIG_IN3_TRIS = 1; // RA6 - PNP2
+    DIG_IN4_TRIS = 1; // RA7 - PNP3
 
-    // Configure relay output
-    RELAY_TRIS = 0; // Output
-    RELAY_PIN = 1;  // Start with relay off
+    // =============================================================================
+    // Relay Outputs (RB5 primary, RB4 secondary - Active High)
+    // =============================================================================
+    RELAY1_TRIS = 0;  // RB5 output - primary relay
+    RELAY1_PIN = 0;   // Start with relay OFF (active high, 0 = off)
+    RELAY2_TRIS = 0;  // RB4 output - secondary relay (not used)
+    RELAY2_PIN = 0;   // Start off
+
+    // =============================================================================
+    // EEPROM Write Protect (RC2 - Active Low)
+    // =============================================================================
+    EEPROM_WP_TRIS = 0;
+    EEPROM_WP = 0;    // Write protect enabled (low)
 }
 
 void trigger_relay_pulse(uint8_t latch_mode)
@@ -149,7 +318,7 @@ void trigger_relay_pulse(uint8_t latch_mode)
             uart_println(buf);
         }
 
-        RELAY_PIN = 0; // OPEN relay (de-energize)
+        RELAY1_PIN = 1; // ENERGIZE relay (active high, 1 = ON)
     }
 }
 
@@ -160,8 +329,8 @@ void relay_close(void)
     {
         relay_state = 0;
         relay_counter = 0;
-        RELAY_PIN = 1; // CLOSE relay (energize)
-        uart_println("Relay CLOSED - fault cleared");
+        RELAY1_PIN = 0; // DE-ENERGIZE relay (active high, 0 = OFF)
+        uart_println("Relay DE-ENERGIZED - fault cleared");
     }
 }
 
@@ -192,6 +361,68 @@ void main(void)
     menu_timeout_reload = (uint16_t)get_menu_timeout_seconds() * 500;
 
     uart_init();
+
+    // Debug: 1Hz tick-tock with buzzer to verify MCU is running
+    // Buzzer will beep even if serial isn't working
+    for (uint8_t i = 0; i < 5; i++)
+    {
+        BUZZER = 1;
+        __delay_ms(50);
+        BUZZER = 0;
+
+        // Try sending a simple character directly
+        while (!TXSTA2bits.TRMT);  // Wait for transmit buffer empty
+        TXREG2 = (i % 2) ? 'T' : 't';
+        while (!TXSTA2bits.TRMT);
+        TXREG2 = '\r';
+        while (!TXSTA2bits.TRMT);
+        TXREG2 = '\n';
+
+        __delay_ms(950);
+    }
+
+    uart_println("Serial OK!");
+
+    // =============================================================================
+    // Test display serial communication
+    // =============================================================================
+    uart_println("Testing display serial (EUSART1)...");
+
+    // Wait for display board to complete initialization
+    // Display board has: 500ms power delay + LCD init + LED test + 1000ms ready delay
+    // Total ~3 seconds - wait 4 seconds to be safe
+    uart_println("Waiting 4 seconds for display board...");
+    __delay_ms(4000);
+
+    // Send test messages to display board
+    disp_clear();
+    __delay_ms(50);
+
+    disp_print_line(1, "====================");
+    __delay_ms(20);
+    disp_print_line(2, " Mainboard Control  ");
+    __delay_ms(20);
+    disp_print_line(3, "   Serial Test OK   ");
+    __delay_ms(20);
+    disp_print_line(4, "====================");
+
+    uart_println("Display test frames sent");
+
+    // Test LED control
+    __delay_ms(500);
+    disp_set_leds(0x01);  // PWR LED on
+    uart_println("LED: PWR on");
+    __delay_ms(500);
+    disp_set_leds(0x03);  // PWR + Signal on
+    uart_println("LED: PWR + Signal on");
+    __delay_ms(500);
+    disp_set_leds(0x07);  // All on
+    uart_println("LED: All on");
+    __delay_ms(500);
+    disp_set_leds(0x01);  // Back to PWR only
+    uart_println("LED: PWR only");
+
+    uart_println("Display serial test complete");
 
     uart_println("=== SYSTEM STARTUP ===");
     char buf[50];
@@ -316,11 +547,11 @@ void main(void)
             // Read all 3 ADC channels in synchronized set (~3ms total)
             ad7994_read_all(&adc_ch1, &adc_ch2, &adc_ch3);
 
-            // Read digital inputs from MAX22193
-            dig_in1 = PORTAbits.RA4;  // OP1
-            dig_in2 = PORTBbits.RB4;  // OP2
-            dig_in3 = PORTBbits.RB5;  // OP3
-            dig_in4 = PORTBbits.RB3;  // OP4
+            // Read digital inputs (RA4-RA7 - Active High)
+            dig_in1 = DIG_IN1_PORT;  // RA4 - Running/Stopped
+            dig_in2 = DIG_IN2_PORT;  // RA5 - PNP1
+            dig_in3 = DIG_IN3_PORT;  // RA6 - PNP2
+            dig_in4 = DIG_IN4_PORT;  // RA7 - PNP3
 
             // Clean status line once per second (every 2nd sample)
             second_counter++;
