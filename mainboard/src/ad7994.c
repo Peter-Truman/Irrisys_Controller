@@ -1,8 +1,20 @@
 // ad7994.c - 12-bit 4-channel ADC driver with debug output
-#include "../include/ad7994.h"
-#include "../include/i2c.h"
+// =============================================================================
+// Ver_B_Rev_1: AD7994 external ADC is DEPRECATED
+// Using PIC internal ADC on RA0-RA2 instead
+// =============================================================================
+
 #include "../include/config.h"
 #include <xc.h>
+#include <stdint.h>
+
+// =============================================================================
+// OLD AD7994 IMPLEMENTATION - COMMENTED OUT (using PIC internal ADC)
+// =============================================================================
+#if 0  // Disabled - AD7994 removed, using PIC internal ADC
+
+#include "../include/ad7994.h"
+#include "../include/i2c.h"
 #include <stdio.h>
 
 // External UART function
@@ -11,7 +23,7 @@ extern void uart_println(const char *str);
 // CONVST pin on RC5
 #define ADC_CONVST LATCbits.LATC5
 
-uint8_t ad7994_init(void)
+uint8_t ad7994_init_old(void)
 {
     uint8_t i2c_error;
 
@@ -134,4 +146,26 @@ void ad7994_read_all(uint16_t *ch1, uint16_t *ch2, uint16_t *ch3)
     *ch2 = 0;
     *ch3 = 0;
     uart_println("CH2/CH3: Not configured (testing CH1 only)");
+}
+
+#endif // End of disabled AD7994 code
+
+// =============================================================================
+// STUB FUNCTIONS - Allow code to compile during transition
+// Will be replaced with PIC internal ADC driver
+// =============================================================================
+
+uint16_t ad7994_read_channel(uint8_t channel)
+{
+    // TODO: Replace with PIC internal ADC read
+    (void)channel;  // Suppress unused parameter warning
+    return 0;
+}
+
+void ad7994_read_all(uint16_t *ch1, uint16_t *ch2, uint16_t *ch3)
+{
+    // TODO: Replace with PIC internal ADC reads
+    *ch1 = 0;
+    *ch2 = 0;
+    *ch3 = 0;
 }

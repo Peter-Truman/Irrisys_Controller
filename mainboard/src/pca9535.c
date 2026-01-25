@@ -1,14 +1,24 @@
 /**
  * PCA9535DWR - 16-bit I2C I/O Expander Driver
  * I2C Address: 0x21
+ *
+ * =============================================================================
+ * Ver_B_Rev_1: PCA9535 I/O expander is DEPRECATED
+ * LEDs are now controlled by the display board
+ * =============================================================================
  */
 
-#define _XTAL_FREQ 32000000UL  // 32MHz (8MHz internal + 4x PLL)
+#include "../include/config.h"
+#include <xc.h>
+
+// =============================================================================
+// OLD PCA9535 IMPLEMENTATION - COMMENTED OUT (LEDs now on display board)
+// =============================================================================
+#if 0  // Disabled - PCA9535 removed, LEDs on display board
 
 #include "../include/pca9535.h"
 #include "../include/i2c.h"
 #include "../include/eeprom.h"
-#include <xc.h>
 
 // Internal state variable to track Port 0 output state
 static uint8_t port0_output_state = 0x00;
@@ -297,3 +307,10 @@ void pca9535_update_power_led(void)
         }
     }
 }
+
+#endif // End of disabled PCA9535 code
+
+// =============================================================================
+// STUB FUNCTIONS - Allow code to compile during transition
+// All PCA9535 functions are now macros in pca9535.h that do nothing
+// =============================================================================

@@ -61,7 +61,7 @@ void __interrupt() isr(void)
             else if (relay_state == 1 && !relay_latch_mode && relay_counter == 0)
             {
                 // Pulse complete - close relay automatically
-                LATCbits.LATC1 = 1; // CLOSE relay
+                RELAY1_PIN = 0; // CLOSE relay (active high, so 0 = off)
                 relay_state = 0;
             }
             // If latch_mode==1, relay stays open until relay_close() called

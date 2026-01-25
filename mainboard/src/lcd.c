@@ -1,169 +1,134 @@
-// lcd.c - LCD implementation for IRRISYS Controller
-// Uses PORTA: RA6=RS, RA5=RW, RA7=EN, RA0-3=D4-D7
+// lcd.c - LCD wrapper that sends to display board via serial
+// =============================================================================
+// Ver_B_Rev_1: LCD is on the display board
+// Buffer entire screen locally, send all 4 lines on lcd_flush()
+// =============================================================================
+
 #include "../include/config.h"
 #include <xc.h>
 #include <stdint.h>
+#include <string.h>
 
-// Helper function to write a nibble to LCD data pins
-void lcd_write_nibble(uint8_t nibble)
-{
-    LCD_D4 = (nibble & 0x01) ? 1 : 0;
-    LCD_D5 = (nibble & 0x02) ? 1 : 0;
-    LCD_D6 = (nibble & 0x04) ? 1 : 0;
-    LCD_D7 = (nibble & 0x08) ? 1 : 0;
-}
+// Line buffers (20 chars + null terminator)
+static char line_buffer[4][21];
+static uint8_t current_row = 0;
+static uint8_t current_col = 0;
+static uint8_t dirty_flags = 0;  // Bit flags for which lines changed
 
-// Send command to LCD (4-bit mode)
-void lcd_cmd(uint8_t cmd)
-{
-    // Upper nibble
-    lcd_write_nibble(cmd >> 4);
-    LCD_RS = 0; // Command mode
-    LCD_RW = 0; // Write mode
-    LCD_EN = 1; // Enable high
-    __delay_us(1);
-    LCD_EN = 0; // Enable low
-    __delay_us(50);
+// External display serial functions (defined in main.c)
+extern void disp_print_line(uint8_t line, const char *text);
+extern void disp_clear(void);
 
-    // Lower nibble
-    lcd_write_nibble(cmd & 0x0F);
-    LCD_RS = 0; // Command mode
-    LCD_RW = 0; // Write mode
-    LCD_EN = 1; // Enable high
-    __delay_us(1);
-    LCD_EN = 0; // Enable low
+// =============================================================================
+// LCD Functions - Buffer locally, send on flush
+// =============================================================================
 
-    // Longer delay for clear and home commands
-    if (cmd == 0x01 || cmd == 0x02)
-    {
-        __delay_ms(2);
-    }
-    else
-    {
-        __delay_us(50);
-    }
-}
-
-// Send data to LCD (4-bit mode)
-void lcd_data(uint8_t data)
-{
-    // Upper nibble
-    lcd_write_nibble(data >> 4);
-    LCD_RS = 1; // Data mode
-    LCD_RW = 0; // Write mode
-    LCD_EN = 1; // Enable high
-    __delay_us(1);
-    LCD_EN = 0; // Enable low
-    __delay_us(50);
-
-    // Lower nibble
-    lcd_write_nibble(data & 0x0F);
-    LCD_RS = 1; // Data mode
-    LCD_RW = 0; // Write mode
-    LCD_EN = 1; // Enable high
-    __delay_us(1);
-    LCD_EN = 0; // Enable low
-    __delay_us(50);
-}
-
-// Initialize LCD in 4-bit mode
 void lcd_init(void)
 {
-    // Configure LCD pins as outputs (PORTA only - don't touch TRISC!)
-    TRISA &= 0xF0;        // RA0-RA3 as outputs (data)
-    TRISAbits.TRISA5 = 0; // RA5 = RW output
-    TRISAbits.TRISA6 = 0; // RA6 = RS output
-    TRISAbits.TRISA7 = 0; // RA7 = EN output
-
-    // Clear LCD control pins
-    LCD_RS = 0;
-    LCD_RW = 0;
-    LCD_EN = 0;
-    lcd_write_nibble(0);
-
-    // Wait for LCD power-up
-    __delay_ms(50);
-
-    // Initialize sequence for 4-bit mode
-    lcd_write_nibble(0x3);
-    LCD_RS = 0;
-    LCD_RW = 0;
-    LCD_EN = 1;
-    __delay_us(1);
-    LCD_EN = 0;
-    __delay_ms(5);
-
-    lcd_write_nibble(0x3);
-    LCD_EN = 1;
-    __delay_us(1);
-    LCD_EN = 0;
-    __delay_ms(1);
-
-    lcd_write_nibble(0x3);
-    LCD_EN = 1;
-    __delay_us(1);
-    LCD_EN = 0;
-    __delay_ms(1);
-
-    // Set to 4-bit mode
-    lcd_write_nibble(0x2);
-    LCD_EN = 1;
-    __delay_us(1);
-    LCD_EN = 0;
-    __delay_ms(1);
-
-    // Function set: 4-bit, 2 lines, 5x8 font
-    lcd_cmd(0x28);
-
-    // Display on, cursor off, blink off
-    lcd_cmd(0x0C);
-
-    // Clear display
-    lcd_cmd(0x01);
-
-    // Entry mode: increment, no shift
-    lcd_cmd(0x06);
-}
-
-// Set cursor position (matches main.c function name)
-void lcd_set_cursor(uint8_t row, uint8_t col)
-{
-    uint8_t addr;
-
-    switch (row)
+    // Clear all line buffers
+    for (uint8_t i = 0; i < 4; i++)
     {
-    case 0:
-        addr = 0x00 + col;
-        break;
-    case 1:
-        addr = 0x40 + col;
-        break;
-    case 2:
-        addr = 0x94 + col;
-        break;
-    case 3:
-        addr = 0xD4 + col;
-        break;
-    default:
-        addr = 0x00;
-        break;
+        memset(line_buffer[i], ' ', 20);
+        line_buffer[i][20] = '\0';
     }
-
-    lcd_cmd(0x80 | addr);
+    current_row = 0;
+    current_col = 0;
+    dirty_flags = 0;
 }
 
-// Write a string to LCD (matches main.c function name)
-void lcd_print(const char *str)
-{
-    while (*str)
-    {
-        lcd_data(*str++);
-    }
-}
-
-// Clear LCD screen
 void lcd_clear(void)
 {
-    lcd_cmd(0x01);
-    __delay_ms(2);
+    // Clear all line buffers to spaces
+    for (uint8_t i = 0; i < 4; i++)
+    {
+        memset(line_buffer[i], ' ', 20);
+        line_buffer[i][20] = '\0';
+    }
+    current_row = 0;
+    current_col = 0;
+    dirty_flags = 0x0F;  // All lines dirty - will be sent on lcd_flush()
+
+    // Note: Don't send disp_clear() here - lcd_flush() will send all 4 lines
+    // which effectively clears the display by overwriting with spaces
+}
+
+void lcd_set_cursor(uint8_t row, uint8_t col)
+{
+    // Just update cursor position - don't send anything
+    if (row < 4) current_row = row;
+    if (col < 20) current_col = col;
+}
+
+void lcd_print(const char *str)
+{
+    // Write characters to line buffer starting at current position
+    while (*str && current_col < 20)
+    {
+        line_buffer[current_row][current_col] = *str;
+        current_col++;
+        str++;
+    }
+
+    // Mark this line as dirty
+    dirty_flags |= (1 << current_row);
+}
+
+// Print at specific position - combines set_cursor + print
+void lcd_print_at(uint8_t row, uint8_t col, const char *str)
+{
+    if (row >= 4) return;
+
+    current_row = row;
+    current_col = col;
+
+    // Write characters starting at specified column
+    while (*str && current_col < 20)
+    {
+        line_buffer[current_row][current_col] = *str;
+        current_col++;
+        str++;
+    }
+
+    // Mark this line as dirty
+    dirty_flags |= (1 << current_row);
+}
+
+// Send all dirty lines to display board
+void lcd_flush(void)
+{
+    for (uint8_t i = 0; i < 4; i++)
+    {
+        if (dirty_flags & (1 << i))
+        {
+            disp_print_line(i + 1, line_buffer[i]);
+        }
+    }
+    dirty_flags = 0;  // Clear all dirty flags
+}
+
+// Send all 4 lines unconditionally
+void lcd_refresh(void)
+{
+    for (uint8_t i = 0; i < 4; i++)
+    {
+        disp_print_line(i + 1, line_buffer[i]);
+    }
+    dirty_flags = 0;
+}
+
+// Legacy stubs for compatibility
+void lcd_cmd(uint8_t cmd)
+{
+    (void)cmd;  // Not used - display board handles commands
+}
+
+void lcd_data(uint8_t data)
+{
+    // Write single character at current position
+    if (current_col < 20 && current_row < 4)
+    {
+        line_buffer[current_row][current_col] = (char)data;
+        current_col++;
+        dirty_flags |= (1 << current_row);
+    }
 }

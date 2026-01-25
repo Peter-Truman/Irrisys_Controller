@@ -1,7 +1,21 @@
+/**
+ * AD7994 - 12-bit 4-channel I2C ADC
+ *
+ * =============================================================================
+ * Ver_B_Rev_1: AD7994 external ADC is DEPRECATED
+ * Using PIC internal ADC on RA0-RA2 instead
+ * =============================================================================
+ */
+
 #ifndef AD7994_H
 #define AD7994_H
 
 #include <stdint.h>
+
+// =============================================================================
+// OLD AD7994 IMPLEMENTATION - COMMENTED OUT (using PIC internal ADC)
+// =============================================================================
+#if 0  // Disabled - AD7994 removed, using PIC internal ADC
 
 // AD7994 I2C Address - CONFIRMED via logic analyzer
 // AD7994BRUZ-0REEL actual address: 0x21 (7-bit)
@@ -25,6 +39,20 @@
 
 // Function prototypes
 uint8_t ad7994_init(void);
+uint16_t ad7994_read_channel(uint8_t channel);
+void ad7994_read_all(uint16_t *ch1, uint16_t *ch2, uint16_t *ch3);
+
+#endif // End of disabled AD7994 code
+
+// =============================================================================
+// STUB FUNCTIONS - Allow code to compile during transition
+// Will be replaced with PIC internal ADC driver
+// =============================================================================
+
+// Stub macros - do nothing
+#define ad7994_init()       (0)
+
+// Stub functions that need actual definitions (in ad7994.c)
 uint16_t ad7994_read_channel(uint8_t channel);
 void ad7994_read_all(uint16_t *ch1, uint16_t *ch2, uint16_t *ch3);
 

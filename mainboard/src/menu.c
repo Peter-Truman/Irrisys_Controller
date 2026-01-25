@@ -7,6 +7,7 @@
 #include "../include/config.h"
 #include "../include/encoder.h"
 #include "../include/menu.h"
+#include "../include/lcd.h"
 #include "../include/eeprom.h"
 #include "../include/rtc.h"
 #include <stdio.h>
@@ -64,11 +65,11 @@ const item_options_t menu_item_options[] = {
 
 // Test menu items for OPTIONS menu
 const char *options_menu[] = {
-    "Main Menu",
-    "Setup Menu",
-    "Utility Menu",
+    "Setup",
+    "Utility",
     "About",
-    "Exit"};
+    "Exit",
+    ""}; // 4 items, empty 5th for array safety
 
 // Buffers for editable values - must be modifiable
 static char value_enable[10] = "Enabled";
@@ -649,6 +650,8 @@ void menu_update_time_value(void)
     lcd_print("(");
     lcd_print(value_buf);
     lcd_print(")");
+
+    lcd_flush();  // Send buffered screen to display board
 }
 
 //=============================================================================
@@ -972,17 +975,15 @@ void menu_update_datetime_display(void)
     }
     else
         lcd_print_at(3, 1, "Back");
+
+    // Note: lcd_flush() called by menu_draw_utility() after this returns
 }
 
 //=============================================================================
 // LCD HELPER FUNCTIONS
 //=============================================================================
 
-void lcd_print_at(uint8_t row, uint8_t col, const char *str)
-{
-    lcd_set_cursor(row, col);
-    lcd_print(str);
-}
+// lcd_print_at is now defined in lcd.c
 
 void lcd_clear_line(uint8_t row)
 {
@@ -1360,6 +1361,8 @@ void menu_update_edit_value(void)
     lcd_print("(");
     lcd_print(display_buf);
     lcd_print(")");
+
+    lcd_flush();  // Send buffered screen to display board
 }
 
 /**
@@ -1417,6 +1420,8 @@ void menu_update_numeric_value(void)
     lcd_print("(");
     lcd_print(value_buf);
     lcd_print(")");
+
+    lcd_flush();  // Send buffered screen to display board
 }
 
 //=============================================================================
@@ -1453,6 +1458,8 @@ void menu_draw_options(void)
             lcd_print_at(i + 1, 1, options_menu[item_index]);
         }
     }
+
+    lcd_flush();  // Send buffered screen to display board
 }
 
 void menu_draw_input(void)
@@ -1601,6 +1608,8 @@ void menu_draw_input(void)
             }
         }
     }
+
+    lcd_flush();  // Send buffered screen to display board
 }
 
 void menu_draw_setup(void)
@@ -1678,6 +1687,8 @@ void menu_draw_setup(void)
             }
         }
     }
+
+    lcd_flush();  // Send buffered screen to display board
 }
 
 /**
@@ -1864,7 +1875,10 @@ void menu_draw_clock(void)
             lcd_print(show_brackets == 1 ? "]" : ")");
         }
     }
+
+    lcd_flush();  // Send buffered screen to display board
 }
+
 /**
  * Draw UTILITY menu
  * Special handling for Set Clock (shows date/time editor when editing)
@@ -1881,6 +1895,7 @@ void menu_draw_utility(void)
 
         menu_update_datetime_display();
 
+        lcd_flush();  // Send buffered screen to display board
         return;
     }
 
@@ -1990,7 +2005,10 @@ void menu_draw_utility(void)
             }
         }
     }
+
+    lcd_flush();  // Send buffered screen to display board
 }
+
 //=============================================================================
 // ENCODER HANDLING
 //=============================================================================
@@ -2658,16 +2676,13 @@ void menu_handle_button(uint8_t press_type)
         {
             if (press_type == 1) // Short press
             {
-                if (current_menu == 0) // OPTIONS menu
+                if (current_menu == 0) // OPTIONS menu (4 items: Setup, Utility, About, Exit)
                 {
                     beep(50);
 
                     switch (menu.current_line)
                     {
-                    case 0: // Main Menu
-                        break;
-
-                    case 1: // Setup Menu
+                    case 0: // Setup
                         current_menu = 2;
                         menu.current_line = 0;
                         menu.top_line = 0;
@@ -2675,7 +2690,7 @@ void menu_handle_button(uint8_t press_type)
                         menu_draw_setup();
                         break;
 
-                    case 2: // Utility Menu
+                    case 1: // Utility
                         rebuild_utility_menu();
                         current_menu = 4; // UTILITY menu is #4
                         menu.current_line = 0;
@@ -2687,10 +2702,11 @@ void menu_handle_button(uint8_t press_type)
                         menu_draw_utility();
                         break;
 
-                    case 3: // About
+                    case 2: // About
+                        // TODO: Show about screen
                         break;
 
-                    case 4: // Exit
+                    case 3: // Exit
                         if (save_pending)
                         {
                             save_current_config();

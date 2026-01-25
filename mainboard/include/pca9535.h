@@ -9,6 +9,11 @@
  * - P00: Power LED
  * - P01: Signal LED
  * - P02: Fault LED
+ *
+ * =============================================================================
+ * Ver_B_Rev_1: PCA9535 I/O expander is DEPRECATED
+ * LEDs are now controlled by the display board
+ * =============================================================================
  */
 
 #ifndef PCA9535_H
@@ -16,6 +21,11 @@
 
 #include <xc.h>
 #include <stdint.h>
+
+// =============================================================================
+// OLD PCA9535 IMPLEMENTATION - COMMENTED OUT (LEDs now on display board)
+// =============================================================================
+#if 0  // Disabled - PCA9535 removed, LEDs on display board
 
 // I2C Address (7-bit): 0100001 = 0x21
 #define PCA9535_I2C_ADDR    0x21
@@ -58,5 +68,28 @@ void pca9535_led_test(void);
 
 // Power LED Management (called from main loop)
 void pca9535_update_power_led(void);
+
+#endif // End of disabled PCA9535 code
+
+// =============================================================================
+// STUB FUNCTIONS - Allow code to compile during transition
+// LEDs are now controlled via serial commands to display board
+// =============================================================================
+
+// Stub macros - do nothing
+#define pca9535_init()              ((void)0)
+#define pca9535_led_init()          ((void)0)
+#define pca9535_led_test()          ((void)0)
+#define pca9535_update_power_led()  ((void)0)
+#define pca9535_led_on(mask)        ((void)0)
+#define pca9535_led_off(mask)       ((void)0)
+#define pca9535_led_toggle(mask)    ((void)0)
+#define pca9535_led_set(mask, st)   ((void)0)
+
+// LED masks still needed for compatibility (used by other code)
+#define LED_PWR_MASK    0x01
+#define LED_SIGNAL_MASK 0x02
+#define LED_FAULT_MASK  0x04
+#define LED_ALL_MASK    0x07
 
 #endif // PCA9535_H

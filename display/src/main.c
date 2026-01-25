@@ -5,7 +5,7 @@
  * Phase 2: Serial protocol integration
  */
 
-#define BUILD_VERSION 33
+#define BUILD_VERSION 34
 
 #include "../include/config.h"
 #include "../include/lcd.h"
@@ -148,7 +148,7 @@ void main(void)
 
     // Initialize debug serial first
     debug_init();
-    debug_println("Display Board v33");
+    debug_println("Display Board v34");
     debug_println("Debug on RB4 @ 9600");
 
     // Turn on backlight immediately
@@ -180,7 +180,7 @@ void main(void)
     lcd_clear();
     lcd_print_at(0, 0, "====================");
     lcd_print_at(1, 0, "  IrrisysPG Display ");
-    lcd_print_at(2, 0, "   Build: 25        ");
+    lcd_print_at(2, 0, "   Build: 34        ");
     lcd_print_at(3, 0, "====================");
 
     // Brief LED test - flash all LEDs once
@@ -209,20 +209,7 @@ void main(void)
     lcd_print_at(2, 0, "");
     lcd_print_at(3, 0, "");
 
-    // Debug variables from uart.c
-    extern volatile uint16_t uart_rx_count;
-    extern volatile uint8_t uart_last_byte;
-
-    // Debug variables from protocol.c
-    extern volatile uint16_t frames_received;
-    extern volatile uint16_t frames_error;
-
-    uint16_t last_count = 0;
-    uint16_t last_frames_ok = 0;
-    uint16_t last_frames_err = 0;
-    char debug_buf[21];
-
-    debug_println("Entering main loop");
+    debug_println("Ready");
 
     // Main loop - process serial protocol
     while (1)
@@ -230,40 +217,7 @@ void main(void)
         // Process any incoming serial data
         protocol_process();
 
-        // Update debug display when frame counts change
-        if (frames_received != last_frames_ok || frames_error != last_frames_err)
-        {
-            // Debug output for frame status
-            debug_print("FRAME: ok=");
-            char cnt_buf[8];
-            sprintf(cnt_buf, "%u", frames_received);
-            debug_print(cnt_buf);
-            debug_print(" err=");
-            sprintf(cnt_buf, "%u", frames_error);
-            debug_print(cnt_buf);
-            debug_print(" rx=");
-            sprintf(cnt_buf, "%u", uart_rx_count);
-            debug_println(cnt_buf);
-
-            last_frames_ok = frames_received;
-            last_frames_err = frames_error;
-
-            // Flash Signal LED on valid frame
-            if (frames_received > 0)
-            {
-                LATAbits.LATA4 = 0;  // ON (active low)
-                __delay_ms(10);
-                LATAbits.LATA4 = 1;  // OFF
-            }
-        }
-
-        // Track byte count changes (no LCD update - let mainboard control display)
-        if (uart_rx_count != last_count)
-        {
-            last_count = uart_rx_count;
-        }
-
         // Small delay to prevent tight loop
-        __delay_ms(10);
+        __delay_ms(5);
     }
 }

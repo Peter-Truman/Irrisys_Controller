@@ -4,7 +4,7 @@
  */
 // This commit is - just starting on menu timeout
 
-#define BUILD_VERSION 6  // Fix timing - wait for display board init
+#define BUILD_VERSION 16  // Startup: splash -> beeps -> 2s -> 200ms beep -> Main Screen
 
 #include "../include/config.h"
 #include "../include/encoder.h"
@@ -13,6 +13,7 @@
 #include "../include/i2c.h"
 #include "../include/rtc.h"
 #include "../include/pca9535.h"
+#include "../include/lcd.h"
 #include "ad7994.h"
 #include <stdio.h>
 
@@ -361,68 +362,17 @@ void main(void)
     menu_timeout_reload = (uint16_t)get_menu_timeout_seconds() * 500;
 
     uart_init();
-
-    // Debug: 1Hz tick-tock with buzzer to verify MCU is running
-    // Buzzer will beep even if serial isn't working
-    for (uint8_t i = 0; i < 5; i++)
-    {
-        BUZZER = 1;
-        __delay_ms(50);
-        BUZZER = 0;
-
-        // Try sending a simple character directly
-        while (!TXSTA2bits.TRMT);  // Wait for transmit buffer empty
-        TXREG2 = (i % 2) ? 'T' : 't';
-        while (!TXSTA2bits.TRMT);
-        TXREG2 = '\r';
-        while (!TXSTA2bits.TRMT);
-        TXREG2 = '\n';
-
-        __delay_ms(950);
-    }
-
     uart_println("Serial OK!");
 
     // =============================================================================
-    // Test display serial communication
+    // Wait for display board initialization
     // =============================================================================
-    uart_println("Testing display serial (EUSART1)...");
-
-    // Wait for display board to complete initialization
     // Display board has: 500ms power delay + LCD init + LED test + 1000ms ready delay
-    // Total ~3 seconds - wait 4 seconds to be safe
-    uart_println("Waiting 4 seconds for display board...");
-    __delay_ms(4000);
+    // Total ~2.7 seconds - wait 3 seconds to be safe
+    __delay_ms(3000);
 
-    // Send test messages to display board
-    disp_clear();
-    __delay_ms(50);
-
-    disp_print_line(1, "====================");
-    __delay_ms(20);
-    disp_print_line(2, " Mainboard Control  ");
-    __delay_ms(20);
-    disp_print_line(3, "   Serial Test OK   ");
-    __delay_ms(20);
-    disp_print_line(4, "====================");
-
-    uart_println("Display test frames sent");
-
-    // Test LED control
-    __delay_ms(500);
+    // Set power LED on display board
     disp_set_leds(0x01);  // PWR LED on
-    uart_println("LED: PWR on");
-    __delay_ms(500);
-    disp_set_leds(0x03);  // PWR + Signal on
-    uart_println("LED: PWR + Signal on");
-    __delay_ms(500);
-    disp_set_leds(0x07);  // All on
-    uart_println("LED: All on");
-    __delay_ms(500);
-    disp_set_leds(0x01);  // Back to PWR only
-    uart_println("LED: PWR only");
-
-    uart_println("Display serial test complete");
 
     uart_println("=== SYSTEM STARTUP ===");
     char buf[50];
@@ -501,28 +451,48 @@ void main(void)
 
     uart_println("=== IRRISYS Menu System ===");
 
+    // =============================================================================
+    // Startup sequence: Splash -> Beeps -> 2s wait -> 200ms beep -> Main Screen
+    // =============================================================================
+
+    // 1. Clear screen and show splash with version
     lcd_clear();
     lcd_set_cursor(0, 0);
-    lcd_print("IRRISYS v1.0");
+    lcd_print("    IRRISYS v1.0    ");
     lcd_set_cursor(1, 0);
-    lcd_print("Initializing...");
+    sprintf(buf, "   Mainboard v%d    ", BUILD_VERSION);
+    lcd_print(buf);
+    lcd_set_cursor(2, 0);
+    lcd_print("                    ");
+    lcd_set_cursor(3, 0);
+    lcd_print("  Pump Protection   ");
+    lcd_flush();
 
-    beep(100);
-    __delay_ms(100);
-    beep(100);
+    // 2. Rapid startup beeps (50ms on, 100ms off x 5)
+    for (uint8_t i = 0; i < 5; i++)
+    {
+        beep(50);
+        __delay_ms(100);
+    }
 
-    //__delay_ms(2000);
+    // 3. Wait 2 seconds with splash visible
+    __delay_ms(2000);
 
-    // Start with OPTIONS menu (default behavior)
+    // 4. Single 200ms beep to signal ready
+    beep(200);
+
+    // 5. Go to Main Screen (idle state)
     extern uint8_t current_menu;
-    current_menu = 255;   // 255 = Main screen (not in menus
-    menu.total_items = 5; // OPTIONS menu has 5 items
-
-    menu_draw_options(); // Draw OPTIONS menu instead
+    current_menu = 255;   // 255 = Main Screen (idle)
+    lcd_clear();
+    lcd_set_cursor(0, 0);
+    lcd_print("MAIN SCREEN");
+    lcd_set_cursor(1, 0);
+    lcd_print("Ready");
+    lcd_flush();
 
     // Main loop variables
     int16_t last_encoder = 0;
-    uint8_t last_button = 0;
     static uint32_t blink_timer = 0;
     static uint16_t encoder_activity_timer = 0; // Track encoder activity
 
@@ -576,16 +546,7 @@ void main(void)
 
         __delay_ms(50); // Update once per second
 
-        // Display CH1 on LCD top line
-        char lcd_buf[17];
-        // sprintf(lcd_buf, "CH1:%4u CH2:%4u", adc_ch1, adc_ch2);
-        lcd_set_cursor(0, 0);
-        // lcd_print(lcd_buf);
-
-        // sprintf(lcd_buf, "CH3:%4u %02u:%02u:%02u", adc_ch3,
-        // current_time.hours, current_time.minutes, current_time.seconds);
-        // lcd_set_cursor(1, 0);
-        // lcd_print(lcd_buf);
+        // ADC display code removed - using menu system instead
 
         // DEBUG: Check if relay variables change
         static uint8_t last_relay_state = 0;
@@ -696,75 +657,75 @@ void main(void)
             {
                 // Full redraw for normal navigation
                 if (current_menu == 0)
-                {
                     menu_draw_options();
-                }
                 else if (current_menu == 1)
-                {
                     menu_draw_input();
-                }
                 else if (current_menu == 2)
-                {
                     menu_draw_setup();
-                }
+                else if (current_menu == 3)
+                    menu_draw_clock();
+                else if (current_menu == 4)
+                    menu_draw_utility();
             }
         }
 
-        /// Check button events
-        if (button_event != last_button)
+        /// Check button events - ISR sets button_event to 1 (short) or 2 (long)
+        if (button_event > 0)
         {
-            if (button_event > 0)
+            uint8_t current_event = button_event;
+            button_event = 0;  // Clear immediately to not miss next event
+
+            // Debug beep to confirm button detected
+            beep(20);
+
+            // Check if we're on main screen (for short press)
+            if (current_menu == 255)
             {
-                uint8_t current_event = button_event;
-                button_event = 0;
-
-                // Check if we're on main screen (for short press)
-                if (current_menu == 255)
+                if (current_event == 1) // Short press
                 {
-                    if (current_event == 1) // Short press
-                    {
-                        // Check if power failure flag is set
-                        extern system_config_t system_config;
-                        extern void save_current_config(void);
+                    // Check if power failure flag is set
+                    extern system_config_t system_config;
+                    extern void save_current_config(void);
 
-                        if (system_config.power_failure_flag == 1)
-                        {
-                            // Clear power failure flag and save to EEPROM
-                            system_config.power_failure_flag = 0;
-                            save_current_config();
-                            uart_println("Power failure flag cleared and saved");
-                            beep(50);
-                            __delay_ms(50);
-                            beep(50); // Double beep to confirm
-                        }
-                        else
-                        {
-                            // Normal operation - enter OPTIONS menu
-                            current_menu = 0; // Enter OPTIONS menu
-                            menu.current_line = 0;
-                            menu.top_line = 0;
-                            menu.total_items = 5;
-                            menu_draw_options();
-                            beep(50);
-                        }
+                    if (system_config.power_failure_flag == 1)
+                    {
+                        // Clear power failure flag and save to EEPROM
+                        system_config.power_failure_flag = 0;
+                        save_current_config();
+                        uart_println("Power failure flag cleared and saved");
+                        beep(50);
+                        __delay_ms(50);
+                        beep(50); // Double beep to confirm
+                    }
+                    else
+                    {
+                        // Normal operation - enter OPTIONS menu
+                        current_menu = 0; // Enter OPTIONS menu
+                        menu.current_line = 0;
+                        menu.top_line = 0;
+                        menu.total_items = 4; // 4 items: Setup, Utility, About, Exit
+                        menu_draw_options();
+                        beep(50);
                     }
                 }
-                else
-                {
-                    // In a menu - pass to menu handler
-                    menu_handle_button(current_event);
-
-                    // Redraw after button action
-                    if (current_menu == 0)
-                        menu_draw_options();
-                    else if (current_menu == 1)
-                        menu_draw_input();
-                    else if (current_menu == 2)
-                        menu_draw_setup();
-                }
             }
-            last_button = button_event;
-            button_event = 0;
+            else
+            {
+                // In a menu - pass to menu handler
+                menu_handle_button(current_event);
+
+                // Redraw after button action
+                if (current_menu == 0)
+                    menu_draw_options();
+                else if (current_menu == 1)
+                    menu_draw_input();
+                else if (current_menu == 2)
+                    menu_draw_setup();
+                else if (current_menu == 3)
+                    menu_draw_clock();
+                else if (current_menu == 4)
+                    menu_draw_utility();
+            }
         }
 
         // Check if we just returned to main screen
@@ -777,6 +738,7 @@ void main(void)
             lcd_print("MAIN SCREEN");
             lcd_set_cursor(1, 0);
             lcd_print("Ready");
+            lcd_flush();  // Send to display board
 
             // Auto-save removed - user must explicitly select "Save" in menus
             if (save_pending)
@@ -902,11 +864,32 @@ void main(void)
                 lcd_print("MAIN SCREEN");
                 lcd_set_cursor(1, 0);
                 lcd_print("Timeout");
+                lcd_flush();  // Send to display board
 
                 // Reset the flag and timer
                 menu_timeout_flag = 1;
                 menu_timeout_timer = 0;
             }
+        }
+
+        // Periodic display refresh (every ~250ms = 5 loops at 50ms each)
+        static uint8_t refresh_counter = 0;
+        refresh_counter++;
+        if (refresh_counter >= 5)
+        {
+            refresh_counter = 0;
+            // Refresh current menu display
+            if (current_menu == 0)
+                menu_draw_options();
+            else if (current_menu == 1)
+                menu_draw_input();
+            else if (current_menu == 2)
+                menu_draw_setup();
+            else if (current_menu == 3)
+                menu_draw_clock();
+            else if (current_menu == 4)
+                menu_draw_utility();
+            // Note: current_menu == 255 (main screen) doesn't need periodic refresh
         }
 
         // Check for long press beep
