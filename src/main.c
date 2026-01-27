@@ -8,7 +8,7 @@
  *   - Hold >= 1000ms -> long beep (300ms), long press event, non-blocking
  */
 
-#define BUILD_VERSION 45  // Disable press beep (menu.c handles beeps)
+#define BUILD_VERSION 57  // ADC read every loop iteration
 
 #include "../include/config.h"
 #include "../include/encoder.h"
@@ -18,7 +18,6 @@
 #include "../include/rtc.h"
 #include "../include/pca9535.h"
 #include "../include/lcd.h"
-#include "ad7994.h"
 #include <stdio.h>
 
 // External variables from encoder
@@ -146,15 +145,26 @@ void system_init(void)
     DIG_IN3_TRIS = 1;
     DIG_IN4_TRIS = 1;
 
-    // Relay outputs (RB5, RB4)
+    // Relay outputs (RB5, RB4) - start energized (closed)
     RELAY1_TRIS = 0;
-    RELAY1_PIN = 0;
+    RELAY1_PIN = 1;  // Energized = closed
     RELAY2_TRIS = 0;
     RELAY2_PIN = 0;
 
     // EEPROM write protect (RC2)
     EEPROM_WP_TRIS = 0;
     EEPROM_WP = 0;
+
+    // RC5 - unused (AD7994 removed), set as output low
+    TRISCbits.TRISC5 = 0;
+    LATCbits.LATC5 = 0;
+
+    // Enable FVR at 2.048V for ADC reference
+    // VREFCON0: bit7=FVREN, bit6=FVRST(RO), bit5:4=FVRS<1:0>, bits3:0=unused
+    // FVRS: 00=reserved, 01=1.024V, 10=2.048V, 11=4.096V
+    VREFCON0 = 0b10100000;  // FVREN=1, FVRS=10 (2.048V)
+    while (!VREFCON0bits.FVRST)
+        ;  // Wait for FVR to stabilize
 }
 
 void trigger_relay_pulse(uint8_t latch_mode)
@@ -205,6 +215,27 @@ void beep(uint16_t duration_ms)
 }
 
 // =============================================================================
+// Internal ADC (PIC18F26K22 10-bit ADC) - Read AN0, AN1, AN2
+// =============================================================================
+uint16_t adc_read(uint8_t channel)
+{
+    // Select channel (AN0-AN2)
+    ADCON0 = (uint8_t)((channel << 2) | 0x01);  // Channel select + ADC ON
+
+    // Configure ADC: right justified, Fosc/32, Vref+=FVR (2.048V), Vref-=VSS
+    ADCON1 = 0b00001000;  // PVCFG<3:2>=10 (FVR), NVCFG<1:0>=00 (VSS)
+    ADCON2 = 0b10100010;  // Right justified, 8 TAD acq time, Fosc/32
+
+    __delay_us(10);  // Acquisition time
+
+    ADCON0bits.GO = 1;  // Start conversion
+    while (ADCON0bits.GO)
+        ;  // Wait for completion
+
+    return (uint16_t)((ADRESH << 8) | ADRESL);
+}
+
+// =============================================================================
 // Main Function
 // =============================================================================
 
@@ -245,20 +276,15 @@ void main(void)
         uart_println("RTC FAIL");
     }
 
-    // Initialize ADC
-    uint8_t adc_error = ad7994_init();
-    if (adc_error)
-    {
-        sprintf(buf, "ADC error: %u", adc_error);
-        uart_println(buf);
-    }
-
     // Initialize encoder and menu
     encoder_init();
     menu_init();
     lcd_init();
 
     uart_println("Peripherals initialized");
+
+    // Confirm relay initial state (energized = closed)
+    uart_println("RELAY: Closed (energized)");
 
     // Wait for display board
     __delay_ms(2000);
@@ -308,6 +334,15 @@ void main(void)
     uint16_t adc_ch1, adc_ch2, adc_ch3;
     rtc_time_t current_time;
 
+    // Digital input edge detection (initialize to current state)
+    uint8_t last_dig1 = DIG_IN1_PORT;
+    uint8_t last_dig2 = DIG_IN2_PORT;
+    uint8_t last_dig3 = DIG_IN3_PORT;
+    uint8_t last_dig4 = DIG_IN4_PORT;
+
+    // ADC debug output timer (print every 1s, read every loop)
+    uint8_t adc_print_timer = 0;
+
     while (1)
     {
         // =============================================================
@@ -326,26 +361,51 @@ void main(void)
         }
 
         // =============================================================
-        // Sample ADC and status (every ~500ms)
+        // Digital input edge detection (output on state change only)
         // =============================================================
-        static uint8_t sample_counter = 0;
-        sample_counter++;
+        uint8_t dig1 = DIG_IN1_PORT;
+        uint8_t dig2 = DIG_IN2_PORT;
+        uint8_t dig3 = DIG_IN3_PORT;
+        uint8_t dig4 = DIG_IN4_PORT;
 
-        if (sample_counter >= 10)
+        if (dig1 != last_dig1)
         {
-            sample_counter = 0;
-            ad7994_read_all(&adc_ch1, &adc_ch2, &adc_ch3);
+            last_dig1 = dig1;
+            sprintf(buf, "DIG1: %s", dig1 ? "Closed" : "Open");
+            uart_println(buf);
+        }
+        if (dig2 != last_dig2)
+        {
+            last_dig2 = dig2;
+            sprintf(buf, "DIG2: %s", dig2 ? "Closed" : "Open");
+            uart_println(buf);
+        }
+        if (dig3 != last_dig3)
+        {
+            last_dig3 = dig3;
+            sprintf(buf, "DIG3: %s", dig3 ? "Closed" : "Open");
+            uart_println(buf);
+        }
+        if (dig4 != last_dig4)
+        {
+            last_dig4 = dig4;
+            sprintf(buf, "DIG4: %s", dig4 ? "Closed" : "Open");
+            uart_println(buf);
+        }
 
-            static uint8_t second_counter = 0;
-            second_counter++;
-            if (second_counter >= 2)
-            {
-                second_counter = 0;
-                if (rtc_read_time(&current_time) == 0)
-                {
-                    // Periodic status can be logged here if needed
-                }
-            }
+        // =============================================================
+        // ADC read every loop (~20Hz), print every 1 second
+        // =============================================================
+        adc_ch1 = adc_read(0);  // AN0 = RA0
+        adc_ch2 = adc_read(1);  // AN1 = RA1
+        adc_ch3 = adc_read(2);  // AN2 = RA2
+
+        adc_print_timer++;
+        if (adc_print_timer >= 20)
+        {
+            adc_print_timer = 0;
+            sprintf(buf, "ADC: AN0=%u AN1=%u AN2=%u", adc_ch1, adc_ch2, adc_ch3);
+            uart_println(buf);
         }
 
         __delay_ms(50);
@@ -441,7 +501,7 @@ void main(void)
             if (current_menu == 255)
             {
                 // Main screen
-                if (evt == 1)
+                if (evt == 1)  // Short press
                 {
                     extern system_config_t system_config;
                     extern void save_current_config(void);
@@ -495,8 +555,7 @@ void main(void)
 
             if (save_pending)
             {
-                uart_println("Exited without saving");
-                save_pending = 0;
+                save_pending = 0;  // Discard unsaved changes
             }
         }
         last_menu_state = current_menu;
@@ -563,7 +622,6 @@ void main(void)
 
         if (current_menu < 5 && menu_timeout_flag == 0)
         {
-            uart_println("TIMEOUT - exit to main");
             beep(100);
             __delay_ms(50);
             beep(100);
@@ -572,12 +630,7 @@ void main(void)
             menu.in_edit_mode = 0;
             menu.current_line = 0;
             menu.top_line = 0;
-
-            if (save_pending)
-            {
-                uart_println("Timeout - discarded");
-                save_pending = 0;
-            }
+            save_pending = 0;  // Discard unsaved changes
 
             lcd_clear();
             lcd_set_cursor(0, 0);

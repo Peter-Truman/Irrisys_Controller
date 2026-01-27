@@ -1,12 +1,8 @@
-// ad7994.c - 12-bit 4-channel ADC driver with debug output
+// ad7994.c - 12-bit 4-channel ADC driver (CH1, CH2, CH3)
 #include "../include/ad7994.h"
 #include "../include/i2c.h"
 #include "../include/config.h"
 #include <xc.h>
-#include <stdio.h>
-
-// External UART function
-extern void uart_println(const char *str);
 
 // CONVST pin on RC5
 #define ADC_CONVST LATCbits.LATC5
@@ -16,44 +12,39 @@ uint8_t ad7994_init(void)
     uint8_t i2c_error;
 
     // 100ms power-on delay for device initialization
-    uart_println("ADC Init: Waiting 100ms for power-on");
     __delay_ms(100);
 
     // MODE 1: Auto-incrementing address pointer
 
-    // Step 1: Enable CH1 only (testing if 0x78 NAKs but 0x18 works)
-    uart_println("ADC Init: Writing config 0x18 (CH1 only + Filter)");
+    // Enable CH1+CH2+CH3 with filter: 0x10|0x20|0x40|0x08 = 0x78
     i2c_error = i2c_start();
-    if (i2c_error) { uart_println("Init: START fail"); return 1; }
+    if (i2c_error) return 1;
 
     i2c_error = i2c_write(0x42);  // Write address (0x21 << 1)
-    if (i2c_error) { uart_println("Init: Addr fail"); i2c_stop(); return 2; }
+    if (i2c_error) { i2c_stop(); return 2; }
 
     i2c_error = i2c_write(0x02);  // Config register
-    if (i2c_error) { uart_println("Init: Reg fail"); i2c_stop(); return 3; }
+    if (i2c_error) { i2c_stop(); return 3; }
 
-    i2c_error = i2c_write(0x18);  // CH1 only + Filter
-    if (i2c_error) { uart_println("Init: Config 0x18 FAIL"); i2c_stop(); return 4; }
+    i2c_error = i2c_write(0x78);  // CH1+CH2+CH3 + Filter
+    if (i2c_error) { i2c_stop(); return 4; }
 
     i2c_stop();
-    uart_println("ADC Init: Config OK");
 
     // 100ms delay after config write for device to process
     __delay_ms(100);
 
-    // Step 2: Point to conversion result register (0x00) - ONCE!
-    uart_println("ADC Init: Setting address pointer to 0x00");
+    // Step 2: Point to conversion result register (0x00)
     i2c_error = i2c_start();
-    if (i2c_error) { uart_println("Init: START2 fail"); return 5; }
+    if (i2c_error) return 5;
 
     i2c_error = i2c_write(0x42);  // Write address (0x21 << 1)
-    if (i2c_error) { uart_println("Init: Addr2 fail"); i2c_stop(); return 6; }
+    if (i2c_error) { i2c_stop(); return 6; }
 
     i2c_error = i2c_write(0x00);  // Conversion result register
-    if (i2c_error) { uart_println("Init: Pointer fail"); i2c_stop(); return 7; }
+    if (i2c_error) { i2c_stop(); return 7; }
 
     i2c_stop();
-    uart_println("ADC Init: Pointer set - ready for auto-increment reads");
 
     // 100ms delay after pointer write for device to process
     __delay_ms(100);
@@ -66,10 +57,7 @@ uint16_t ad7994_read_channel(uint8_t channel)
     uint8_t msb, lsb;
     uint16_t result;
     uint8_t i2c_error;
-    uint8_t detected_channel;
-    char debug_buf[64];
 
-    // ABSOLUTE MINIMUM: Just read in power-on default state
     i2c_error = i2c_start();
     if (i2c_error)
         return 0xFFFF;
@@ -85,15 +73,8 @@ uint16_t ad7994_read_channel(uint8_t channel)
     lsb = i2c_read(0);  // NACK
     i2c_stop();
 
-    // Extract channel ID from upper 4 bits
-    detected_channel = (msb >> 4) & 0x0F;
-
     // Extract 12-bit value from lower 12 bits
     result = ((uint16_t)(msb & 0x0F) << 8) | lsb;
-
-    // Debug output
-    sprintf(debug_buf, "Chan=%u Value=%u", detected_channel, result);
-    uart_println(debug_buf);
 
     return result;
 }
@@ -102,36 +83,38 @@ void ad7994_read_all(uint16_t *ch1, uint16_t *ch2, uint16_t *ch3)
 {
     uint8_t msb, lsb;
     uint8_t i2c_error;
-    char debug_buf[64];
+    uint8_t detected_ch;
+    uint16_t value;
 
-    // TEST: CH1 only with 0x18 config
-    // If this works, we know config writes succeed with single channel
+    *ch1 = 0xFFFF;
+    *ch2 = 0xFFFF;
+    *ch3 = 0xFFFF;
 
-    // Pulse CONVST to trigger conversion (increased timing for reliability)
-    uart_println("Pulsing CONVST");
+    // Pulse CONVST to trigger conversion
     ADC_CONVST = 1;
-    __delay_us(10);  // 10µs high pulse
+    __delay_us(10);
     ADC_CONVST = 0;
-    __delay_us(10);  // 10µs settling time after pulse
+    __delay_us(10);
 
-    // ===== Read CH1 only =====
-    uart_println("Reading CH1");
+    // Read 3 channels (6 bytes) in one I2C transaction
     i2c_error = i2c_start();
-    if (i2c_error) { uart_println("CH1: START fail"); *ch1 = 0xFFFF; *ch2 = 0xFFFF; *ch3 = 0xFFFF; return; }
+    if (i2c_error) return;
 
-    i2c_error = i2c_write(0x43);  // Read address (0x21 << 1 | 1)
-    if (i2c_error) { uart_println("CH1: Addr fail"); i2c_stop(); *ch1 = 0xFFFF; *ch2 = 0xFFFF; *ch3 = 0xFFFF; return; }
+    i2c_error = i2c_write(0x43);  // Read address
+    if (i2c_error) { i2c_stop(); return; }
 
-    msb = i2c_read(1);  // ACK
-    lsb = i2c_read(0);  // NACK
+    for (uint8_t i = 0; i < 3; i++)
+    {
+        msb = i2c_read(1);                    // ACK (more bytes follow)
+        lsb = i2c_read(i < 2 ? 1 : 0);       // ACK for first 2, NACK for last
+
+        detected_ch = (msb >> 4) & 0x03;      // Channel ID in bits [5:4]
+        value = ((uint16_t)(msb & 0x0F) << 8) | lsb;
+
+        if (detected_ch == 0) *ch1 = value;
+        else if (detected_ch == 1) *ch2 = value;
+        else if (detected_ch == 2) *ch3 = value;
+    }
+
     i2c_stop();
-
-    *ch1 = ((uint16_t)(msb & 0x0F) << 8) | lsb;
-    sprintf(debug_buf, "CH1: Value=%u (MSB=0x%02X LSB=0x%02X)", *ch1, msb, lsb);
-    uart_println(debug_buf);
-
-    // Set CH2 and CH3 to zero for now (not configured)
-    *ch2 = 0;
-    *ch3 = 0;
-    uart_println("CH2/CH3: Not configured (testing CH1 only)");
 }
