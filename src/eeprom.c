@@ -13,23 +13,23 @@ uint16_t menu_timeout_seconds = 30; // Default value if EEPROM invalid
 // Factory defaults constant
 const input_config_t factory_defaults[3] = {
     // Input 1 - Default to Pressure
-    {1, 0, 0, 0, 1, {0, 0, 0}, // enable, pressure, show, etc.
-     4,
-     20,
+    {1, 0, 0, 0, 1, {0, 0, 0}, // enable=YES, pressure, analog, %, show
      0,
-     {0, 0, 0, 0, 0}, // 4mA=4, 20mA=20 (signed)
-     150,
-     2,
-     30,
-     5,
+     360,
      0,
+     {0, 0, 0, 0, 0}, // 4mA=0 psi, 20mA=360 psi (signed)
+     200,
+     0,
+     300,
      30,
-     {0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, // setpoints and times
+     0,
+     0,
+     {0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, // high=200psi, PLPBP=300s(5min), SLPBP=30s
      0,
      0,
      1,
      0,
-     {0, 0, 0, 0}, // relay modes (latch, latch, pulse, none)
+     {0, 0, 0, 0}, // relay: high=latch, plp=latch, slp=pulse, low=none
      {0, 0, 0, 0}, // reserved uint32
      {0}},         // padding
 

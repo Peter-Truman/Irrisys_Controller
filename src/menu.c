@@ -2379,6 +2379,7 @@ void menu_handle_button(uint8_t press_type)
                         uart_println("RTC write successful - verifying...");
 
                         // Read back to verify
+                        __delay_ms(100);  // Allow RTC to process write
                         rtc_time_t verify_time;
                         if (rtc_read_time(&verify_time) == 0)
                         {
@@ -2387,7 +2388,20 @@ void menu_handle_button(uint8_t press_type)
                                     verify_time.date, verify_time.month, verify_time.year,
                                     verify_time.hours, verify_time.minutes, verify_time.seconds);
                             uart_println(buf);
-                            uart_println("RTC verified OK");
+
+                            // Actually verify the values match
+                            if (verify_time.hours == new_time.hours &&
+                                verify_time.minutes == new_time.minutes &&
+                                verify_time.date == new_time.date &&
+                                verify_time.month == new_time.month &&
+                                verify_time.year == new_time.year)
+                            {
+                                uart_println("RTC verified OK");
+                            }
+                            else
+                            {
+                                uart_println("ERROR: RTC readback MISMATCH");
+                            }
                         }
                         else
                         {

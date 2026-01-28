@@ -124,6 +124,7 @@ void i2c_stop(void)
  */
 uint8_t i2c_write(uint8_t data)
 {
+    PIR1bits.SSPIF = 0;  // Clear flag BEFORE writing
     SSPBUF = data;
 
     // Wait for transmission to complete

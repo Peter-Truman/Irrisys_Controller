@@ -8,7 +8,7 @@
  *   - Hold >= 1000ms -> long beep (300ms), long press event, non-blocking
  */
 
-#define BUILD_VERSION 58  // 8-sample rolling average on ADC
+#define BUILD_VERSION 59  // Phase 1: Main screen with state machine
 
 #include "../include/config.h"
 #include "../include/encoder.h"
@@ -217,11 +217,139 @@ void beep(uint16_t duration_ms)
 // =============================================================================
 // ADC averaging (8-sample rolling average per channel)
 // =============================================================================
-#define ADC_AVG_SIZE 8
-#define ADC_AVG_SHIFT 3  // log2(8)
+#define ADC_AVG_SIZE 4
+#define ADC_AVG_SHIFT 2  // log2(4)
 static uint16_t adc_buf[3][ADC_AVG_SIZE];
 static uint8_t adc_buf_idx = 0;
 static uint8_t adc_buf_full = 0;
+
+// =============================================================================
+// System state machine
+// =============================================================================
+#define SYS_STOP  0
+#define SYS_RUN   1
+
+static uint8_t sys_state = SYS_STOP;
+static uint32_t run_timer_secs = 0;
+static uint32_t stop_timer_secs = 0;
+static uint8_t flash_toggle = 0;
+static uint8_t tick_counter = 0;       // Counts 50ms loops for 1-second tick
+static uint8_t render_counter = 0;     // Display update throttle
+
+// =============================================================================
+// ADC to engineering units conversion
+// =============================================================================
+// 4mA = 205 counts, 20mA = 1000 counts (100 ohm sense, 2.048V ref, 10-bit)
+#define ADC_4MA   205
+#define ADC_20MA  1000
+
+int16_t adc_to_eng(uint16_t counts, int16_t scale_4ma, int16_t scale_20ma)
+{
+    int32_t num;
+    if (counts <= ADC_4MA) return scale_4ma;
+    if (counts >= ADC_20MA) return scale_20ma;
+    num = (int32_t)(counts - ADC_4MA) * (scale_20ma - scale_4ma);
+    return scale_4ma + (int16_t)(num / (ADC_20MA - ADC_4MA));
+}
+
+// =============================================================================
+// Main screen rendering
+// =============================================================================
+void render_main_screen(uint16_t ch1, uint16_t ch2, uint16_t ch3, rtc_time_t *time)
+{
+    char line[21];
+    uint16_t adc_vals[3];
+
+    adc_vals[0] = ch1;
+    adc_vals[1] = ch2;
+    adc_vals[2] = ch3;
+
+    // --- Line 1: Status + stop code + time ---
+    lcd_clear();
+    lcd_set_cursor(0, 0);
+    // Use %-15s to left-pad status, then right-justify time at col 15
+    {
+        char status[16];
+        if (sys_state == SYS_RUN)
+            sprintf(status, "RUN");
+        else
+            sprintf(status, "STOP");
+        sprintf(line, "%-15s%02u:%02u", status, time->hours, time->minutes);
+    }
+    lcd_print(line);
+
+    // --- Lines 2-4: Input values ---
+    for (uint8_t i = 0; i < 3; i++)
+    {
+        lcd_set_cursor(i + 1, 0);
+
+        if (!input_config[i].display_enabled)
+        {
+            lcd_print("                    ");
+            continue;
+        }
+
+        int16_t eng = adc_to_eng(adc_vals[i],
+                                  input_config[i].scale_4ma,
+                                  input_config[i].scale_20ma);
+
+        switch (input_config[i].sensor_type)
+        {
+        case 0: // Pressure
+        {
+            int16_t psi = eng;
+            if (psi < 0) psi = 0;
+            if (psi > 999) psi = 999;
+            sprintf(line, "%03d psi             ", psi);
+            break;
+        }
+        case 1: // Temperature
+        {
+            char sign = eng >= 0 ? '+' : '-';
+            int16_t abs_val = eng >= 0 ? eng : -eng;
+            if (abs_val > 99) abs_val = 99;
+            sprintf(line, "%c%02d C               ", sign, abs_val);
+            break;
+        }
+        case 2: // Flow
+        {
+            if (input_config[i].flow_type == 1)
+            {
+                // Digital flow: read DIG_IN (i+2)
+                uint8_t flow_on = 0;
+                if (i == 0) flow_on = DIG_IN2_PORT;
+                else if (i == 1) flow_on = DIG_IN3_PORT;
+                else flow_on = DIG_IN4_PORT;
+
+                if (flow_on)
+                    sprintf(line, "FLOW                ");
+                else
+                    sprintf(line, "NO FLOW             ");
+            }
+            else
+            {
+                // Analog flow
+                int16_t flow = eng;
+                if (flow < 0) flow = 0;
+                if (flow > 999) flow = 999;
+                sprintf(line, "%03d L/m             ", flow);
+            }
+            break;
+        }
+        default:
+            sprintf(line, "                    ");
+            break;
+        }
+
+        // Add enable indicator at position 19
+        if (input_config[i].enable)
+            line[19] = '*';
+
+        lcd_print(line);
+    }
+
+    lcd_flush();
+}
 
 // =============================================================================
 // Internal ADC (PIC18F26K22 10-bit ADC) - Read AN0, AN1, AN2
@@ -327,12 +455,11 @@ void main(void)
     // Go to main screen
     extern uint8_t current_menu;
     current_menu = 255;
-    lcd_clear();
-    lcd_set_cursor(0, 0);
-    lcd_print("MAIN SCREEN");
-    lcd_set_cursor(1, 0);
-    lcd_print("Ready");
-    lcd_flush();
+
+    // Initialize system state from DIG_IN1
+    sys_state = DIG_IN1_PORT ? SYS_RUN : SYS_STOP;
+    run_timer_secs = 0;
+    stop_timer_secs = 0;
 
     uart_println("Ready");
 
@@ -341,7 +468,7 @@ void main(void)
     static uint32_t blink_timer = 0;
     static uint16_t encoder_activity_timer = 0;
     uint16_t adc_ch1, adc_ch2, adc_ch3;
-    rtc_time_t current_time;
+    rtc_time_t current_time = {0};
 
     // Digital input edge detection (initialize to current state)
     uint8_t last_dig1 = DIG_IN1_PORT;
@@ -349,8 +476,15 @@ void main(void)
     uint8_t last_dig3 = DIG_IN3_PORT;
     uint8_t last_dig4 = DIG_IN4_PORT;
 
-    // ADC debug output timer (print every 1s, read every loop)
-    uint8_t adc_print_timer = 0;
+    // Read initial RTC time
+    rtc_read_time(&current_time);
+    {
+        char tbuf[40];
+        sprintf(tbuf, "RTC: %02u:%02u:%02u %02u/%02u/%02u",
+                current_time.hours, current_time.minutes, current_time.seconds,
+                current_time.date, current_time.month, current_time.year);
+        uart_println(tbuf);
+    }
 
     while (1)
     {
@@ -403,6 +537,29 @@ void main(void)
         }
 
         // =============================================================
+        // System state machine (RUN/STOP based on DIG_IN1)
+        // =============================================================
+        if (dig1 && sys_state == SYS_STOP)
+        {
+            sys_state = SYS_RUN;
+            run_timer_secs = 0;
+            if (system_config.clock_enabled)
+            {
+                // Load runtime countdown (hours:minutes -> seconds)
+                run_timer_secs = (uint32_t)system_config.runtime_hours * 3600
+                               + (uint32_t)system_config.runtime_minutes * 60;
+            }
+            RELAY1_PIN = 1;  // Closed = pump can run
+            uart_println("STATE: RUN");
+        }
+        else if (!dig1 && sys_state == SYS_RUN)
+        {
+            sys_state = SYS_STOP;
+            stop_timer_secs = 0;
+            uart_println("STATE: STOP");
+        }
+
+        // =============================================================
         // ADC read every loop (~20Hz) with 8-sample rolling average
         // =============================================================
         adc_buf[0][adc_buf_idx] = adc_read(0);
@@ -437,15 +594,42 @@ void main(void)
             adc_ch3 = adc_buf[2][adc_buf_idx ? adc_buf_idx - 1 : 0];
         }
 
-        adc_print_timer++;
-        if (adc_print_timer >= 20)
+        __delay_ms(50);
+
+        // =============================================================
+        // 1-second tick (every 20 × 50ms loops)
+        // =============================================================
+        tick_counter++;
+        if (tick_counter >= 20)
         {
-            adc_print_timer = 0;
-            sprintf(buf, "ADC: AN0=%u AN1=%u AN2=%u", adc_ch1, adc_ch2, adc_ch3);
-            uart_println(buf);
+            tick_counter = 0;
+            flash_toggle = !flash_toggle;
+
+            if (sys_state == SYS_RUN)
+            {
+                if (system_config.clock_enabled && run_timer_secs > 0)
+                    run_timer_secs--;  // Countdown
+                else if (!system_config.clock_enabled)
+                    run_timer_secs++;  // Count up
+            }
+            // else
+            // {
+            //     stop_timer_secs++;
+            // }
+
+            // (RTC read moved to render block for coordination)
         }
 
-        __delay_ms(50);
+        // =============================================================
+        // Render main screen (~4Hz when on main screen)
+        // =============================================================
+        render_counter++;
+        if (render_counter >= 5 && current_menu == 255)
+        {
+            render_counter = 0;
+            rtc_read_time(&current_time);
+            render_main_screen(adc_ch1, adc_ch2, adc_ch3, &current_time);
+        }
 
         // =============================================================
         // Handle encoder rotation
@@ -583,17 +767,12 @@ void main(void)
         static uint8_t last_menu_state = 0;
         if (current_menu == 255 && last_menu_state != 255)
         {
-            lcd_clear();
-            lcd_set_cursor(0, 0);
-            lcd_print("MAIN SCREEN");
-            lcd_set_cursor(1, 0);
-            lcd_print("Ready");
-            lcd_flush();
-
+            // Returning to main screen — render will happen automatically
             if (save_pending)
             {
                 save_pending = 0;  // Discard unsaved changes
             }
+            render_counter = 5;  // Force immediate render
         }
         last_menu_state = current_menu;
 
@@ -668,13 +847,7 @@ void main(void)
             menu.current_line = 0;
             menu.top_line = 0;
             save_pending = 0;  // Discard unsaved changes
-
-            lcd_clear();
-            lcd_set_cursor(0, 0);
-            lcd_print("MAIN SCREEN");
-            lcd_set_cursor(1, 0);
-            lcd_print("Timeout");
-            lcd_flush();
+            render_counter = 5;  // Force immediate render
 
             menu_timeout_flag = 1;
             menu_timeout_timer = 0;

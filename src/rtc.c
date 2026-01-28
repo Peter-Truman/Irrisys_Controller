@@ -11,11 +11,11 @@ uint8_t rtc_write_register(uint8_t reg, uint8_t value)
     if (i2c_start())
         return 1;
     if (i2c_write((RTC_I2C_ADDR << 1) | 0))
-        return 1;
+    { i2c_stop(); return 1; }
     if (i2c_write(reg))
-        return 1;
+    { i2c_stop(); return 1; }
     if (i2c_write(value))
-        return 1;
+    { i2c_stop(); return 1; }
     i2c_stop();
     return 0;
 }
@@ -95,21 +95,21 @@ uint8_t rtc_set_time(rtc_time_t *time)
     // Write all 7 bytes starting at register 0x00
     if (i2c_start())
         return 1;
-    __delay_us(50); // <-- ADD: After START
+    __delay_us(50);
 
     if (i2c_write((RTC_I2C_ADDR << 1) | 0))
-        return 1;
-    __delay_us(50); // <-- ADD: After address
+    { i2c_stop(); return 1; }
+    __delay_us(50);
 
     if (i2c_write(0x00))
-        return 1;
-    __delay_us(50); // <-- ADD: After register address
+    { i2c_stop(); return 1; }
+    __delay_us(50);
 
     for (uint8_t i = 0; i < 7; i++)
     {
         if (i2c_write(data[i]))
-            return 1;
-        __delay_us(50); // <-- ADD: After each data byte (CRITICAL!)
+        { i2c_stop(); return 1; }
+        __delay_us(50);
     }
 
     i2c_stop();
@@ -125,26 +125,23 @@ uint8_t rtc_read_time(rtc_time_t *time)
     // Write register address with delays between operations
     if (i2c_start())
         return 1;
-    __delay_us(50); // Small delay after start
+    __delay_us(50);
 
     if (i2c_write((RTC_I2C_ADDR << 1) | 0))
-        return 1;
-    __delay_us(50); // Small delay after address write
+    { i2c_stop(); return 1; }
+    __delay_us(50);
 
     if (i2c_write(0x00))
-        return 1;
-    __delay_us(50); // Small delay after register write
+    { i2c_stop(); return 1; }
+    __delay_us(50);
 
-    i2c_stop();
-    __delay_us(200); // Longer delay after stop
-
-    // Start new transaction to read
-    if (i2c_start())
-        return 1;
+    // Repeated start to maintain register pointer
+    if (i2c_restart())
+    { i2c_stop(); return 1; }
     __delay_us(50);
 
     if (i2c_write((RTC_I2C_ADDR << 1) | 1))
-        return 1;
+    { i2c_stop(); return 1; }
     __delay_us(50);
 
     for (uint8_t i = 0; i < 6; i++)
@@ -153,12 +150,6 @@ uint8_t rtc_read_time(rtc_time_t *time)
     }
     data[6] = i2c_read(0);
     i2c_stop();
-
-    // Keep RAW output for now
-    char debug_buf[80];
-    //sprintf(debug_buf, "RAW: %02X %02X %02X %02X %02X %02X %02X",
-            //data[0], data[1], data[2], data[3], data[4], data[5], data[6]);
-    //uart_println(debug_buf);
 
     // Convert BCD to decimal
     time->seconds = bcd_to_dec(data[0] & 0x7F);
