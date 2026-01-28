@@ -142,26 +142,6 @@ void lcd_set_cursor(uint8_t row, uint8_t col)
     }
 }
 
-// Write a single character at current cursor position
-void lcd_data(uint8_t data)
-{
-    if (lcd_cursor_row < LCD_ROWS && lcd_cursor_col < LCD_COLS)
-    {
-        lcd_buffer[lcd_cursor_row][lcd_cursor_col] = data;
-        lcd_dirty[lcd_cursor_row] = 1;
-        lcd_cursor_col++;
-        if (lcd_cursor_col >= LCD_COLS)
-        {
-            lcd_cursor_col = 0;
-            lcd_cursor_row++;
-            if (lcd_cursor_row >= LCD_ROWS)
-            {
-                lcd_cursor_row = 0;
-            }
-        }
-    }
-}
-
 // Write a string at current cursor position
 void lcd_print(const char *str)
 {
@@ -238,51 +218,3 @@ void disp_set_leds(uint8_t led_mask)
     disp_send_frame(DISP_CMD_LED, &led_mask, 1);
 }
 
-// Legacy command function (for compatibility)
-void lcd_cmd(uint8_t cmd)
-{
-    // Commands are handled locally in buffer
-    // Clear command
-    if (cmd == 0x01)
-    {
-        lcd_clear();
-    }
-    // Home command
-    else if (cmd == 0x02)
-    {
-        lcd_cursor_row = 0;
-        lcd_cursor_col = 0;
-    }
-    // Set DDRAM address (cursor position)
-    else if (cmd & 0x80)
-    {
-        uint8_t addr = cmd & 0x7F;
-        if (addr < 0x14)
-        {
-            lcd_cursor_row = 0;
-            lcd_cursor_col = addr;
-        }
-        else if (addr >= 0x40 && addr < 0x54)
-        {
-            lcd_cursor_row = 1;
-            lcd_cursor_col = addr - 0x40;
-        }
-        else if (addr >= 0x14 && addr < 0x28)
-        {
-            lcd_cursor_row = 2;
-            lcd_cursor_col = addr - 0x14;
-        }
-        else if (addr >= 0x54 && addr < 0x68)
-        {
-            lcd_cursor_row = 3;
-            lcd_cursor_col = addr - 0x54;
-        }
-    }
-}
-
-// Helper function (for compatibility with old code)
-void lcd_write_nibble(uint8_t nibble)
-{
-    // No-op in buffered mode
-    (void)nibble;
-}

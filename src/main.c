@@ -8,7 +8,7 @@
  *   - Hold >= 1000ms -> long beep (300ms), long press event, non-blocking
  */
 
-#define BUILD_VERSION 57  // ADC read every loop iteration
+#define BUILD_VERSION 58  // 8-sample rolling average on ADC
 
 #include "../include/config.h"
 #include "../include/encoder.h"
@@ -215,6 +215,15 @@ void beep(uint16_t duration_ms)
 }
 
 // =============================================================================
+// ADC averaging (8-sample rolling average per channel)
+// =============================================================================
+#define ADC_AVG_SIZE 8
+#define ADC_AVG_SHIFT 3  // log2(8)
+static uint16_t adc_buf[3][ADC_AVG_SIZE];
+static uint8_t adc_buf_idx = 0;
+static uint8_t adc_buf_full = 0;
+
+// =============================================================================
 // Internal ADC (PIC18F26K22 10-bit ADC) - Read AN0, AN1, AN2
 // =============================================================================
 uint16_t adc_read(uint8_t channel)
@@ -394,11 +403,39 @@ void main(void)
         }
 
         // =============================================================
-        // ADC read every loop (~20Hz), print every 1 second
+        // ADC read every loop (~20Hz) with 8-sample rolling average
         // =============================================================
-        adc_ch1 = adc_read(0);  // AN0 = RA0
-        adc_ch2 = adc_read(1);  // AN1 = RA1
-        adc_ch3 = adc_read(2);  // AN2 = RA2
+        adc_buf[0][adc_buf_idx] = adc_read(0);
+        adc_buf[1][adc_buf_idx] = adc_read(1);
+        adc_buf[2][adc_buf_idx] = adc_read(2);
+        adc_buf_idx++;
+        if (adc_buf_idx >= ADC_AVG_SIZE)
+        {
+            adc_buf_idx = 0;
+            adc_buf_full = 1;
+        }
+
+        // Compute averages
+        if (adc_buf_full)
+        {
+            uint16_t sum0 = 0, sum1 = 0, sum2 = 0;
+            for (uint8_t i = 0; i < ADC_AVG_SIZE; i++)
+            {
+                sum0 += adc_buf[0][i];
+                sum1 += adc_buf[1][i];
+                sum2 += adc_buf[2][i];
+            }
+            adc_ch1 = sum0 >> ADC_AVG_SHIFT;
+            adc_ch2 = sum1 >> ADC_AVG_SHIFT;
+            adc_ch3 = sum2 >> ADC_AVG_SHIFT;
+        }
+        else
+        {
+            // Before buffer is full, use latest raw reading
+            adc_ch1 = adc_buf[0][adc_buf_idx ? adc_buf_idx - 1 : 0];
+            adc_ch2 = adc_buf[1][adc_buf_idx ? adc_buf_idx - 1 : 0];
+            adc_ch3 = adc_buf[2][adc_buf_idx ? adc_buf_idx - 1 : 0];
+        }
 
         adc_print_timer++;
         if (adc_print_timer >= 20)

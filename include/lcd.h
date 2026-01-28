@@ -18,12 +18,7 @@ void lcd_init(void);
 void lcd_clear(void);
 void lcd_set_cursor(uint8_t row, uint8_t col);
 void lcd_print(const char *str);
-void lcd_data(uint8_t data);
-void lcd_cmd(uint8_t cmd);
 void lcd_flush(void);
-
-// Legacy compatibility
-void lcd_write_nibble(uint8_t nibble);
 
 // Display Board Control Functions
 void disp_clear(void);
