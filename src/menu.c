@@ -110,6 +110,15 @@ menu_item_t input_menu[16]; // Max 16 items to cover all cases (pressure with Sa
 // Clock menu - static 5 items (with Save)
 menu_item_t clock_menu[5];
 
+// Main menu template and items
+const menu_item_t main_menu_template[] = {
+    {"Run Time", NULL, 1},   // 0 - Time edit HH:MM
+    {"Save", NULL, 0},       // 1 - Action: save to EEPROM
+    {"Back", NULL, 0}        // 2
+};
+menu_item_t main_menu_items[3];
+static char value_runtime[6] = "00:00";
+
 // Menu template for PRESSURE sensor
 const menu_item_t pressure_menu_template[] = {
     {"Enable", NULL, 1},       // 0
@@ -189,20 +198,18 @@ const menu_item_t utility_menu_template[] = {
     {"Log Entries", NULL, 1}, // 3 - Numeric edit
     {"Menu T/O", NULL, 1},    // 4 - Time edit MM:SS
     {"Pwr Detect", NULL, 1},  // 5 - Time edit MM:SS
-    {"Contrast", NULL, 1},    // 6 - Numeric edit
-    {"Brightness", NULL, 1},  // 7 - Numeric edit
-    {"Rly Pulse", NULL, 1},   // 8 - Time edit MM:SS
-    {"Save", NULL, 0},        // 9 - Action: save to EEPROM
-    {"Back", NULL, 0}         // 10
+    {"Brightness", NULL, 1},  // 6 - Numeric edit
+    {"Rly Pulse", NULL, 1},   // 7 - Time edit MM:SS
+    {"Save", NULL, 0},        // 8 - Action: save to EEPROM
+    {"Back", NULL, 0}         // 9
 };
 
 // Utility menu instance
-menu_item_t utility_menu[11];
+menu_item_t utility_menu[10];
 
 // Value buffers for utility menu items
 static char value_log_entries[6] = "10";
 static char value_menu_timeout[6] = "00:30";
-static char value_contrast[4] = "50";
 static char value_brightness[4] = "50";
 static char value_pwr_fail[6] = "00:05";
 
@@ -215,6 +222,8 @@ extern void uart_println(const char *str);
 extern void lcd_clear(void);
 void handle_time_rotation(int8_t direction);
 void menu_draw_utility(void);
+void menu_draw_main_menu(void);
+void rebuild_main_menu(void);
 
 //=============================================================================
 // CONTEXT-AWARE FIELD DETECTION FUNCTIONS
@@ -483,7 +492,7 @@ void handle_time_rotation(int8_t direction)
         {
             menu.time_xx++;
             // Special limit for UTILITY Rly Pulse (120 seconds = 2 minutes max)
-            if (current_menu == 4 && menu.current_line == 8 && menu.time_xx > 2)
+            if (current_menu == 4 && menu.current_line == 7 && menu.time_xx > 2)
                 menu.time_xx = 0;
             // Special limit for UTILITY Menu Timeout and Pwr Detect (240 seconds = 4 minutes max)
             else if (current_menu == 4 && (menu.current_line == 4 || menu.current_line == 5) && menu.time_xx > 4)
@@ -498,7 +507,7 @@ void handle_time_rotation(int8_t direction)
             if (menu.time_xx == 0)
             {
                 // Special limit for UTILITY Rly Pulse
-                if (current_menu == 4 && menu.current_line == 8)
+                if (current_menu == 4 && menu.current_line == 7)
                     menu.time_xx = 2;
                 // Special limit for UTILITY Menu Timeout and Pwr Detect
                 else if (current_menu == 4 && (menu.current_line == 4 || menu.current_line == 5))
@@ -515,7 +524,7 @@ void handle_time_rotation(int8_t direction)
     else if (menu.time_edit_digit == 1) // Editing YY field
     {
         // Special case: UTILITY Rly Pulse with minutes=2 cannot change seconds
-        if (current_menu == 4 && menu.current_line == 8 && menu.time_xx == 2)
+        if (current_menu == 4 && menu.current_line == 7 && menu.time_xx == 2)
         {
             // Seconds locked at 0 when minutes = 2 (120 second limit)
             menu.time_yy = 0;
@@ -601,10 +610,21 @@ void menu_update_time_value(void)
             menu_draw_utility();
             return;
         }
-        else if (menu.current_line == 8) // Rly Pulse
+        else if (menu.current_line == 7) // Rly Pulse
         {
             sprintf(value_relay_pulse, "%s", value_buf);
             menu_draw_utility();
+            return;
+        }
+    }
+
+    // Handle MAIN MENU time field (Run Time)
+    if (current_menu == 5)
+    {
+        if (menu.current_line == 0) // Run Time
+        {
+            sprintf(value_runtime, "%s", value_buf);
+            menu_draw_main_menu();
             return;
         }
     }
@@ -690,37 +710,18 @@ void handle_utility_numeric_rotation(int8_t direction)
         // Update display immediately
         rebuild_utility_menu();
     }
-    else if (menu.current_line == 6) // Contrast (1-9)
+    else if (menu.current_line == 6) // Brightness (0-9)
     {
         if (direction > 0)
         {
-            system_config.contrast++;
-            if (system_config.contrast > 9)
-                system_config.contrast = 1; // Wrap to 1
-        }
-        else
-        {
-            if (system_config.contrast <= 1)
-                system_config.contrast = 9; // Wrap to 9
+            if (system_config.brightness >= 9)
+                system_config.brightness = 0; // Wrap to 0
             else
-                system_config.contrast--;
-        }
-
-        // Update display immediately
-        sprintf(value_contrast, "%d", system_config.contrast);
-        menu_draw_utility();
-    }
-    else if (menu.current_line == 7) // Brightness (1-9)
-    {
-        if (direction > 0)
-        {
-            system_config.brightness++;
-            if (system_config.brightness > 9)
-                system_config.brightness = 1; // Wrap to 1
+                system_config.brightness++;
         }
         else
         {
-            if (system_config.brightness <= 1)
+            if (system_config.brightness == 0)
                 system_config.brightness = 9; // Wrap to 9
             else
                 system_config.brightness--;
@@ -728,6 +729,7 @@ void handle_utility_numeric_rotation(int8_t direction)
 
         // Update display immediately
         sprintf(value_brightness, "%d", system_config.brightness);
+        disp_set_brightness(system_config.brightness * 10 + 10); // Map 0-9 to 10-100%
         menu_draw_utility();
     }
 }
@@ -1737,18 +1739,16 @@ void rebuild_utility_menu(void)
     utility_menu[3].value = value_log_entries;
     utility_menu[4].value = value_menu_timeout;
     utility_menu[5].value = value_pwr_fail;
-    utility_menu[6].value = value_contrast;
-    utility_menu[7].value = value_brightness;
-    utility_menu[8].value = value_relay_pulse;
-    utility_menu[9].value = ""; // Save - no value displayed
-    utility_menu[10].value = ""; // Back - no value displayed
+    utility_menu[6].value = value_brightness;
+    utility_menu[7].value = value_relay_pulse;
+    utility_menu[8].value = ""; // Save - no value displayed
+    utility_menu[9].value = ""; // Back - no value displayed
 
     // Sync from system_config
     sprintf(value_log_entries, "%d", system_config.log_entries);
     sprintf(value_menu_timeout, "%02d:%02d",
             system_config.menu_timeout / 60,
             system_config.menu_timeout % 60);
-    sprintf(value_contrast, "%d", system_config.contrast);
     sprintf(value_brightness, "%d", system_config.brightness);
     sprintf(value_pwr_fail, "%02d:%02d",
             system_config.power_fail_delay / 60,
@@ -1757,7 +1757,7 @@ void rebuild_utility_menu(void)
             system_config.relay_pulse_time / 60,
             system_config.relay_pulse_time % 60);
 
-    menu.total_items = 11;
+    menu.total_items = 10;
 }
 
 /**
@@ -1914,7 +1914,7 @@ void menu_draw_utility(void)
                 lcd_print_at(i + 1, 1, "Set Clock");
             }
         }
-        else if (item_idx == 9 || item_idx == 10) // Save and Back - action items left-justified
+        else if (item_idx == 8 || item_idx == 9) // Save and Back - action items left-justified
         {
             if (is_selected)
             {
@@ -1956,7 +1956,7 @@ void menu_draw_utility(void)
                     show_brackets = menu.in_edit_mode ? 2 : 1;
 
                     // For time fields (Menu T/O at line 4, Pwr Detect at line 5, Rly Pulse at line 8), use value as-is (already formatted with selective blanking)
-                    if (menu.in_edit_mode && (item_idx == 4 || item_idx == 5 || item_idx == 8))
+                    if (menu.in_edit_mode && (item_idx == 4 || item_idx == 5 || item_idx == 7))
                     {
                         strcpy(value_buf, utility_menu[item_idx].value);
                     }
@@ -1998,6 +1998,124 @@ void menu_draw_utility(void)
         }
     }
     lcd_flush();  // Send buffer to display board
+}
+
+/**
+ * Build main menu with current runtime value from system_config
+ */
+void rebuild_main_menu(void)
+{
+    extern system_config_t system_config;
+
+    uart_println("rebuild: start");
+
+    // Copy template
+    memcpy(main_menu_items, main_menu_template, sizeof(main_menu_template));
+
+    // Clamp values to valid range (EEPROM may have garbage on first boot)
+    uint16_t hrs = system_config.runtime_hours;
+    uint16_t mins = system_config.runtime_minutes;
+    {
+        char dbg[40];
+        sprintf(dbg, "rebuild: hrs=%u mins=%u", (unsigned)hrs, (unsigned)mins);
+        uart_println(dbg);
+    }
+    if (hrs > 99) hrs = 0;
+    if (mins > 59) mins = 0;
+
+    // Format runtime as HH:MM
+    sprintf(value_runtime, "%02u:%02u", (unsigned)hrs, (unsigned)mins);
+    uart_println(value_runtime);
+
+    // Assign value pointers
+    main_menu_items[0].value = value_runtime;
+    main_menu_items[1].value = "";  // Save
+    main_menu_items[2].value = "";  // Back
+
+    menu.total_items = 3;
+    uart_println("rebuild: done");
+}
+
+/**
+ * Draw the MAIN MENU screen
+ */
+void menu_draw_main_menu(void)
+{
+    // Fixed title line
+    lcd_clear_line(0);
+    lcd_print_at(0, 0, "MAIN MENU");
+
+    // Draw 3 visible items
+    for (uint8_t i = 0; i < 3 && (menu.top_line + i) < menu.total_items; i++)
+    {
+        uint8_t item_idx = menu.top_line + i;
+        lcd_clear_line(i + 1);
+
+        uint8_t is_selected = (item_idx == menu.current_line);
+
+        // Handle Save and Back items (1 and 2) - action items left-justified
+        if (item_idx == 1 || item_idx == 2)
+        {
+            if (is_selected)
+            {
+                lcd_print_at(i + 1, 0, "[");
+                lcd_print_at(i + 1, 1, main_menu_items[item_idx].label);
+                lcd_print_at(i + 1, 1 + strlen(main_menu_items[item_idx].label), "]");
+            }
+            else
+            {
+                lcd_print_at(i + 1, 1, main_menu_items[item_idx].label);
+            }
+            continue;
+        }
+
+        // Run Time item (0) - label left, value right
+        lcd_print_at(i + 1, 0, main_menu_items[item_idx].label);
+
+        // Build value display
+        char value_buf[15];
+        uint8_t show_brackets = 0;
+
+        if (is_selected)
+        {
+            if (menu.in_edit_mode)
+            {
+                show_brackets = 2; // Parentheses in edit mode
+                strcpy(value_buf, main_menu_items[item_idx].value);
+            }
+            else
+            {
+                show_brackets = 1; // Square brackets
+                strcpy(value_buf, main_menu_items[item_idx].value);
+            }
+        }
+        else
+        {
+            strcpy(value_buf, main_menu_items[item_idx].value);
+        }
+
+        // Display value right-justified
+        uint8_t val_len = strlen(value_buf);
+
+        if (show_brackets == 0)
+        {
+            if (val_len > 0)
+                lcd_print_at(i + 1, 19 - val_len, value_buf);
+        }
+        else
+        {
+            uint8_t actual_len = strlen(main_menu_items[item_idx].value);
+            uint8_t start_pos = 19 - actual_len - 1;
+
+            lcd_set_cursor(i + 1, start_pos);
+            lcd_print(show_brackets == 1 ? "[" : "(");
+            lcd_print(value_buf);
+            lcd_set_cursor(i + 1, 19);
+            lcd_print(show_brackets == 1 ? "]" : ")");
+        }
+    }
+
+    lcd_flush();
 }
 
 //=============================================================================
@@ -2074,8 +2192,8 @@ void menu_handle_encoder(int16_t delta)
                 return; // Exit early for clock menu
             }
 
-            // Handle UTILITY menu time fields (Menu Timeout at line 4, Pwr Detect at line 5, Rly Pulse at line 8)
-            if (current_menu == 4 && !menu.in_datetime_submenu && (menu.current_line == 4 || menu.current_line == 5 || menu.current_line == 8))
+            // Handle UTILITY menu time fields (Menu Timeout at line 4, Pwr Detect at line 5, Rly Pulse at line 7)
+            if (current_menu == 4 && !menu.in_datetime_submenu && (menu.current_line == 4 || menu.current_line == 5 || menu.current_line == 7))
             {
                 handle_time_rotation(delta > 0 ? 1 : -1);
                 menu_update_time_value();
@@ -2262,8 +2380,39 @@ void menu_handle_button(uint8_t press_type)
                 return; // Exit early for CLOCK menu
             }
 
-            // Handle UTILITY menu time fields (Menu Timeout at line 4, Pwr Detect at line 5, Rly Pulse at line 8)
-            if (current_menu == 4 && !menu.in_datetime_submenu && (menu.current_line == 4 || menu.current_line == 5 || menu.current_line == 8))
+            // Handle MAIN MENU time field (Run Time at line 0)
+            if (current_menu == 5 && menu.current_line == 0)
+            {
+                extern system_config_t system_config;
+                extern uint8_t save_pending;
+
+                menu.time_edit_digit++;
+                menu.blink_state = 1;
+                beep(50);
+
+                menu_update_time_value();
+
+                if (menu.time_edit_digit > 1)
+                {
+                    // Save HH:MM to system_config
+                    system_config.runtime_hours = menu.time_xx;
+                    system_config.runtime_minutes = menu.time_yy;
+
+                    sprintf(value_runtime, "%02d:%02d", menu.time_xx, menu.time_yy);
+
+                    menu.in_edit_mode = 0;
+                    save_pending = 1;
+                    beep(50);
+                    __delay_ms(50);
+                    beep(50);
+
+                    menu_draw_main_menu();
+                }
+                return; // Exit early for MAIN MENU
+            }
+
+            // Handle UTILITY menu time fields (Menu Timeout at line 4, Pwr Detect at line 5, Rly Pulse at line 7)
+            if (current_menu == 4 && !menu.in_datetime_submenu && (menu.current_line == 4 || menu.current_line == 5 || menu.current_line == 7))
             {
                 extern system_config_t system_config;
                 extern uint8_t save_pending;
@@ -2305,7 +2454,7 @@ void menu_handle_button(uint8_t press_type)
                                 system_config.power_fail_delay / 60,
                                 system_config.power_fail_delay % 60);
                     }
-                    else if (menu.current_line == 8) // Rly Pulse
+                    else if (menu.current_line == 7) // Rly Pulse
                     {
                         system_config.relay_pulse_time = (uint8_t)new_seconds;
                         sprintf(value_relay_pulse, "%02d:%02d",
@@ -2686,6 +2835,12 @@ void menu_handle_button(uint8_t press_type)
                     switch (menu.current_line)
                     {
                     case 0: // Main Menu
+                        uart_println("-> Main Menu");
+                        rebuild_main_menu();
+                        current_menu = 5; // MAIN MENU
+                        menu.current_line = 0;
+                        menu.top_line = 0;
+                        menu_draw_main_menu();
                         break;
 
                     case 1: // Setup Menu
@@ -2936,6 +3091,49 @@ void menu_handle_button(uint8_t press_type)
                         uart_println("Field not editable!");
                     }
                 }
+                else if (current_menu == 5) // MAIN MENU
+                {
+                    beep(50);
+
+                    if (menu.current_line == 1) // Save
+                    {
+                        if (save_pending)
+                        {
+                            save_current_config();
+                            save_pending = 0;
+                            beep(50);
+                        }
+                        else
+                        {
+                            beep(50);
+                        }
+                    }
+                    else if (menu.current_line == 2) // Back
+                    {
+                        current_menu = 0;
+                        menu.current_line = 0;
+                        menu.top_line = 0;
+                        menu.total_items = 5;
+                        menu_draw_options();
+                    }
+                    else if (main_menu_items[menu.current_line].editable)
+                    {
+                        if (menu.current_line == 0) // Run Time
+                        {
+                            // Calculate total seconds from stored hours:minutes
+                            extern system_config_t system_config;
+                            uint16_t total_secs = (uint16_t)system_config.runtime_hours * 3600
+                                                + (uint16_t)system_config.runtime_minutes * 60;
+                            init_time_editor(total_secs, 1); // mode 1 = HH:MM
+                        }
+
+                        strcpy(original_value, main_menu_items[menu.current_line].value);
+                        menu.in_edit_mode = 1;
+                        menu.blink_state = 1;
+                        beep(50);
+                        menu_draw_main_menu();
+                    }
+                }
                 else if (current_menu == 4) // UTILITY menu
                 {
                     // ISR already beeped on press
@@ -3000,7 +3198,7 @@ void menu_handle_button(uint8_t press_type)
                         menu.in_edit_mode = 1;
                         menu.blink_state = 1;
                     }
-                    else if (menu.current_line == 6) // Contrast (1-9)
+                    else if (menu.current_line == 6) // Brightness (1-9)
                     {
                         // ISR already beeped on press
                         extern system_config_t system_config;
@@ -3008,15 +3206,7 @@ void menu_handle_button(uint8_t press_type)
                         menu.blink_state = 1;
                         menu_draw_utility();
                     }
-                    else if (menu.current_line == 7) // Brightness (1-9)
-                    {
-                        // ISR already beeped on press
-                        extern system_config_t system_config;
-                        menu.in_edit_mode = 1;
-                        menu.blink_state = 1;
-                        menu_draw_utility();
-                    }
-                    else if (menu.current_line == 8) // Rly Pulse - Time field
+                    else if (menu.current_line == 7) // Rly Pulse - Time field
                     {
                         // ISR already beeped on press
                         extern system_config_t system_config;
@@ -3115,6 +3305,15 @@ void menu_handle_button(uint8_t press_type)
                     menu.total_items = 5;
                     menu_draw_options();
                     uart_println("Long press - UTILITY to OPTIONS");
+                }
+                else if (current_menu == 5) // MAIN MENU -> OPTIONS
+                {
+                    current_menu = 0;
+                    menu.current_line = 0;
+                    menu.top_line = 0;
+                    menu.total_items = 5;
+                    menu_draw_options();
+                    uart_println("Long press - MAIN MENU to OPTIONS");
                 }
             }
         }

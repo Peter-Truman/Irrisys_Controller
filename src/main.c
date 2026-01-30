@@ -8,7 +8,7 @@
  *   - Hold >= 1000ms -> long beep (300ms), long press event, non-blocking
  */
 
-#define BUILD_VERSION 59  // Phase 1: Main screen with state machine
+#define BUILD_VERSION 60  // Power fail workflow: arm on RUN, non-blocking clear on STOP
 
 #include "../include/config.h"
 #include "../include/encoder.h"
@@ -30,6 +30,7 @@ extern void menu_update_numeric_value(void);
 extern void handle_time_rotation(int8_t direction);
 extern void menu_update_time_value(void);
 extern void menu_draw_utility(void);
+extern void menu_draw_main_menu(void);
 
 uint8_t save_pending = 0;
 
@@ -145,9 +146,9 @@ void system_init(void)
     DIG_IN3_TRIS = 1;
     DIG_IN4_TRIS = 1;
 
-    // Relay outputs (RB5, RB4) - start energized (closed)
+    // Relay outputs (RB5, RB4) - start de-energized (open/safe)
     RELAY1_TRIS = 0;
-    RELAY1_PIN = 1;  // Energized = closed
+    RELAY1_PIN = 0;  // De-energized = open = pump stopped (safe boot)
     RELAY2_TRIS = 0;
     RELAY2_PIN = 0;
 
@@ -183,13 +184,14 @@ void trigger_relay_pulse(uint8_t latch_mode)
         }
         else
         {
-            relay_counter = system_config.relay_pulse_time * 100;
+            // Pulse mode: counter starts when DIG_IN1 goes low, not now
+            relay_counter = 0;
             char buf[40];
-            sprintf(buf, "Relay OPEN - PULSE: %d sec", system_config.relay_pulse_time);
+            sprintf(buf, "Relay OPEN - PULSE: %d sec delay", system_config.relay_pulse_time);
             uart_println(buf);
         }
 
-        RELAY1_PIN = 1;
+        RELAY1_PIN = 0;  // De-energize = open = pump stopped
     }
 }
 
@@ -199,7 +201,7 @@ void relay_close(void)
     {
         relay_state = 0;
         relay_counter = 0;
-        RELAY1_PIN = 0;
+        RELAY1_PIN = 1;  // Energize = closed = pump can run
         uart_println("Relay CLOSED");
     }
 }
@@ -235,6 +237,9 @@ static uint32_t stop_timer_secs = 0;
 static uint8_t flash_toggle = 0;
 static uint8_t tick_counter = 0;       // Counts 50ms loops for 1-second tick
 static uint8_t render_counter = 0;     // Display update throttle
+static uint16_t pwr_detect_countdown = 0;  // Non-blocking power detect delay (seconds)
+static uint8_t boot_pwr_fail = 0;             // Set once at boot if power_failure_flag was set in EEPROM
+static uint8_t buzzer_countdown = 0;          // Non-blocking beep: counts down 50ms ticks
 
 // =============================================================================
 // ADC to engineering units conversion
@@ -270,11 +275,36 @@ void render_main_screen(uint16_t ch1, uint16_t ch2, uint16_t ch3, rtc_time_t *ti
     // Use %-15s to left-pad status, then right-justify time at col 15
     {
         char status[16];
-        if (sys_state == SYS_RUN)
+        if (boot_pwr_fail)
+            sprintf(status, "STOP  PWR Fail");
+        else if (system_config.active_stop_code)
+        {
+            // Map stop codes to text
+            switch (system_config.active_stop_code)
+            {
+            case 1:  sprintf(status, "STOP  End Clk"); break;
+            default: sprintf(status, "STOP  Fault %u", system_config.active_stop_code); break;
+            }
+        }
+        else if (sys_state == SYS_RUN)
             sprintf(status, "RUN");
         else
             sprintf(status, "STOP");
-        sprintf(line, "%-15s%02u:%02u", status, time->hours, time->minutes);
+
+        // Show countdown HH:MM:SS when running with clock enabled
+        if (sys_state == SYS_RUN && system_config.clock_enabled)
+        {
+            uint32_t t = run_timer_secs;
+            uint8_t hh = t / 3600;
+            uint8_t mm = (t % 3600) / 60;
+            uint8_t ss = t % 60;
+            sprintf(line, "RUN  %02u:%02u:%02u  %02u:%02u",
+                    hh, mm, ss, time->hours, time->minutes);
+        }
+        else
+        {
+            sprintf(line, "%-15s%02u:%02u", status, time->hours, time->minutes);
+        }
     }
     lcd_print(line);
 
@@ -382,6 +412,9 @@ void main(void)
     uart_init();
     eeprom_init();
 
+    // Capture boot-time power fail state (only show on first screen after power-up)
+    boot_pwr_fail = system_config.power_failure_flag;
+
     // Set menu timeout
     extern volatile uint16_t menu_timeout_reload;
     extern uint8_t get_menu_timeout_seconds(void);
@@ -424,7 +457,7 @@ void main(void)
     uart_println("RELAY: Closed (energized)");
 
     // Wait for display board
-    __delay_ms(2000);
+    __delay_ms(500);
 
     // Set power LED
     disp_set_leds(0x01);
@@ -443,13 +476,24 @@ void main(void)
     lcd_flush();
 
     // Startup beeps
-    for (uint8_t i = 0; i < 5; i++)
+    for (uint8_t i = 0; i < 3; i++)
     {
         beep(50);
         __delay_ms(100);
     }
 
-    __delay_ms(2000);
+    // Hold splash for 5 seconds so display board is fully ready
+    uart_println("Splash hold 5s...");
+    __delay_ms(500);
+    __delay_ms(500);
+    __delay_ms(500);
+    __delay_ms(500);
+    __delay_ms(500);
+    __delay_ms(500);
+    __delay_ms(500);
+    __delay_ms(500);
+    __delay_ms(500);
+    __delay_ms(500);
     beep(200);
 
     // Go to main screen
@@ -461,7 +505,27 @@ void main(void)
     run_timer_secs = 0;
     stop_timer_secs = 0;
 
-    uart_println("Ready");
+    // After boot sequence: check for latched fault
+    if (system_config.active_stop_code)
+    {
+        relay_state = 1;
+        relay_latch_mode = 1;  // Treat as latched until button pressed
+        RELAY1_PIN = 0;        // Stay de-energized = pump stopped
+        uart_println("Boot: active stop code, relay latched open");
+    }
+    else
+    {
+        RELAY1_PIN = 1;  // No fault — energize relay, ready to run
+        uart_println("Boot: relay energized (no fault)");
+    }
+
+    // If booting into STOP with power fail flag set, start countdown to auto-clear
+    if (sys_state == SYS_STOP && boot_pwr_fail)
+    {
+        pwr_detect_countdown = system_config.power_fail_delay;
+        if (pwr_detect_countdown == 0) pwr_detect_countdown = 1;
+        uart_println("Boot: pwr fail flag set, starting countdown");
+    }
 
     // Main loop variables
     int16_t last_encoder = 0;
@@ -469,6 +533,48 @@ void main(void)
     static uint16_t encoder_activity_timer = 0;
     uint16_t adc_ch1, adc_ch2, adc_ch3;
     rtc_time_t current_time = {0};
+
+    // Clear display board, wait 1 second, then render first main screen with debug
+    uart_println("Sending CLS to display...");
+    disp_clear();
+    uart_println("CLS sent. Waiting 1s...");
+    __delay_ms(500);
+    __delay_ms(500);
+
+    // Reset LCD buffers for clean render
+    lcd_init();
+
+    // Apply saved brightness setting
+    disp_set_brightness(system_config.brightness * 10 + 10); // Map 0-9 to 10-100%
+
+    // Build first main screen manually with debug output
+    uart_println("Building first main screen:");
+    rtc_read_time(&current_time);
+    {
+        uint16_t raw0 = adc_read(0);
+        uint16_t raw1 = adc_read(1);
+        uint16_t raw2 = adc_read(2);
+
+        // Debug: show config state
+        sprintf(buf, "  display_en: %d %d %d",
+                input_config[0].display_enabled,
+                input_config[1].display_enabled,
+                input_config[2].display_enabled);
+        uart_println(buf);
+        sprintf(buf, "  sensor_type: %d %d %d",
+                input_config[0].sensor_type,
+                input_config[1].sensor_type,
+                input_config[2].sensor_type);
+        uart_println(buf);
+        sprintf(buf, "  ADC raw: %u %u %u", raw0, raw1, raw2);
+        uart_println(buf);
+
+        render_main_screen(raw0, raw1, raw2, &current_time);
+    }
+    uart_println("render_main_screen done, now force_flush:");
+    lcd_force_flush();
+    uart_println("force_flush done.");
+    render_counter = 0;  // Reset so main loop doesn't re-render immediately
 
     // Digital input edge detection (initialize to current state)
     uint8_t last_dig1 = DIG_IN1_PORT;
@@ -541,22 +647,85 @@ void main(void)
         // =============================================================
         if (dig1 && sys_state == SYS_STOP)
         {
-            sys_state = SYS_RUN;
-            run_timer_secs = 0;
-            if (system_config.clock_enabled)
+            // If relay is latched open, refuse to start — button must clear first
+            if (relay_state == 1 && relay_latch_mode)
             {
-                // Load runtime countdown (hours:minutes -> seconds)
-                run_timer_secs = (uint32_t)system_config.runtime_hours * 3600
-                               + (uint32_t)system_config.runtime_minutes * 60;
+                uart_println("RUN blocked - relay latched, press button to clear");
             }
-            RELAY1_PIN = 1;  // Closed = pump can run
-            uart_println("STATE: RUN");
+            else
+            {
+                sys_state = SYS_RUN;
+                run_timer_secs = 0;
+                if (system_config.clock_enabled)
+                {
+                    // Load runtime countdown (hours:minutes -> seconds)
+                    run_timer_secs = (uint32_t)system_config.runtime_hours * 3600
+                                   + (uint32_t)system_config.runtime_minutes * 60;
+                }
+
+                RELAY1_PIN = 1;  // Energize = closed = pump can run
+                boot_pwr_fail = 0;
+                pwr_detect_countdown = 0;  // Cancel any pending countdown
+                BUZZER = 1; buzzer_countdown = 10;  // 500ms non-blocking beep
+
+                // Immediate screen update BEFORE slow EEPROM saves
+                if (current_menu == 255)
+                {
+                    rtc_read_time(&current_time);
+                    render_main_screen(adc_ch1, adc_ch2, adc_ch3, &current_time);
+                    render_counter = 0;
+                }
+
+                // Clear any stored fault then ARM power fail flag (EEPROM saves are slow)
+                if (system_config.power_failure_flag || system_config.active_stop_code)
+                {
+                    system_config.power_failure_flag = 0;
+                    system_config.active_stop_code = 0;
+                    save_power_flags();
+                    uart_println("Faults cleared (RUN)");
+                }
+                system_config.power_failure_flag = 1;
+                save_power_flags();
+                uart_println("STATE: RUN (pwr fail armed)");
+            }
         }
         else if (!dig1 && sys_state == SYS_RUN)
         {
             sys_state = SYS_STOP;
             stop_timer_secs = 0;
-            uart_println("STATE: STOP");
+            BUZZER = 1; buzzer_countdown = 10;  // 500ms non-blocking beep
+            // Start non-blocking power detect delay before clearing flag
+            pwr_detect_countdown = system_config.power_fail_delay;
+            if (pwr_detect_countdown == 0) pwr_detect_countdown = 1;  // Min 1 second
+
+            // If relay is open in pulse mode, start pulse countdown
+            {
+                char dbuf[50];
+                sprintf(dbuf, "STOP: relay_state=%u latch=%u", relay_state, relay_latch_mode);
+                uart_println(dbuf);
+            }
+            if (relay_state == 1 && !relay_latch_mode)
+            {
+                relay_counter = system_config.relay_pulse_time;
+                if (relay_counter == 0) relay_counter = 1;  // Min 1 second
+                char dbuf[40];
+                sprintf(dbuf, "Pulse countdown: %us", relay_counter);
+                uart_println(dbuf);
+            }
+
+            {
+                char dbuf[40];
+                sprintf(dbuf, "STATE: STOP (pwr detect %us)", pwr_detect_countdown);
+                uart_println(dbuf);
+            }
+
+            // Immediate screen update on state change
+            if (current_menu == 255)
+            {
+                rtc_read_time(&current_time);
+                render_main_screen(adc_ch1, adc_ch2, adc_ch3, &current_time);
+                render_counter = 0;
+            }
         }
 
         // =============================================================
@@ -596,6 +765,14 @@ void main(void)
 
         __delay_ms(50);
 
+        // Non-blocking buzzer countdown (50ms per tick)
+        if (buzzer_countdown > 0)
+        {
+            buzzer_countdown--;
+            if (buzzer_countdown == 0)
+                BUZZER = 0;
+        }
+
         // =============================================================
         // 1-second tick (every 20 × 50ms loops)
         // =============================================================
@@ -608,7 +785,27 @@ void main(void)
             if (sys_state == SYS_RUN)
             {
                 if (system_config.clock_enabled && run_timer_secs > 0)
+                {
                     run_timer_secs--;  // Countdown
+                    if (run_timer_secs == 0)
+                    {
+                        // Runtime expired — trigger relay action
+                        uint8_t mode = system_config.end_runtime_mode;
+                        if (mode == 0)
+                            trigger_relay_pulse(1);  // Latch
+                        else
+                            trigger_relay_pulse(0);  // Pulse
+
+                        system_config.active_stop_code = 1;  // 1 = runtime expired
+                        save_power_flags();
+                        {
+                            char rbuf[60];
+                            sprintf(rbuf, "Runtime expired - mode=%u pulse_time=%u relay_state=%u latch=%u",
+                                    mode, system_config.relay_pulse_time, relay_state, relay_latch_mode);
+                            uart_println(rbuf);
+                        }
+                    }
+                }
                 else if (!system_config.clock_enabled)
                     run_timer_secs++;  // Count up
             }
@@ -616,6 +813,38 @@ void main(void)
             // {
             //     stop_timer_secs++;
             // }
+
+            // Relay pulse countdown (starts when DIG_IN1 goes low)
+            if (relay_state == 1)
+            {
+                char rbuf[50];
+                sprintf(rbuf, "RLY: state=%u latch=%u ctr=%u pin=%u",
+                        relay_state, relay_latch_mode, relay_counter, (uint8_t)RELAY1_PIN);
+                uart_println(rbuf);
+            }
+            if (relay_counter > 0)
+            {
+                relay_counter--;
+                if (relay_counter == 0)
+                {
+                    relay_close();
+                    uart_println("Relay closed (pulse expired)");
+                }
+            }
+
+            // Non-blocking power detect delay countdown
+            if (pwr_detect_countdown > 0)
+            {
+                pwr_detect_countdown--;
+                if (pwr_detect_countdown == 0)
+                {
+                    // Delay expired — normal stop, clear power fail flag
+                    system_config.power_failure_flag = 0;
+                    boot_pwr_fail = 0;
+                    save_power_flags();
+                    uart_println("Power fail flag cleared (normal stop)");
+                }
+            }
 
             // (RTC read moved to render block for coordination)
         }
@@ -637,7 +866,8 @@ void main(void)
         if (encoder_count != last_encoder)
         {
             int16_t delta = encoder_count - last_encoder;
-            beep(1);  // Tick sound
+            if (current_menu != 255)
+                beep(1);  // Tick sound (only in menus, not on main screen)
             last_encoder = encoder_count;
             encoder_activity_timer = 10;
 
@@ -664,6 +894,15 @@ void main(void)
                 extern void handle_datetime_rotation(int8_t direction);
                 handle_datetime_rotation(delta);
                 menu_draw_utility();
+            }
+            else if (menu.in_edit_mode && current_menu == 5)
+            {
+                // MAIN MENU - Run Time is a time field
+                if (menu.current_line == 0)
+                {
+                    handle_time_rotation(delta > 0 ? 1 : -1);
+                    menu_update_time_value();
+                }
             }
             else if (menu.in_edit_mode && current_menu == 1)
             {
@@ -707,6 +946,7 @@ void main(void)
                 if (current_menu == 0) menu_draw_options();
                 else if (current_menu == 1) menu_draw_input();
                 else if (current_menu == 2) menu_draw_setup();
+                else if (current_menu == 5) menu_draw_main_menu();
             }
         }
 
@@ -725,19 +965,30 @@ void main(void)
                 if (evt == 1)  // Short press
                 {
                     extern system_config_t system_config;
-                    extern void save_current_config(void);
+                    extern void save_power_flags(void);
 
-                    if (system_config.power_failure_flag == 1)
+                    if (boot_pwr_fail || system_config.active_stop_code)
                     {
+                        // First press: clear fault, close relay if latched, don't enter menu
+                        boot_pwr_fail = 0;
                         system_config.power_failure_flag = 0;
-                        save_current_config();
-                        uart_println("Power failure cleared");
+                        system_config.active_stop_code = 0;
+                        if (relay_state == 1)
+                            relay_close();
+                        save_power_flags();
+                        uart_println("Faults cleared (button)");
+                        // Distinctive double-beep for fault acknowledgment
                         beep(50);
-                        __delay_ms(50);
+                        __delay_ms(80);
                         beep(50);
+                        // Immediate screen update to clear fault message
+                        rtc_read_time(&current_time);
+                        render_main_screen(adc_ch1, adc_ch2, adc_ch3, &current_time);
+                        render_counter = 0;
                     }
                     else
                     {
+                        // No fault: enter menu
                         current_menu = 0;
                         menu.current_line = 0;
                         menu.top_line = 0;
@@ -756,6 +1007,7 @@ void main(void)
                 if (current_menu == 0) menu_draw_options();
                 else if (current_menu == 1) menu_draw_input();
                 else if (current_menu == 2) menu_draw_setup();
+                else if (current_menu == 5) menu_draw_main_menu();
 
                 lcd_flush();
             }
@@ -819,6 +1071,12 @@ void main(void)
                         menu_update_time_value();
                     else
                         menu_draw_utility();
+                    break;
+                case 5:
+                    if (menu.current_line == 0)
+                        menu_update_time_value();
+                    else
+                        menu_draw_main_menu();
                     break;
                 }
 

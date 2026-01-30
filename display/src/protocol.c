@@ -68,20 +68,8 @@ static void protocol_execute(void)
         case PROTO_CMD_BRIGHT:
             if (len >= 1)
             {
-                // Brightness control - data[0] is 0-100
-                uint8_t brightness = data_buf[0];
-                if (brightness > 100) brightness = 100;
-
-                // TODO: Implement backlight PWM
-                // For now, just on/off based on threshold
-                if (brightness > 0)
-                {
-                    LATCbits.LATC4 = 1;  // Backlight ON
-                }
-                else
-                {
-                    LATCbits.LATC4 = 0;  // Backlight OFF
-                }
+                // Brightness control via software PWM (0-100%)
+                led_set_backlight(data_buf[0]);
             }
             break;
 

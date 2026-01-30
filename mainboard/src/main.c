@@ -666,6 +666,8 @@ void main(void)
                     menu_draw_clock();
                 else if (current_menu == 4)
                     menu_draw_utility();
+                else if (current_menu == 5)
+                    menu_draw_main_menu();
             }
         }
 
@@ -677,6 +679,12 @@ void main(void)
 
             // Debug beep to confirm button detected
             beep(20);
+
+            {
+                char dbg[50];
+                sprintf(dbg, "BTN evt=%d menu=%d", current_event, current_menu);
+                uart_println(dbg);
+            }
 
             // Check if we're on main screen (for short press)
             if (current_menu == 255)
@@ -703,7 +711,7 @@ void main(void)
                         current_menu = 0; // Enter OPTIONS menu
                         menu.current_line = 0;
                         menu.top_line = 0;
-                        menu.total_items = 4; // 4 items: Setup, Utility, About, Exit
+                        menu.total_items = 6; // 6 items: Main Menu, Setup, Utility, About, Exit, ""
                         menu_draw_options();
                         beep(50);
                     }
@@ -725,6 +733,8 @@ void main(void)
                     menu_draw_clock();
                 else if (current_menu == 4)
                     menu_draw_utility();
+                else if (current_menu == 5)
+                    menu_draw_main_menu();
             }
         }
 
@@ -889,6 +899,8 @@ void main(void)
                 menu_draw_clock();
             else if (current_menu == 4)
                 menu_draw_utility();
+            else if (current_menu == 5)
+                menu_draw_main_menu();
             // Note: current_menu == 255 (main screen) doesn't need periodic refresh
         }
 

@@ -73,6 +73,7 @@ void menu_init(void);
 void menu_draw_options(void);
 void menu_draw_input(void);
 void menu_draw_setup(void);
+void menu_draw_main_menu(void);
 void menu_update_edit_value(void);
 void menu_handle_encoder(int16_t delta);
 void menu_handle_button(uint8_t press_type);

@@ -181,9 +181,24 @@ void lcd_flush(void)
 
                 // Update previous buffer
                 memcpy(lcd_prev_buffer[row], lcd_buffer[row], LCD_COLS + 1);
+
+                // Inter-frame delay: let display board process before next frame
+                __delay_ms(5);
             }
             lcd_dirty[row] = 0;
         }
+    }
+}
+
+// Force-flush all 4 lines unconditionally (no change detection)
+void lcd_force_flush(void)
+{
+    for (uint8_t row = 0; row < LCD_ROWS; row++)
+    {
+        disp_send_line(row + 1, lcd_buffer[row]);
+        memcpy(lcd_prev_buffer[row], lcd_buffer[row], LCD_COLS + 1);
+        lcd_dirty[row] = 0;
+        __delay_ms(10);  // Give display board time to process each line
     }
 }
 
@@ -196,6 +211,12 @@ void disp_clear(void)
 {
     disp_send_frame(DISP_CMD_CLEAR, NULL, 0);
     lcd_clear();  // Also clear local buffer
+    // Reset prev_buffer so next flush sends all lines unconditionally
+    for (uint8_t row = 0; row < LCD_ROWS; row++)
+    {
+        memset(lcd_prev_buffer[row], '\0', LCD_COLS);
+        lcd_prev_buffer[row][LCD_COLS] = '\0';
+    }
 }
 
 // Set brightness (0-100%)

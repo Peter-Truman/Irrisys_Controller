@@ -223,8 +223,8 @@ void pca9535_led_toggle(uint8_t led_mask)
 void pca9535_led_test(void)
 {
     // One cycle = 5 steps x 64ms = 320ms
-    // 50% shorter: 2.56s -> 1.28s = 4 cycles
-    for (uint8_t cycle = 0; cycle < 4; cycle++)
+    // 2 cycles = 640ms
+    for (uint8_t cycle = 0; cycle < 2; cycle++)
     {
         // Forward: PWR -> SIGNAL -> FAULT
         pca9535_led_off(LED_ALL_MASK);

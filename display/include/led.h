@@ -60,6 +60,12 @@ void led_off(uint8_t led);
 uint8_t led_get_brightness(uint8_t led);
 
 /**
+ * Set LCD backlight brightness via software PWM on RC4
+ * @param percent 0-100 (0=off, 100=full brightness)
+ */
+void led_set_backlight(uint8_t percent);
+
+/**
  * Timer ISR handler - call from main ISR
  * Handles software PWM and flash timing
  */

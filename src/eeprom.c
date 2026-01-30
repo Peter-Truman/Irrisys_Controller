@@ -13,7 +13,7 @@ uint16_t menu_timeout_seconds = 30; // Default value if EEPROM invalid
 // Factory defaults constant
 const input_config_t factory_defaults[3] = {
     // Input 1 - Default to Pressure
-    {1, 0, 0, 0, 1, {0, 0, 0}, // enable=YES, pressure, analog, %, show
+    {1, 0, 0, 0, 1, 0, {0, 0}, // enable=YES, pressure, analog, %, show, flags=0
      0,
      360,
      0,
@@ -24,7 +24,8 @@ const input_config_t factory_defaults[3] = {
      30,
      0,
      0,
-     {0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, // high=200psi, PLPBP=300s(5min), SLPBP=30s
+     30,
+     {0, 0, 0, 0, 0, 0, 0, 0, 0}, // high=200, PLPBP=300s, SLPBP=30s, low_press=30
      0,
      0,
      1,
@@ -34,18 +35,19 @@ const input_config_t factory_defaults[3] = {
      {0}},         // padding
 
     // Input 2 - Default to Temperature
-    {1, 1, 0, 0, 1, {0, 0, 0}, // enable, temp, show
-     0,
-     100,
+    {1, 1, 0, 0, 1, 0, {0, 0}, // enable, temp, analog, %, show, flags=0
+     -50,
+     150,
      -10,
-     {0, 0, 0, 0, 0}, // 4mA=0°C, 20mA=100°C, low=-10°C (signed)
+     {0, 0, 0, 0, 0}, // 4mA=-50°C, 20mA=150°C, low=-10°C (signed)
      85,
      60,
      0,
      0,
      0,
      0,
-     {0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, // high temp=85°C, bypass=60s
+     0,
+     {0, 0, 0, 0, 0, 0, 0, 0, 0}, // high temp=85°C, bypass=60s, low_press=0(N/A)
      0,
      0,
      0,
@@ -55,7 +57,7 @@ const input_config_t factory_defaults[3] = {
      {0}},         // padding
 
     // Input 3 - Default to Flow (Digital)
-    {1, 2, 1, 0, 1, {0, 0, 0}, // enable, flow, digital, show
+    {1, 2, 1, 0, 1, 0, {0, 0}, // enable, flow, digital, %, show, flags=0
      0,
      0,
      0,
@@ -66,7 +68,8 @@ const input_config_t factory_defaults[3] = {
      0,
      50,
      30,
-     {0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, // low flow=50%, bypass=30s
+     0,
+     {0, 0, 0, 0, 0, 0, 0, 0, 0}, // low flow=50%, bypass=30s, low_press=0(N/A)
      0,
      0,
      0,
@@ -78,12 +81,13 @@ const input_config_t factory_defaults[3] = {
 
 // System defaults
 const system_config_t system_defaults = {
-    1, 120, 0, 0, 1, 2, {0, 0, 0, 0, 0, 0, 0, 0}, // clock enabled, timeout=120s, pulse mode, relay_pulse=2s
+    1, 120, 0, 0, 1, 2, 0, {0, 0, 0, 0, 0, 0, 0}, // clock enabled, timeout=120s, pulse mode, relay_pulse=2s, flags=0
     5,
     5,
-    60,
-    1,                                            // power_failure_flag = 1 (TEST MODE - flash PWR LED)
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},           // contrast=5, brightness=5, power fail=60s
+    5,
+    0,                                            // power_failure_flag = 0 (armed on RUN entry)
+    0,                                            // active_stop_code = 0 (no latched fault)
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0},              // contrast=5, brightness=5, power fail=5s
     100,
     {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, // 100 log entries
     {0}                                          // padding
@@ -228,6 +232,18 @@ void save_current_config(void)
     eeprom_write_block(&system_config, EEPROM_SYSTEM_BASE, sizeof(system_config_t));
 
     // Write checksum last
+    uint16_t checksum = calculate_config_checksum();
+    eeprom_write_word(EEPROM_CHECKSUM_ADDR, checksum);
+}
+
+void save_power_flags(void)
+{
+    // Only write the 2 flag bytes + checksum (4 EEPROM writes vs ~514)
+    uint16_t offset = EEPROM_SYSTEM_BASE + 20;  // power_failure_flag offset in system_config_t
+    eeprom_write_byte(offset, system_config.power_failure_flag);
+    eeprom_write_byte(offset + 1, system_config.active_stop_code);
+
+    // Recalculate and write checksum
     uint16_t checksum = calculate_config_checksum();
     eeprom_write_word(EEPROM_CHECKSUM_ADDR, checksum);
 }

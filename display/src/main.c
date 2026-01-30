@@ -151,10 +151,7 @@ void main(void)
     debug_println("Display Board v34");
     debug_println("Debug on RB4 @ 9600");
 
-    // Turn on backlight immediately
-    LATCbits.LATC4 = 1;  // Backlight ON
-
-    // Initialize LED driver (sets up Timer0 interrupt)
+    // Initialize LED driver (sets up Timer0 interrupt, including backlight PWM on RC4)
     led_init();
     debug_println("LED init OK");
 

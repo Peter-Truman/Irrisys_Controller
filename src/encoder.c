@@ -77,17 +77,7 @@ void __interrupt() isr(void)
         {
             relay_ms_counter = 0;
 
-            if (relay_state == 1 && !relay_latch_mode && relay_counter > 0)
-            {
-                relay_counter--;
-            }
-            else if (relay_state == 1 && !relay_latch_mode && relay_counter == 0)
-            {
-                // Pulse complete - close relay automatically
-                RELAY1_PIN = 0; // DE-ENERGIZE relay (active high)
-                relay_state = 0;
-            }
-            // If latch_mode==1, relay stays open until relay_close() called
+            // Relay pulse logic handled in main loop 1-second tick
         }
 
         // Menu timeout countdown (every 2ms)

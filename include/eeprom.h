@@ -12,7 +12,8 @@ typedef struct
     uint8_t flow_type;       // 0=Analog, 1=Digital (Flow only)
     uint8_t flow_units;      // 0=%, 1=LpS (Analog Flow only)
     uint8_t display_enabled; // 0=Hide, 1=Show
-    uint8_t reserved1[3];    // Future expansion
+    uint8_t config_flags;    // Bit flags for per-input options (future use)
+    uint8_t reserved1[2];    // Future expansion
 
     // Signed values (16 bytes) - for values that can be negative
     int16_t scale_4ma;          // SIGNED 4mA scaling (-999 to +999)
@@ -25,9 +26,10 @@ typedef struct
     uint16_t high_bypass_time;    // High bypass time (seconds)
     uint16_t plp_bypass_time;     // Primary low pressure bypass
     uint16_t slp_bypass_time;     // Secondary low pressure bypass
-    uint16_t low_flow_setpoint;   // Low flow limit
-    uint16_t low_flow_bypass;     // Low flow bypass time
-    uint16_t reserved_uint16[10]; // Future 16-bit values
+    uint16_t low_flow_setpoint;      // Low flow limit
+    uint16_t low_flow_bypass;        // Low flow bypass time
+    uint16_t low_pressure_setpoint;  // Low pressure setpoint (psi)
+    uint16_t reserved_uint16[9];     // Future 16-bit values
 
     // Relay modes (8 bytes)
     uint8_t relay_high_mode; // 0=Latch, 1=Pulse, 2=No Action
@@ -43,8 +45,6 @@ typedef struct
     uint8_t padding[48];
 } input_config_t;
 
-// ADD THESE MISSING PARTS:
-
 // System configuration structure
 typedef struct
 {
@@ -55,14 +55,16 @@ typedef struct
     uint16_t runtime_minutes;
     uint8_t end_runtime_mode; // Relay mode for end runtime
     uint8_t relay_pulse_time; // Relay pulse duration (1-120 seconds)
-    uint8_t reserved_time[8];
+    uint8_t config_flags;     // Bit flags for system options (future use)
+    uint8_t reserved_time[7];
 
     // Display settings (16 bytes)
     uint8_t contrast;           // LCD contrast (3-10)
     uint8_t brightness;         // LCD brightness (3-10)
     uint16_t power_fail_delay;  // Power fail delay (seconds)
     uint8_t power_failure_flag; // 1=power failure occurred, 0=normal
-    uint8_t reserved_display[11];
+    uint8_t active_stop_code;   // Latched stop code (persists across power cycles)
+    uint8_t reserved_display[10];
 
     // Logging (16 bytes)
     uint16_t log_entries; // Number of log entries to store
@@ -80,6 +82,7 @@ typedef struct
 // Function prototypes
 void eeprom_init(void);
 void save_current_config(void);
+void save_power_flags(void);
 void factory_reset(void);
 void load_factory_defaults(void);
 void sync_menu_variables(void);

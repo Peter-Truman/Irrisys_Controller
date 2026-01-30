@@ -19,6 +19,7 @@ void lcd_clear(void);
 void lcd_set_cursor(uint8_t row, uint8_t col);
 void lcd_print(const char *str);
 void lcd_flush(void);
+void lcd_force_flush(void);  // Send all 4 lines unconditionally (ignores change detection)
 
 // Display Board Control Functions
 void disp_clear(void);

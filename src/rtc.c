@@ -42,10 +42,8 @@ uint8_t rtc_read_register(uint8_t reg, uint8_t *value)
 // Initialize RTC for 1Hz square wave output
 uint8_t rtc_init(void)
 {
-    // CRITICAL: 2-second delay for RTC oscillator to stabilize after power-up
-    // DS3231M datasheet specifies 250-300ms minimum, we use 2000ms for safety
-    __delay_ms(500);
-    __delay_ms(500);
+    // RTC oscillator stabilization after power-up
+    // DS3231M datasheet specifies 250-300ms minimum, we use 1000ms for margin
     __delay_ms(500);
     __delay_ms(500);
 

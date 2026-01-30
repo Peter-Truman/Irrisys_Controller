@@ -16,6 +16,41 @@
 #include "../include/config.h"
 #include "../include/led.h"
 
+// EEPROM address for brightness persistence
+#define EE_ADDR_BRIGHTNESS  0x00
+#define EE_MAGIC_ADDR       0x01
+#define EE_MAGIC_VALUE      0xA5   // Indicates valid stored data
+
+// EEPROM read/write helpers (PIC18F14K22 built-in data EEPROM)
+static uint8_t ee_read(uint8_t addr)
+{
+    EEADR = addr;
+    EECON1bits.EEPGD = 0;  // Data EEPROM
+    EECON1bits.CFGS = 0;   // Access EEPROM
+    EECON1bits.RD = 1;     // Initiate read
+    return EEDATA;
+}
+
+static void ee_write(uint8_t addr, uint8_t data)
+{
+    EEADR = addr;
+    EEDATA = data;
+    EECON1bits.EEPGD = 0;  // Data EEPROM
+    EECON1bits.CFGS = 0;   // Access EEPROM
+    EECON1bits.WREN = 1;   // Enable writes
+
+    uint8_t gie_save = INTCONbits.GIE;
+    INTCONbits.GIE = 0;    // Disable interrupts for unlock sequence
+    EECON2 = 0x55;
+    EECON2 = 0xAA;
+    EECON1bits.WR = 1;     // Start write
+    INTCONbits.GIE = gie_save;
+
+    while (EECON1bits.WR)   // Wait for completion
+        ;
+    EECON1bits.WREN = 0;   // Disable writes
+}
+
 // PWM resolution (steps per cycle)
 #define PWM_STEPS 100
 
@@ -34,6 +69,9 @@ static volatile uint8_t pwm_counter = 0;
 // Flash tick divider (counts PWM cycles, 100 cycles = 1 second at 100Hz PWM)
 static volatile uint8_t tick_divider = 0;
 
+// LCD backlight brightness (0-100, software PWM on RC4, active HIGH)
+static volatile uint8_t backlight_duty = 100;  // Default full brightness
+
 /**
  * Initialize LED driver
  */
@@ -43,6 +81,7 @@ void led_init(void)
     TRISAbits.TRISA2 = 0;   // PWR LED
     TRISAbits.TRISA4 = 0;   // Signal LED
     TRISAbits.TRISA5 = 0;   // Fault LED
+    PWM_BRIGHTNESS_TRIS = 0; // LCD backlight (RC4)
 
     // Start with LEDs off (active low, so set high)
     LATAbits.LATA2 = 1;
@@ -75,6 +114,16 @@ void led_init(void)
     // Enable Timer0 interrupt
     INTCONbits.TMR0IE = 1;
     INTCONbits.TMR0IF = 0;
+
+    // Load saved brightness from EEPROM (if valid)
+    if (ee_read(EE_MAGIC_ADDR) == EE_MAGIC_VALUE)
+    {
+        uint8_t saved = ee_read(EE_ADDR_BRIGHTNESS);
+        if (saved <= 100)
+        {
+            backlight_duty = saved;
+        }
+    }
 }
 
 /**
@@ -132,6 +181,22 @@ uint8_t led_get_brightness(uint8_t led)
 {
     if (led >= LED_COUNT) return 0;
     return led_state[led].brightness;
+}
+
+/**
+ * Set LCD backlight brightness via software PWM on RC4
+ * Shares Timer0 ISR with LED PWM (same 100-step, 100Hz cycle)
+ */
+void led_set_backlight(uint8_t percent)
+{
+    if (percent > 100) percent = 100;
+    if (backlight_duty != percent)
+    {
+        backlight_duty = percent;
+        // Persist to EEPROM (only on change to minimize writes)
+        ee_write(EE_ADDR_BRIGHTNESS, percent);
+        ee_write(EE_MAGIC_ADDR, EE_MAGIC_VALUE);
+    }
 }
 
 /**
@@ -210,4 +275,7 @@ void led_timer_isr(void)
     {
         LATAbits.LATA5 = 1;  // OFF
     }
+
+    // LCD Backlight (RC4) - active HIGH
+    PWM_BRIGHTNESS = (pwm_counter < backlight_duty) ? 1 : 0;
 }

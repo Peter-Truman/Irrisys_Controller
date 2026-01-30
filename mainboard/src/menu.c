@@ -65,11 +65,12 @@ const item_options_t menu_item_options[] = {
 
 // Test menu items for OPTIONS menu
 const char *options_menu[] = {
+    "Main Menu",
     "Setup",
     "Utility",
     "About",
     "Exit",
-    ""}; // 4 items, empty 5th for array safety
+    ""}; // 5 items, empty 6th for array safety
 
 // Buffers for editable values - must be modifiable
 static char value_enable[10] = "Enabled";
@@ -109,6 +110,15 @@ menu_item_t input_menu[16]; // Max 16 items to cover all cases (pressure with Sa
 
 // Clock menu - static 5 items (with Save)
 menu_item_t clock_menu[5];
+
+// Main menu - static 3 items (Run Time, Save, Back)
+const menu_item_t main_menu_template[] = {
+    {"Run Time", NULL, 1},   // 0 - Time edit HH:MM
+    {"Save", NULL, 0},       // 1 - Action: save to EEPROM
+    {"Back", NULL, 0}        // 2
+};
+menu_item_t main_menu_items[3];
+static char value_runtime[6] = "00:00";
 
 // Menu template for PRESSURE sensor
 const menu_item_t pressure_menu_template[] = {
@@ -215,6 +225,7 @@ extern void uart_println(const char *str);
 extern void lcd_clear(void);
 void handle_time_rotation(int8_t direction);
 void menu_draw_utility(void);
+void menu_draw_main_menu(void);
 
 //=============================================================================
 // CONTEXT-AWARE FIELD DETECTION FUNCTIONS
@@ -585,6 +596,17 @@ void menu_update_time_value(void)
     }
 
     value_buf[5] = '\0';
+
+    // Handle MAIN MENU time field (Run Time)
+    if (current_menu == 5)
+    {
+        if (menu.current_line == 0) // Run Time
+        {
+            sprintf(value_runtime, "%s", value_buf);
+            menu_draw_main_menu();
+            return;
+        }
+    }
 
     // Handle UTILITY menu time fields
     if (current_menu == 4)
@@ -999,7 +1021,7 @@ void menu_init(void)
 {
     menu.current_line = 0;
     menu.top_line = 0;
-    menu.total_items = 5; // OPTIONS menu items
+    menu.total_items = 6; // OPTIONS menu items (Main Menu, Setup, Utility, About, Exit)
     menu.in_edit_mode = 0;
     menu.blink_state = 0;
     menu.blink_timer = 0;
@@ -1439,7 +1461,7 @@ void menu_draw_options(void)
     for (uint8_t i = 0; i < 3; i++)
     {
         uint8_t item_index = menu.top_line + i;
-        if (item_index >= 5)
+        if (item_index >= 6)
             break;
 
         lcd_clear_line(i + 1);
@@ -1721,6 +1743,125 @@ void rebuild_clock_menu(void)
     clock_menu[4].value = "";    // Back - no value displayed
 
     menu.total_items = 5;
+}
+
+/**
+ * Build main menu with current runtime value from system_config
+ */
+void rebuild_main_menu(void)
+{
+    extern system_config_t system_config;
+
+    uart_println("rebuild: start");
+
+    // Copy template
+    memcpy(main_menu_items, main_menu_template, sizeof(main_menu_template));
+
+    // Clamp values to valid range (EEPROM may have garbage on first boot)
+    uint16_t hrs = system_config.runtime_hours;
+    uint16_t mins = system_config.runtime_minutes;
+    {
+        char dbg[40];
+        sprintf(dbg, "rebuild: hrs=%u mins=%u", (unsigned)hrs, (unsigned)mins);
+        uart_println(dbg);
+    }
+    if (hrs > 99) hrs = 0;
+    if (mins > 59) mins = 0;
+
+    // Format runtime as HH:MM
+    sprintf(value_runtime, "%02u:%02u", (unsigned)hrs, (unsigned)mins);
+    uart_println(value_runtime);
+
+    // Assign value pointers
+    main_menu_items[0].value = value_runtime;
+    main_menu_items[1].value = "";  // Save
+    main_menu_items[2].value = "";  // Back
+
+    menu.total_items = 3;
+    uart_println("rebuild: done");
+}
+
+/**
+ * Draw the MAIN MENU screen
+ */
+void menu_draw_main_menu(void)
+{
+    // Fixed title line
+    lcd_clear_line(0);
+    lcd_print_at(0, 0, "MAIN MENU");
+
+    // Draw 3 visible items
+    for (uint8_t i = 0; i < 3 && (menu.top_line + i) < menu.total_items; i++)
+    {
+        uint8_t item_idx = menu.top_line + i;
+        lcd_clear_line(i + 1);
+
+        uint8_t is_selected = (item_idx == menu.current_line);
+
+        // Handle Save and Back items (1 and 2) - action items left-justified
+        if (item_idx == 1 || item_idx == 2)
+        {
+            if (is_selected)
+            {
+                lcd_print_at(i + 1, 0, "[");
+                lcd_print_at(i + 1, 1, main_menu_items[item_idx].label);
+                lcd_print_at(i + 1, 1 + strlen(main_menu_items[item_idx].label), "]");
+            }
+            else
+            {
+                lcd_print_at(i + 1, 1, main_menu_items[item_idx].label);
+            }
+            continue;
+        }
+
+        // Run Time item (0) - label left, value right
+        lcd_print_at(i + 1, 0, main_menu_items[item_idx].label);
+
+        // Build value display
+        char value_buf[15];
+        uint8_t show_brackets = 0;
+
+        if (is_selected)
+        {
+            if (menu.in_edit_mode)
+            {
+                show_brackets = 2; // Parentheses in edit mode
+                // Time field - value handled by menu_update_time_value blink
+                strcpy(value_buf, main_menu_items[item_idx].value);
+            }
+            else
+            {
+                show_brackets = 1; // Square brackets
+                strcpy(value_buf, main_menu_items[item_idx].value);
+            }
+        }
+        else
+        {
+            strcpy(value_buf, main_menu_items[item_idx].value);
+        }
+
+        // Display value right-justified
+        uint8_t val_len = strlen(value_buf);
+
+        if (show_brackets == 0)
+        {
+            if (val_len > 0)
+                lcd_print_at(i + 1, 19 - val_len, value_buf);
+        }
+        else
+        {
+            uint8_t actual_len = strlen(main_menu_items[item_idx].value);
+            uint8_t start_pos = 19 - actual_len - 1;
+
+            lcd_set_cursor(i + 1, start_pos);
+            lcd_print(show_brackets == 1 ? "[" : "(");
+            lcd_print(value_buf);
+            lcd_set_cursor(i + 1, 19);
+            lcd_print(show_brackets == 1 ? "]" : ")");
+        }
+    }
+
+    lcd_flush();
 }
 
 /**
@@ -2083,6 +2224,14 @@ void menu_handle_encoder(int16_t delta)
                 return; // Exit early for clock menu
             }
 
+            // Handle MAIN MENU time field (Run Time at line 0)
+            if (current_menu == 5 && menu.current_line == 0)
+            {
+                handle_time_rotation(delta > 0 ? 1 : -1);
+                menu_update_time_value();
+                return; // Exit early for MAIN MENU time field
+            }
+
             // Handle UTILITY menu time fields (Menu Timeout at line 4, Pwr Detect at line 5, Rly Pulse at line 8)
             if (current_menu == 4 && !menu.in_datetime_submenu && (menu.current_line == 4 || menu.current_line == 5 || menu.current_line == 8))
             {
@@ -2216,6 +2365,12 @@ void menu_handle_button(uint8_t press_type)
     extern uint8_t save_pending;
     extern input_config_t input_config[3];
 
+    {
+        char dbg[50];
+        sprintf(dbg, "BTN: press=%d menu=%d line=%d edit=%d", press_type, current_menu, menu.current_line, menu.in_edit_mode);
+        uart_println(dbg);
+    }
+
     if (menu.in_edit_mode)
     {
         if (press_type == 1) // Short press - confirm edit
@@ -2269,6 +2424,37 @@ void menu_handle_button(uint8_t press_type)
                 __delay_ms(50);
                 beep(50);
                 return; // Exit early for CLOCK menu
+            }
+
+            // Handle MAIN MENU time field (Run Time at line 0)
+            if (current_menu == 5 && menu.current_line == 0)
+            {
+                extern system_config_t system_config;
+                extern uint8_t save_pending;
+
+                menu.time_edit_digit++;
+                menu.blink_state = 1;
+                beep(50);
+
+                menu_update_time_value();
+
+                if (menu.time_edit_digit > 1)
+                {
+                    // Save HH:MM to system_config
+                    system_config.runtime_hours = menu.time_xx;
+                    system_config.runtime_minutes = menu.time_yy;
+
+                    sprintf(value_runtime, "%02d:%02d", menu.time_xx, menu.time_yy);
+
+                    menu.in_edit_mode = 0;
+                    save_pending = 1;
+                    beep(50);
+                    __delay_ms(50);
+                    beep(50);
+
+                    menu_draw_main_menu();
+                }
+                return; // Exit early for MAIN MENU
             }
 
             // Handle UTILITY menu time fields (Menu Timeout at line 4, Pwr Detect at line 5, Rly Pulse at line 8)
@@ -2676,13 +2862,30 @@ void menu_handle_button(uint8_t press_type)
         {
             if (press_type == 1) // Short press
             {
-                if (current_menu == 0) // OPTIONS menu (4 items: Setup, Utility, About, Exit)
+                if (current_menu == 0) // OPTIONS menu (5 items: Main Menu, Setup, Utility, About, Exit)
                 {
                     beep(50);
+                    {
+                        char dbg[40];
+                        sprintf(dbg, "OPT press line=%d", menu.current_line);
+                        uart_println(dbg);
+                    }
 
                     switch (menu.current_line)
                     {
-                    case 0: // Setup
+                    case 0: // Main Menu
+                        uart_println("-> rebuild_main_menu");
+                        rebuild_main_menu();
+                        uart_println("-> set current_menu=5");
+                        current_menu = 5; // MAIN MENU
+                        menu.current_line = 0;
+                        menu.top_line = 0;
+                        uart_println("-> menu_draw_main_menu");
+                        menu_draw_main_menu();
+                        uart_println("-> done main menu");
+                        break;
+
+                    case 1: // Setup
                         current_menu = 2;
                         menu.current_line = 0;
                         menu.top_line = 0;
@@ -2690,7 +2893,7 @@ void menu_handle_button(uint8_t press_type)
                         menu_draw_setup();
                         break;
 
-                    case 1: // Utility
+                    case 2: // Utility
                         rebuild_utility_menu();
                         current_menu = 4; // UTILITY menu is #4
                         menu.current_line = 0;
@@ -2702,11 +2905,11 @@ void menu_handle_button(uint8_t press_type)
                         menu_draw_utility();
                         break;
 
-                    case 2: // About
+                    case 3: // About
                         // TODO: Show about screen
                         break;
 
-                    case 3: // Exit
+                    case 4: // Exit
                         if (save_pending)
                         {
                             save_current_config();
@@ -2855,7 +3058,7 @@ void menu_handle_button(uint8_t press_type)
                         current_menu = 0;
                         menu.current_line = 0;
                         menu.top_line = 0;
-                        menu.total_items = 5;
+                        menu.total_items = 6;
                         menu_draw_options();
                     }
                     else if (menu.current_line <= 2) // Input 1-3
@@ -2937,6 +3140,49 @@ void menu_handle_button(uint8_t press_type)
                     else
                     {
                         uart_println("Field not editable!");
+                    }
+                }
+                else if (current_menu == 5) // MAIN MENU
+                {
+                    beep(50);
+
+                    if (menu.current_line == 1) // Save
+                    {
+                        if (save_pending)
+                        {
+                            save_current_config();
+                            save_pending = 0;
+                            beep(50);
+                        }
+                        else
+                        {
+                            beep(50);
+                        }
+                    }
+                    else if (menu.current_line == 2) // Back
+                    {
+                        current_menu = 0;
+                        menu.current_line = 0;
+                        menu.top_line = 0;
+                        menu.total_items = 6;
+                        menu_draw_options();
+                    }
+                    else if (main_menu_items[menu.current_line].editable)
+                    {
+                        if (menu.current_line == 0) // Run Time
+                        {
+                            // Calculate total seconds from stored hours:minutes
+                            extern system_config_t system_config;
+                            uint16_t total_secs = (uint16_t)system_config.runtime_hours * 3600
+                                                + (uint16_t)system_config.runtime_minutes * 60;
+                            init_time_editor(total_secs, 1); // mode 1 = HH:MM
+                        }
+
+                        strcpy(original_value, main_menu_items[menu.current_line].value);
+                        menu.in_edit_mode = 1;
+                        menu.blink_state = 1;
+                        beep(50);
+                        menu_draw_main_menu();
                     }
                 }
                 else if (current_menu == 4) // UTILITY menu
@@ -3062,7 +3308,7 @@ void menu_handle_button(uint8_t press_type)
                         current_menu = 0;
                         menu.current_line = 0;
                         menu.top_line = 0;
-                        menu.total_items = 5;
+                        menu.total_items = 6;
                         menu_draw_options();
                     }
                     // TODO: Handle other UTILITY menu items (Set Clock, View Log, etc.)
@@ -3103,7 +3349,7 @@ void menu_handle_button(uint8_t press_type)
                     current_menu = 0;
                     menu.current_line = 0;
                     menu.top_line = 0;
-                    menu.total_items = 5;
+                    menu.total_items = 6;
                     menu_draw_options();
                     uart_println("Long press - SETUP to OPTIONS");
                 }
@@ -3121,9 +3367,18 @@ void menu_handle_button(uint8_t press_type)
                     current_menu = 0;
                     menu.current_line = 0;
                     menu.top_line = 0;
-                    menu.total_items = 5;
+                    menu.total_items = 6;
                     menu_draw_options();
                     uart_println("Long press - UTILITY to OPTIONS");
+                }
+                else if (current_menu == 5) // MAIN MENU -> OPTIONS
+                {
+                    current_menu = 0;
+                    menu.current_line = 0;
+                    menu.top_line = 0;
+                    menu.total_items = 6;
+                    menu_draw_options();
+                    uart_println("Long press - MAIN MENU to OPTIONS");
                 }
             }
         }
