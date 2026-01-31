@@ -17,6 +17,9 @@ extern volatile uint8_t button_state;        // State machine state
 extern volatile uint8_t short_beep_flag;  // Request 50ms beep
 extern volatile uint8_t long_beep_flag;   // Request 300ms beep
 
+// Free-running ms counter for encoder acceleration
+extern volatile uint16_t encoder_ms_timer;
+
 void encoder_init(void);
 
 #endif

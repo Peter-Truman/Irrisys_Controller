@@ -42,6 +42,7 @@ volatile uint16_t menu_timeout_reload = 0; // Store the reload value (set from m
 // Debug flag for timeout (defined here, used in main)
 volatile uint8_t timeout_debug_flag = 0;
 volatile uint8_t long_press_beep_flag = 0; // Legacy - keeping for compatibility
+volatile uint16_t encoder_ms_timer = 0;   // Free-running ms counter for acceleration
 
 // Relay pulse countdown (defined in main.c)
 extern volatile uint8_t relay_state;
@@ -79,6 +80,9 @@ void __interrupt() isr(void)
 
             // Relay pulse logic handled in main loop 1-second tick
         }
+
+        // Free-running ms counter for encoder acceleration
+        if (encoder_ms_timer < 65535) encoder_ms_timer++;
 
         // Menu timeout countdown (every 2ms)
         ms_counter++;

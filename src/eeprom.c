@@ -1,7 +1,7 @@
 #include "../include/eeprom.h"
 #include "../include/config.h"
 #include <string.h>
-#include "../include/menu.h" // Add this line
+#include "../include/menu.h"
 
 // Global variables
 input_config_t input_config[3];
@@ -12,85 +12,58 @@ uint16_t menu_timeout_seconds = 30; // Default value if EEPROM invalid
 
 // Factory defaults constant
 const input_config_t factory_defaults[3] = {
-    // Input 1 - Default to Pressure
-    {1, 0, 0, 0, 1, 0, {0, 0}, // enable=YES, pressure, analog, %, show, flags=0
-     0,
-     360,
-     0,
-     {0, 0, 0, 0, 0}, // 4mA=0 psi, 20mA=360 psi (signed)
-     200,
-     0,
-     300,
-     30,
-     0,
-     0,
-     30,
-     {0, 0, 0, 0, 0, 0, 0, 0, 0}, // high=200, PLPBP=300s, SLPBP=30s, low_press=30
-     0,
-     0,
-     1,
-     0,
-     {0, 0, 0, 0}, // relay: high=latch, plp=latch, slp=pulse, low=none
-     {0, 0, 0, 0}, // reserved uint32
-     {0}},         // padding
+    // Input 1 - Default to Pressure (analog)
+    {
+        1, 0, 0, 0, {0, 0, 0, 0},           // enable, pressure, fault_pol=0, flags, reserved
+        0, 360, 200, 30, {0, 0, 0, 0},      // scale_4ma=0, scale_20ma=360, high=200, low=30
+        0, 0, 300, 30, {0,0,0,0,0,0,0,0,0,0,0,0}, // pri_hi=0, sec_hi=0, pri_lo=300, sec_lo=30
+        0, 0, 0, 0, {0, 0, 0, 0},           // relay: pri_hi, sec_hi, pri_lo, sec_lo = all latch
+        {0, 0, 0, 0},                        // reserved uint32
+        "Pressure",                           // name
+        "psi",                                // units
+        {0}                                   // padding
+    },
 
-    // Input 2 - Default to Temperature
-    {1, 1, 0, 0, 1, 0, {0, 0}, // enable, temp, analog, %, show, flags=0
-     -50,
-     150,
-     -10,
-     {0, 0, 0, 0, 0}, // 4mA=-50°C, 20mA=150°C, low=-10°C (signed)
-     85,
-     60,
-     0,
-     0,
-     0,
-     0,
-     0,
-     {0, 0, 0, 0, 0, 0, 0, 0, 0}, // high temp=85°C, bypass=60s, low_press=0(N/A)
-     0,
-     0,
-     0,
-     0,
-     {0, 0, 0, 0}, // relay modes
-     {0, 0, 0, 0}, // reserved uint32
-     {0}},         // padding
+    // Input 2 - Default to Temperature (analog)
+    {
+        1, 1, 0, 0, {0, 0, 0, 0},           // enable, temp, fault_pol=0, flags, reserved
+        -50, 150, 85, -10, {0, 0, 0, 0},    // scale_4ma=-50, scale_20ma=150, high=85, low=-10
+        60, 0, 0, 0, {0,0,0,0,0,0,0,0,0,0,0,0}, // pri_hi=60s, others=0
+        0, 0, 0, 0, {0, 0, 0, 0},           // relay modes all latch
+        {0, 0, 0, 0},                        // reserved uint32
+        "Temperature",                        // name
+        "\xDF""C",                            // units (degree symbol + C)
+        {0}                                   // padding
+    },
 
-    // Input 3 - Default to Flow (Digital)
-    {1, 2, 1, 0, 1, 0, {0, 0}, // enable, flow, digital, %, show, flags=0
-     0,
-     0,
-     0,
-     {0, 0, 0, 0, 0}, // no scaling for digital
-     0,
-     0,
-     0,
-     0,
-     50,
-     30,
-     0,
-     {0, 0, 0, 0, 0, 0, 0, 0, 0}, // low flow=50%, bypass=30s, low_press=0(N/A)
-     0,
-     0,
-     0,
-     0,
-     {0, 0, 0, 0}, // relay modes
-     {0, 0, 0, 0}, // reserved uint32
-     {0}}          // padding
+    // Input 3 - Default to Flow Meter (analog)
+    {
+        1, 2, 0, 0, {0, 0, 0, 0},           // enable, flow_meter, fault_pol=0, flags, reserved
+        0, 100, 0, 0, {0, 0, 0, 0},         // scale_4ma=0, scale_20ma=100, high=0, low=0
+        0, 0, 0, 30, {0,0,0,0,0,0,0,0,0,0,0,0}, // sec_lo=30s
+        0, 0, 0, 0, {0, 0, 0, 0},           // relay modes all latch
+        {0, 0, 0, 0},                        // reserved uint32
+        "Flow Meter",                         // name
+        "L/M",                                // units
+        {0}                                   // padding
+    }
 };
 
 // System defaults
 const system_config_t system_defaults = {
-    1, 120, 0, 0, 1, 2, 0, {0, 0, 0, 0, 0, 0, 0}, // clock enabled, timeout=120s, pulse mode, relay_pulse=2s, flags=0
-    5,
-    5,
-    5,
-    0,                                            // power_failure_flag = 0 (armed on RUN entry)
-    0,                                            // active_stop_code = 0 (no latched fault)
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0},              // contrast=5, brightness=5, power fail=5s
-    100,
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, // 100 log entries
-    {0}                                          // padding
+    // Clock/timing
+    1, 120, 0, 0, 1, 2, 0, {0, 0, 0, 0, 0, 0, 0},
+    // Display
+    5, 5, 5, 0, 0, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    // Digital inputs (all disabled)
+    0, 0, 0,  // DIG2: disabled, fault_low, latch
+    0, 0, 0,  // DIG3: disabled, fault_low, latch
+    0, 0, 0,  // DIG4: disabled, fault_low, latch
+    {0, 0, 0, 0, 0, 0, 0},
+    // Logging
+    100, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    // Padding
+    {0}
 };
 
 // Calculate checksum for data integrity
@@ -206,7 +179,6 @@ void eeprom_init(void)
 
     // Sync menu variables with loaded config
     sync_menu_variables();
-    // ... existing EEPROM loading code ...
 
     // Load menu timeout value
     menu_timeout_seconds = system_config.menu_timeout * 2; // Convert from 2-second increments
@@ -232,6 +204,28 @@ void save_current_config(void)
     eeprom_write_block(&system_config, EEPROM_SYSTEM_BASE, sizeof(system_config_t));
 
     // Write checksum last
+    uint16_t checksum = calculate_config_checksum();
+    eeprom_write_word(EEPROM_CHECKSUM_ADDR, checksum);
+}
+
+void save_input_config(uint8_t input_num)
+{
+    if (input_num >= 3) return;
+
+    eeprom_write_block(&input_config[input_num],
+                       EEPROM_INPUT_BASE + (input_num * sizeof(input_config_t)),
+                       sizeof(input_config_t));
+
+    // Recalculate and write checksum
+    uint16_t checksum = calculate_config_checksum();
+    eeprom_write_word(EEPROM_CHECKSUM_ADDR, checksum);
+}
+
+void save_system_config(void)
+{
+    eeprom_write_block(&system_config, EEPROM_SYSTEM_BASE, sizeof(system_config_t));
+
+    // Recalculate and write checksum
     uint16_t checksum = calculate_config_checksum();
     eeprom_write_word(EEPROM_CHECKSUM_ADDR, checksum);
 }
@@ -263,16 +257,14 @@ void load_factory_defaults(void)
 
 void sync_menu_variables(void)
 {
-    // This function will sync the menu display variables with the EEPROM config
-    // We'll implement this after we integrate with the menu system
-
-    // For now, just update the basic flags for Input 1
+    // Sync menu display variables with loaded config
     extern uint8_t enable_edit_flag;
     extern uint8_t sensor_edit_flag;
 
     enable_edit_flag = input_config[0].enable;
     sensor_edit_flag = input_config[0].sensor_type;
 }
+
 // Getter function for menu timeout - safe to call from anywhere
 uint8_t get_menu_timeout_seconds(void)
 {

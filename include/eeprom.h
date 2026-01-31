@@ -3,75 +3,89 @@
 
 #include <stdint.h>
 
-// Per-input configuration (expandable structure)
+// Per-input configuration — unified for all sensor types (128 bytes)
 typedef struct
 {
     // Basic config (8 bytes)
-    uint8_t enable;          // 0=Disabled, 1=Enabled
-    uint8_t sensor_type;     // 0=Pressure, 1=Temp, 2=Flow
-    uint8_t flow_type;       // 0=Analog, 1=Digital (Flow only)
-    uint8_t flow_units;      // 0=%, 1=LpS (Analog Flow only)
-    uint8_t display_enabled; // 0=Hide, 1=Show
-    uint8_t config_flags;    // Bit flags for per-input options (future use)
-    uint8_t reserved1[2];    // Future expansion
+    uint8_t enable;               // 0=Disabled, 1=Enabled
+    uint8_t sensor_type;          // 0=Pressure, 1=Temp, 2=FlowMeter, 3=FlowSw, 4=Oth4-20, 5=OthSw
+    uint8_t fault_polarity;       // Digital types: 0=Fault Low, 1=Fault High
+    uint8_t config_flags;         // Bit flags for per-input options
+    uint8_t reserved1[4];         // Future expansion
 
-    // Signed values (16 bytes) - for values that can be negative
-    int16_t scale_4ma;          // SIGNED 4mA scaling (-999 to +999)
-    int16_t scale_20ma;         // SIGNED 20mA scaling (-999 to +999)
-    int16_t temp_low;           // SIGNED temp low setpoint
-    int16_t reserved_signed[5]; // Future signed values
+    // Signed values (16 bytes)
+    int16_t scale_4ma;            // 4mA scaling (-999 to +999)
+    int16_t scale_20ma;           // 20mA scaling (-999 to +999)
+    int16_t high_setpoint;        // High setpoint (signed)
+    int16_t low_setpoint;         // Low setpoint (signed)
+    int16_t reserved_signed[4];   // Future signed values
 
-    // Unsigned 16-bit values (32 bytes) - for 0-1000 range values
-    uint16_t high_setpoint;       // High pressure/temp limit
-    uint16_t high_bypass_time;    // High bypass time (seconds)
-    uint16_t plp_bypass_time;     // Primary low pressure bypass
-    uint16_t slp_bypass_time;     // Secondary low pressure bypass
-    uint16_t low_flow_setpoint;      // Low flow limit
-    uint16_t low_flow_bypass;        // Low flow bypass time
-    uint16_t low_pressure_setpoint;  // Low pressure setpoint (psi)
-    uint16_t reserved_uint16[9];     // Future 16-bit values
+    // Unsigned 16-bit bypass times in seconds (32 bytes)
+    uint16_t primary_high_bypass;     // Analog: pri high BP / Digital: pri fault BP
+    uint16_t secondary_high_bypass;   // Analog: sec high BP / Digital: sec fault BP
+    uint16_t primary_low_bypass;      // Analog: pri low BP
+    uint16_t secondary_low_bypass;    // Analog: sec low BP
+    uint16_t reserved_uint16[12];     // Future 16-bit values
 
-    // Relay modes (8 bytes)
-    uint8_t relay_high_mode; // 0=Latch, 1=Pulse, 2=No Action
-    uint8_t relay_plp_mode;
-    uint8_t relay_slp_mode;
-    uint8_t relay_low_mode;
+    // Relay modes (8 bytes) — 0=Latch, 1=Pulse
+    uint8_t relay_pri_high_mode;      // Analog: pri high relay / Digital: pri fault relay
+    uint8_t relay_sec_high_mode;      // Analog: sec high relay / Digital: sec fault relay
+    uint8_t relay_pri_low_mode;       // Analog: pri low relay
+    uint8_t relay_sec_low_mode;       // Analog: sec low relay
     uint8_t reserved_relay[4];
 
-    // Space reserved for future 32-bit values (0-22000000 range)
-    uint32_t reserved_uint32[4]; // 16 bytes for future large values
+    // Space reserved for future 32-bit values
+    uint32_t reserved_uint32[4];  // 16 bytes
 
-    // Padding to 128 bytes per input for maximum expansion
-    uint8_t padding[48];
+    // Custom name (16 bytes)
+    char name[16];              // Null-terminated, max 15 chars
+
+    // Units string (8 bytes)
+    char units[8];              // Null-terminated, max 7 chars (e.g. "psi", "°C", "L/m")
+
+    // Padding to 128 bytes
+    uint8_t padding[24];
 } input_config_t;
 
-// System configuration structure
+// System configuration structure (128 bytes)
 typedef struct
 {
     // Clock/timing (16 bytes)
     uint8_t clock_enabled;
-    uint8_t menu_timeout;   // Menu timeout in seconds
-    uint16_t runtime_hours; // Set runtime hh:mm
+    uint8_t menu_timeout;       // Menu timeout in seconds
+    uint16_t runtime_hours;     // Set runtime hh:mm
     uint16_t runtime_minutes;
-    uint8_t end_runtime_mode; // Relay mode for end runtime
-    uint8_t relay_pulse_time; // Relay pulse duration (1-120 seconds)
-    uint8_t config_flags;     // Bit flags for system options (future use)
+    uint8_t end_runtime_mode;   // Relay mode for end runtime
+    uint8_t relay_pulse_time;   // Relay pulse duration (1-120 seconds)
+    uint8_t config_flags;       // Bit flags for system options (future use)
     uint8_t reserved_time[7];
 
     // Display settings (16 bytes)
-    uint8_t contrast;           // LCD contrast (3-10)
-    uint8_t brightness;         // LCD brightness (3-10)
-    uint16_t power_fail_delay;  // Power fail delay (seconds)
-    uint8_t power_failure_flag; // 1=power failure occurred, 0=normal
-    uint8_t active_stop_code;   // Latched stop code (persists across power cycles)
+    uint8_t contrast;               // LCD contrast (3-10)
+    uint8_t brightness;             // LCD brightness (3-10)
+    uint16_t power_fail_delay;      // Power fail delay (seconds)
+    uint8_t power_failure_flag;     // 1=power failure occurred, 0=normal
+    uint8_t active_stop_code;       // Latched stop code (persists across power cycles)
     uint8_t reserved_display[10];
 
+    // Digital input config (16 bytes)
+    uint8_t dig2_enable;            // 0=Disabled, 1=Enabled
+    uint8_t dig2_fault_polarity;    // 0=Fault Low, 1=Fault High
+    uint8_t dig2_relay_mode;        // 0=Latch, 1=Pulse
+    uint8_t dig3_enable;
+    uint8_t dig3_fault_polarity;
+    uint8_t dig3_relay_mode;
+    uint8_t dig4_enable;
+    uint8_t dig4_fault_polarity;
+    uint8_t dig4_relay_mode;
+    uint8_t reserved_digital[7];
+
     // Logging (16 bytes)
-    uint16_t log_entries; // Number of log entries to store
+    uint16_t log_entries;       // Number of log entries to store
     uint8_t reserved_log[14];
 
-    // Padding to 128 bytes for future system config
-    uint8_t padding[80];
+    // Padding to 128 bytes
+    uint8_t padding[64];
 } system_config_t;
 
 // EEPROM addresses
@@ -82,6 +96,8 @@ typedef struct
 // Function prototypes
 void eeprom_init(void);
 void save_current_config(void);
+void save_input_config(uint8_t input_num);
+void save_system_config(void);
 void save_power_flags(void);
 void factory_reset(void);
 void load_factory_defaults(void);

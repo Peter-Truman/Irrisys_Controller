@@ -8,7 +8,7 @@
  *   - Hold >= 1000ms -> long beep (300ms), long press event, non-blocking
  */
 
-#define BUILD_VERSION 60  // Power fail workflow: arm on RUN, non-blocking clear on STOP
+#define BUILD_VERSION 61  // Unified input menu, save-on-field-exit, digital input menu
 
 #include "../include/config.h"
 #include "../include/encoder.h"
@@ -19,20 +19,19 @@
 #include "../include/pca9535.h"
 #include "../include/lcd.h"
 #include <stdio.h>
+#include <string.h>
 
 // External variables from encoder
 extern volatile uint8_t button_event;
 extern volatile uint16_t button_hold_captured;
 
 // External function declarations for menu editing
-extern void handle_numeric_rotation(int8_t direction);
-extern void menu_update_numeric_value(void);
+extern void menu_update_edit_value(void);
 extern void handle_time_rotation(int8_t direction);
 extern void menu_update_time_value(void);
 extern void menu_draw_utility(void);
 extern void menu_draw_main_menu(void);
-
-uint8_t save_pending = 0;
+extern void menu_draw_digital(void);
 
 // Relay pulse control
 volatile uint8_t relay_state = 0;
@@ -313,7 +312,7 @@ void render_main_screen(uint16_t ch1, uint16_t ch2, uint16_t ch3, rtc_time_t *ti
     {
         lcd_set_cursor(i + 1, 0);
 
-        if (!input_config[i].display_enabled)
+        if (!input_config[i].enable)
         {
             lcd_print("                    ");
             continue;
@@ -323,57 +322,38 @@ void render_main_screen(uint16_t ch1, uint16_t ch2, uint16_t ch3, rtc_time_t *ti
                                   input_config[i].scale_4ma,
                                   input_config[i].scale_20ma);
 
-        switch (input_config[i].sensor_type)
-        {
-        case 0: // Pressure
-        {
-            int16_t psi = eng;
-            if (psi < 0) psi = 0;
-            if (psi > 999) psi = 999;
-            sprintf(line, "%03d psi             ", psi);
-            break;
-        }
-        case 1: // Temperature
-        {
-            char sign = eng >= 0 ? '+' : '-';
-            int16_t abs_val = eng >= 0 ? eng : -eng;
-            if (abs_val > 99) abs_val = 99;
-            sprintf(line, "%c%02d C               ", sign, abs_val);
-            break;
-        }
-        case 2: // Flow
-        {
-            if (input_config[i].flow_type == 1)
-            {
-                // Digital flow: read DIG_IN (i+2)
-                uint8_t flow_on = 0;
-                if (i == 0) flow_on = DIG_IN2_PORT;
-                else if (i == 1) flow_on = DIG_IN3_PORT;
-                else flow_on = DIG_IN4_PORT;
+        // Left-justified: "val units" then spaces (rest of line reserved for future use)
+        uint8_t st = input_config[i].sensor_type;
+        uint8_t is_digital = (st == 3 || st == 5); // Flow Switch, Other Switch
 
-                if (flow_on)
-                    sprintf(line, "FLOW                ");
-                else
-                    sprintf(line, "NO FLOW             ");
-            }
+        if (is_digital)
+        {
+            // Digital: read hardware pin
+            uint8_t sw_on = 0;
+            if (i == 0) sw_on = DIG_IN2_PORT;
+            else if (i == 1) sw_on = DIG_IN3_PORT;
+            else sw_on = DIG_IN4_PORT;
+
+            if (input_config[i].fault_polarity)
+                sw_on = !sw_on;
+
+            sprintf(line, "%-20s", sw_on ? "High" : "Low");
+        }
+        else
+        {
+            // Analog: "val units" left-justified
+            int16_t val = eng;
+            if (val < -999) val = -999;
+            if (val > 999) val = 999;
+
+            char vbuf[16];
+            if (val < 0)
+                sprintf(vbuf, "-%03d %s", -val, input_config[i].units);
             else
-            {
-                // Analog flow
-                int16_t flow = eng;
-                if (flow < 0) flow = 0;
-                if (flow > 999) flow = 999;
-                sprintf(line, "%03d L/m             ", flow);
-            }
-            break;
-        }
-        default:
-            sprintf(line, "                    ");
-            break;
-        }
+                sprintf(vbuf, "%03d %s", val, input_config[i].units);
 
-        // Add enable indicator at position 19
-        if (input_config[i].enable)
-            line[19] = '*';
+            sprintf(line, "%-20s", vbuf);
+        }
 
         lcd_print(line);
     }
@@ -556,10 +536,10 @@ void main(void)
         uint16_t raw2 = adc_read(2);
 
         // Debug: show config state
-        sprintf(buf, "  display_en: %d %d %d",
-                input_config[0].display_enabled,
-                input_config[1].display_enabled,
-                input_config[2].display_enabled);
+        sprintf(buf, "  enable: %d %d %d",
+                input_config[0].enable,
+                input_config[1].enable,
+                input_config[2].enable);
         uart_println(buf);
         sprintf(buf, "  sensor_type: %d %d %d",
                 input_config[0].sensor_type,
@@ -876,78 +856,19 @@ void main(void)
                 menu.blink_state = 1;
             }
 
-            // Handle rotation based on current menu context
-            if (menu.in_edit_mode && current_menu == 4 && !menu.in_datetime_submenu &&
-                (menu.current_line == 4 || menu.current_line == 5 || menu.current_line == 8))
-            {
-                handle_time_rotation(delta > 0 ? 1 : -1);
-                menu_update_time_value();
-            }
-            else if (menu.in_edit_mode && current_menu == 4 && !menu.in_datetime_submenu)
-            {
-                extern void handle_utility_numeric_rotation(int8_t direction);
-                handle_utility_numeric_rotation(delta);
-                menu_draw_utility();
-            }
-            else if (menu.in_edit_mode && current_menu == 4 && menu.in_datetime_submenu)
-            {
-                extern void handle_datetime_rotation(int8_t direction);
-                handle_datetime_rotation(delta);
-                menu_draw_utility();
-            }
-            else if (menu.in_edit_mode && current_menu == 5)
-            {
-                // MAIN MENU - Run Time is a time field
-                if (menu.current_line == 0)
-                {
-                    handle_time_rotation(delta > 0 ? 1 : -1);
-                    menu_update_time_value();
-                }
-            }
-            else if (menu.in_edit_mode && current_menu == 1)
-            {
-                if (is_numeric_field(menu.current_line, input_config[current_input].sensor_type, input_config[current_input].flow_type))
-                {
-                    handle_numeric_rotation(delta);
-                }
-                else if (is_time_field(menu.current_line, input_config[current_input].sensor_type, input_config[current_input].flow_type))
-                {
-                    handle_time_rotation(delta > 0 ? 1 : -1);
-                    menu_update_time_value();
-                }
-                else
-                {
-                    menu_handle_encoder(delta);
-                }
-            }
-            else
-            {
-                menu_handle_encoder(delta);
-            }
+            // Handle rotation - menu_handle_encoder handles all edit modes
+            menu_handle_encoder(delta);
 
             // Redraw menu after rotation
-            if (menu.in_edit_mode && current_menu == 1)
-            {
-                if (is_numeric_field(menu.current_line, input_config[current_input].sensor_type, input_config[current_input].flow_type))
-                {
-                    menu_update_numeric_value();
-                }
-                else if (is_time_field(menu.current_line, input_config[current_input].sensor_type, input_config[current_input].flow_type))
-                {
-                    menu_update_time_value();
-                }
-                else
-                {
-                    menu_update_edit_value();
-                }
-            }
-            else
-            {
-                if (current_menu == 0) menu_draw_options();
-                else if (current_menu == 1) menu_draw_input();
-                else if (current_menu == 2) menu_draw_setup();
-                else if (current_menu == 5) menu_draw_main_menu();
-            }
+            if (current_menu == 0) menu_draw_options();
+            else if (current_menu == 1) menu_draw_input();
+            else if (current_menu == 2) menu_draw_setup();
+            else if (current_menu == 3) menu_draw_clock();
+            else if (current_menu == 4) menu_draw_utility();
+            else if (current_menu == 5) menu_draw_main_menu();
+            else if (current_menu == 6) menu_draw_digital();
+
+            lcd_flush();
         }
 
         // =============================================================
@@ -989,10 +910,7 @@ void main(void)
                     else
                     {
                         // No fault: enter menu
-                        current_menu = 0;
-                        menu.current_line = 0;
-                        menu.top_line = 0;
-                        menu.total_items = 5;
+                        menu_init();
                         menu_draw_options();
                         lcd_flush();
                     }
@@ -1007,7 +925,10 @@ void main(void)
                 if (current_menu == 0) menu_draw_options();
                 else if (current_menu == 1) menu_draw_input();
                 else if (current_menu == 2) menu_draw_setup();
+                else if (current_menu == 3) menu_draw_clock();
+                else if (current_menu == 4) menu_draw_utility();
                 else if (current_menu == 5) menu_draw_main_menu();
+                else if (current_menu == 6) menu_draw_digital();
 
                 lcd_flush();
             }
@@ -1020,10 +941,6 @@ void main(void)
         if (current_menu == 255 && last_menu_state != 255)
         {
             // Returning to main screen — render will happen automatically
-            if (save_pending)
-            {
-                save_pending = 0;  // Discard unsaved changes
-            }
             render_counter = 5;  // Force immediate render
         }
         last_menu_state = current_menu;
@@ -1037,7 +954,8 @@ void main(void)
         }
 
         blink_timer++;
-        if (blink_timer >= 10)
+        uint8_t blink_rate = menu.in_edit_mode ? 3 : 10; // ~4Hz in edit mode, ~1Hz otherwise
+        if (blink_timer >= blink_rate)
         {
             blink_timer = 0;
             if (menu.in_edit_mode && encoder_activity_timer == 0)
@@ -1050,33 +968,25 @@ void main(void)
                     menu_draw_options();
                     break;
                 case 1:
-                    if (is_numeric_field(menu.current_line, input_config[current_input].sensor_type, input_config[current_input].flow_type))
-                        menu_update_numeric_value();
-                    else if (is_time_field(menu.current_line, input_config[current_input].sensor_type, input_config[current_input].flow_type))
-                        menu_update_time_value();
-                    else
-                        menu_draw_input();
+                    menu_draw_input();
                     break;
                 case 2:
                     menu_draw_setup();
                     break;
                 case 3:
-                    if (menu.current_line == 2)
-                        menu_update_time_value();
-                    else
-                        menu_draw_clock();
+                    menu_draw_clock();
                     break;
                 case 4:
-                    if (!menu.in_datetime_submenu && (menu.current_line == 4 || menu.current_line == 5 || menu.current_line == 8))
+                    if (!menu.in_datetime_submenu && (menu.current_line == 4 || menu.current_line == 5 || menu.current_line == 7))
                         menu_update_time_value();
                     else
                         menu_draw_utility();
                     break;
                 case 5:
-                    if (menu.current_line == 0)
-                        menu_update_time_value();
-                    else
-                        menu_draw_main_menu();
+                    menu_draw_main_menu();
+                    break;
+                case 6:
+                    menu_draw_digital();
                     break;
                 }
 
@@ -1094,7 +1004,7 @@ void main(void)
         extern volatile uint8_t menu_timeout_flag;
         extern volatile uint16_t menu_timeout_timer;
 
-        if (current_menu < 5 && menu_timeout_flag == 0)
+        if (current_menu <= 6 && menu_timeout_flag == 0)
         {
             beep(100);
             __delay_ms(50);
@@ -1104,7 +1014,6 @@ void main(void)
             menu.in_edit_mode = 0;
             menu.current_line = 0;
             menu.top_line = 0;
-            save_pending = 0;  // Discard unsaved changes
             render_counter = 5;  // Force immediate render
 
             menu_timeout_flag = 1;
