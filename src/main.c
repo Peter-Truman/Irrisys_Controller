@@ -230,6 +230,25 @@ static uint8_t adc_buf_full = 0;
 #define SYS_STOP  0
 #define SYS_RUN   1
 
+// Bypass timer phases
+#define BP_INACTIVE  0  // Direction not monitored
+#define BP_PRIMARY   1  // Startup grace period (counts down regardless)
+#define BP_NORMAL    2  // Normal monitoring (no timer running)
+#define BP_SECONDARY 3  // Fault detected, secondary countdown
+#define BP_ALARM     4  // Timer expired while fault active
+
+// Bypass timer state per direction
+typedef struct {
+    uint16_t countdown;  // Seconds remaining, 0=inactive
+    uint8_t phase;       // BP_INACTIVE/PRIMARY/NORMAL/SECONDARY/ALARM
+} bp_dir_t;
+
+// Bypass timer state per input (high + low directions)
+typedef struct {
+    bp_dir_t high;
+    bp_dir_t low;
+} bp_input_t;
+
 static uint8_t sys_state = SYS_STOP;
 static uint32_t run_timer_secs = 0;
 static uint32_t stop_timer_secs = 0;
@@ -239,6 +258,23 @@ static uint8_t render_counter = 0;     // Display update throttle
 static uint16_t pwr_detect_countdown = 0;  // Non-blocking power detect delay (seconds)
 static uint8_t boot_pwr_fail = 0;             // Set once at boot if power_failure_flag was set in EEPROM
 static uint8_t buzzer_countdown = 0;          // Non-blocking beep: counts down 50ms ticks
+static uint8_t ext_stop_flag = 0;             // 1=stopped by external run input going low
+static uint8_t led_flash_counter = 0;         // 50ms tick counter for 2Hz LED flash
+static uint8_t led_flash_state = 0;           // Toggles at 2Hz for LED flashing
+
+// Bypass timer state
+static bp_input_t bp_state[3];
+static uint8_t alarm_active[3] = {0, 0, 0};  // Per-input alarm flag
+static uint8_t alarm_flash = 0;               // Toggles at ~4Hz for alarm line flash
+static uint8_t alarm_flash_counter = 0;
+
+// Alarm buzzer state (6 cycles of 500ms on / 250ms off)
+static uint8_t alarm_buzz_phase = 0;  // 0=idle, 1-12=on/off cycles (odd=on, even=off)
+static uint8_t alarm_buzz_tick = 0;   // Counts 50ms ticks within current phase
+
+// Alarm display: which bypass abbreviation to show on the fault line
+static char alarm_code_text[7] = "";  // e.g. "PLPBP", "PHTBP"
+static uint8_t alarm_input_idx = 0;   // Which input (0-2) triggered the alarm
 
 // =============================================================================
 // ADC to engineering units conversion
@@ -255,6 +291,16 @@ int16_t adc_to_eng(uint16_t counts, int16_t scale_4ma, int16_t scale_20ma)
     num = (int32_t)(counts - ADC_4MA) * (scale_20ma - scale_4ma);
     return scale_4ma + (int16_t)(num / (ADC_20MA - ADC_4MA));
 }
+
+
+// Forward declarations for bypass timer helpers
+static uint8_t read_digital_input(uint8_t input_idx);
+
+// Bypass abbreviation lookup [sensor_type 0-5] for alarm display
+static const char *bp_lbl_phi[6] = {"PHPBP", "PHTBP", "PHFBP", "PFBP",  "PHVBP", "PABP"};
+static const char *bp_lbl_shi[6] = {"SHPBP", "SHTBP", "SHFBP", "SFBP",  "SHVBP", "SABP"};
+static const char *bp_lbl_plo[6] = {"PLPBP", "PLTBP", "PLFBP", "PNFBP", "PLVBP", "PNABP"};
+static const char *bp_lbl_slo[6] = {"SLPBP", "SLTBP", "SLFBP", "SNFBP", "SLVBP", "SNABP"};
 
 // =============================================================================
 // Main screen rendering
@@ -278,20 +324,23 @@ void render_main_screen(uint16_t ch1, uint16_t ch2, uint16_t ch3, rtc_time_t *ti
             sprintf(status, "STOP  PWR Fail");
         else if (system_config.active_stop_code)
         {
-            // Map stop codes to text
-            switch (system_config.active_stop_code)
-            {
-            case 1:  sprintf(status, "STOP  End Clk"); break;
-            default: sprintf(status, "STOP  Fault %u", system_config.active_stop_code); break;
-            }
+            // Stop code 1 = runtime expired (line 1 only)
+            // Stop codes 2-7 = bypass alarm (shown on the fault input line instead)
+            if (system_config.active_stop_code == 1)
+                sprintf(status, "STOP End RunTime");
+            else
+                sprintf(status, "STOP");
         }
         else if (sys_state == SYS_RUN)
             sprintf(status, "RUN");
+        else if (ext_stop_flag)
+            sprintf(status, "STOP  Ext Stop");
         else
             sprintf(status, "STOP");
 
-        // Show countdown HH:MM:SS when running with clock enabled
-        if (sys_state == SYS_RUN && system_config.clock_enabled)
+        // Show countdown HH:MM:SS when running with clock enabled and runtime > 0
+        if (sys_state == SYS_RUN && system_config.clock_enabled &&
+            (system_config.runtime_hours > 0 || system_config.runtime_minutes > 0))
         {
             uint32_t t = run_timer_secs;
             uint8_t hh = t / 3600;
@@ -305,9 +354,13 @@ void render_main_screen(uint16_t ch1, uint16_t ch2, uint16_t ch3, rtc_time_t *ti
             sprintf(line, "%-15s%02u:%02u", status, time->hours, time->minutes);
         }
     }
-    lcd_print(line);
+    // Flash line 1 for End RunTime stop code
+    if (system_config.active_stop_code == 1 && !alarm_flash)
+        lcd_print("                    ");
+    else
+        lcd_print(line);
 
-    // --- Lines 2-4: Input values ---
+    // --- Lines 2-4: Input values with bypass timer and alarm flash ---
     for (uint8_t i = 0; i < 3; i++)
     {
         lcd_set_cursor(i + 1, 0);
@@ -318,41 +371,88 @@ void render_main_screen(uint16_t ch1, uint16_t ch2, uint16_t ch3, rtc_time_t *ti
             continue;
         }
 
-        int16_t eng = adc_to_eng(adc_vals[i],
-                                  input_config[i].scale_4ma,
-                                  input_config[i].scale_20ma);
+        // Alarm flash: blank the line during flash-off phase
+        if (alarm_active[i] && !alarm_flash)
+        {
+            lcd_print("                    ");
+            continue;
+        }
 
-        // Left-justified: "val units" then spaces (rest of line reserved for future use)
+        // Build value + units string
+        char vbuf[16];
         uint8_t st = input_config[i].sensor_type;
-        uint8_t is_digital = (st == 3 || st == 5); // Flow Switch, Other Switch
+        uint8_t is_digital = (st == 3 || st == 5);
 
         if (is_digital)
         {
-            // Digital: read hardware pin
-            uint8_t sw_on = 0;
-            if (i == 0) sw_on = DIG_IN2_PORT;
-            else if (i == 1) sw_on = DIG_IN3_PORT;
-            else sw_on = DIG_IN4_PORT;
-
+            uint8_t sw_on = read_digital_input(i);
             if (input_config[i].fault_polarity)
                 sw_on = !sw_on;
-
-            sprintf(line, "%-20s", sw_on ? "High" : "Low");
+            sprintf(vbuf, "%s", sw_on ? "High" : "Low");
         }
         else
         {
-            // Analog: "val units" left-justified
+            int16_t eng = adc_to_eng(adc_vals[i],
+                                      input_config[i].scale_4ma,
+                                      input_config[i].scale_20ma);
             int16_t val = eng;
             if (val < -999) val = -999;
             if (val > 999) val = 999;
 
-            char vbuf[16];
             if (val < 0)
                 sprintf(vbuf, "-%03d %s", -val, input_config[i].units);
             else
                 sprintf(vbuf, "%03d %s", val, input_config[i].units);
+        }
 
-            sprintf(line, "%-20s", vbuf);
+        // Build the full line: "val units  MM:SS" or "val units" padded to 20
+        memset(line, ' ', 20);
+        line[20] = '\0';
+
+        uint8_t vlen = (uint8_t)strlen(vbuf);
+        if (vlen > 12) vlen = 12;
+        memcpy(line, vbuf, vlen);
+
+        // Find most urgent active timer and its label
+        uint16_t display_timer = 0;
+        const char *bp_label = "";
+        if (bp_state[i].high.countdown > 0)
+        {
+            display_timer = bp_state[i].high.countdown;
+            // Primary or secondary?
+            if (bp_state[i].high.phase == BP_PRIMARY)
+                bp_label = bp_lbl_phi[st];
+            else
+                bp_label = bp_lbl_shi[st];
+        }
+        if (bp_state[i].low.countdown > 0 &&
+            (display_timer == 0 || bp_state[i].low.countdown < display_timer))
+        {
+            display_timer = bp_state[i].low.countdown;
+            if (bp_state[i].low.phase == BP_PRIMARY)
+                bp_label = bp_lbl_plo[st];
+            else
+                bp_label = bp_lbl_slo[st];
+        }
+
+        if (display_timer > 0)
+        {
+            uint8_t mm = (uint8_t)(display_timer / 60);
+            uint8_t ss = (uint8_t)(display_timer % 60);
+            // Format "LABEL MM:SS" right-justified
+            char tbuf[14];
+            sprintf(tbuf, "%s %02u:%02u", bp_label, mm, ss);
+            uint8_t tlen = (uint8_t)strlen(tbuf);
+            if (tlen <= 20)
+                memcpy(line + 20 - tlen, tbuf, tlen);
+        }
+
+        // Alarm: show bypass abbreviation right-justified (e.g. "PLPBP")
+        if (alarm_active[i] && i == alarm_input_idx && alarm_code_text[0] != '\0')
+        {
+            uint8_t clen = (uint8_t)strlen(alarm_code_text);
+            if (clen > 0 && clen <= 6)
+                memcpy(line + 20 - clen, alarm_code_text, clen);
         }
 
         lcd_print(line);
@@ -380,6 +480,146 @@ uint16_t adc_read(uint8_t channel)
         ;  // Wait for completion
 
     return (uint16_t)((ADRESH << 8) | ADRESL);
+}
+
+// =============================================================================
+// Bypass timer helpers
+// =============================================================================
+
+static uint8_t read_digital_input(uint8_t input_idx)
+{
+    switch (input_idx)
+    {
+    case 0: return DIG_IN2_PORT;
+    case 1: return DIG_IN3_PORT;
+    case 2: return DIG_IN4_PORT;
+    default: return 0;
+    }
+}
+
+// Process one bypass direction per 1-second tick.
+// Returns: 0=no alarm, 1=alarm from primary, 2=alarm from secondary
+static uint8_t process_bp(bp_dir_t *dir, uint8_t fault, uint16_t sec_time)
+{
+    switch (dir->phase)
+    {
+    case BP_PRIMARY:
+        // Countdown regardless of fault state (startup grace)
+        if (dir->countdown > 0) dir->countdown--;
+        if (dir->countdown == 0)
+        {
+            if (fault) { dir->phase = BP_ALARM; return 1; }
+            else dir->phase = BP_NORMAL;
+        }
+        break;
+
+    case BP_NORMAL:
+        // Monitor for fault
+        if (fault)
+        {
+            if (sec_time > 0)
+            {
+                dir->phase = BP_SECONDARY;
+                dir->countdown = sec_time;
+            }
+            else
+            {
+                // No secondary grace — immediate alarm
+                dir->phase = BP_ALARM;
+                return 2;
+            }
+        }
+        break;
+
+    case BP_SECONDARY:
+        // Countdown while fault persists
+        if (!fault)
+        {
+            // Fault cleared — back to normal
+            dir->phase = BP_NORMAL;
+            dir->countdown = 0;
+        }
+        else
+        {
+            if (dir->countdown > 0) dir->countdown--;
+            if (dir->countdown == 0) { dir->phase = BP_ALARM; return 2; }
+        }
+        break;
+
+    case BP_ALARM:
+        // Stay in alarm until cleared externally
+        break;
+    }
+    return 0;
+}
+
+// Initialize bypass timers for one input on RUN start
+static void init_bp_timers(uint8_t i)
+{
+    // High direction
+    uint8_t high_mon = (input_config[i].primary_high_bypass > 0 ||
+                        input_config[i].secondary_high_bypass > 0);
+    if (high_mon && input_config[i].primary_high_bypass > 0)
+    {
+        bp_state[i].high.phase = BP_PRIMARY;
+        bp_state[i].high.countdown = input_config[i].primary_high_bypass;
+    }
+    else if (high_mon)
+    {
+        bp_state[i].high.phase = BP_NORMAL;
+        bp_state[i].high.countdown = 0;
+    }
+    else
+    {
+        bp_state[i].high.phase = BP_INACTIVE;
+        bp_state[i].high.countdown = 0;
+    }
+
+    // Low direction
+    uint8_t low_mon = (input_config[i].primary_low_bypass > 0 ||
+                       input_config[i].secondary_low_bypass > 0);
+    if (low_mon && input_config[i].primary_low_bypass > 0)
+    {
+        bp_state[i].low.phase = BP_PRIMARY;
+        bp_state[i].low.countdown = input_config[i].primary_low_bypass;
+    }
+    else if (low_mon)
+    {
+        bp_state[i].low.phase = BP_NORMAL;
+        bp_state[i].low.countdown = 0;
+    }
+    else
+    {
+        bp_state[i].low.phase = BP_INACTIVE;
+        bp_state[i].low.countdown = 0;
+    }
+
+    alarm_active[i] = 0;
+}
+
+// Clear all bypass timers (on STOP or fault clear)
+static void clear_bp_timers(void)
+{
+    for (uint8_t i = 0; i < 3; i++)
+    {
+        bp_state[i].high.phase = BP_INACTIVE;
+        bp_state[i].high.countdown = 0;
+        bp_state[i].low.phase = BP_INACTIVE;
+        bp_state[i].low.countdown = 0;
+        alarm_active[i] = 0;
+    }
+    alarm_buzz_phase = 0;
+    alarm_buzz_tick = 0;
+    alarm_code_text[0] = '\0';
+    alarm_input_idx = 0;
+}
+
+// Start the alarm buzzer (5 cycles of 250ms on/off)
+static void start_alarm_buzzer(void)
+{
+    alarm_buzz_phase = 1;  // Start with ON
+    alarm_buzz_tick = 0;
+    BUZZER = 1;
 }
 
 // =============================================================================
@@ -645,6 +885,7 @@ void main(void)
 
                 RELAY1_PIN = 1;  // Energize = closed = pump can run
                 boot_pwr_fail = 0;
+                ext_stop_flag = 0;
                 pwr_detect_countdown = 0;  // Cancel any pending countdown
                 BUZZER = 1; buzzer_countdown = 10;  // 500ms non-blocking beep
 
@@ -666,13 +907,25 @@ void main(void)
                 }
                 system_config.power_failure_flag = 1;
                 save_power_flags();
-                uart_println("STATE: RUN (pwr fail armed)");
+
+                // Initialize bypass timers for all enabled inputs
+                for (uint8_t i = 0; i < 3; i++)
+                {
+                    if (input_config[i].enable)
+                        init_bp_timers(i);
+                    else
+                        { bp_state[i].high.phase = BP_INACTIVE; bp_state[i].low.phase = BP_INACTIVE; alarm_active[i] = 0; }
+                }
+                uart_println("STATE: RUN (pwr fail armed, timers init)");
             }
         }
         else if (!dig1 && sys_state == SYS_RUN)
         {
             sys_state = SYS_STOP;
             stop_timer_secs = 0;
+            // Set ext_stop_flag if no alarm/stop code caused this (pure external stop)
+            if (!system_config.active_stop_code)
+                ext_stop_flag = 1;
             BUZZER = 1; buzzer_countdown = 10;  // 500ms non-blocking beep
             // Start non-blocking power detect delay before clearing flag
             pwr_detect_countdown = system_config.power_fail_delay;
@@ -697,6 +950,14 @@ void main(void)
                 char dbuf[40];
                 sprintf(dbuf, "STATE: STOP (pwr detect %us)", pwr_detect_countdown);
                 uart_println(dbuf);
+            }
+
+            // Keep alarm_active[] and alarm_code_text for STOP screen flashing.
+            // Zero out all countdowns so stale timers don't display.
+            for (uint8_t j = 0; j < 3; j++)
+            {
+                bp_state[j].high.countdown = 0;
+                bp_state[j].low.countdown = 0;
             }
 
             // Immediate screen update on state change
@@ -751,6 +1012,42 @@ void main(void)
             buzzer_countdown--;
             if (buzzer_countdown == 0)
                 BUZZER = 0;
+        }
+
+        // Alarm buzzer: 6 cycles of 500ms on / 250ms off (non-blocking)
+        if (alarm_buzz_phase > 0)
+        {
+            alarm_buzz_tick++;
+            // Odd phases = ON (500ms = 10 ticks), even phases = OFF (250ms = 5 ticks)
+            uint8_t phase_len = (alarm_buzz_phase & 1) ? 10 : 5;
+            if (alarm_buzz_tick >= phase_len)
+            {
+                alarm_buzz_tick = 0;
+                alarm_buzz_phase++;
+                if (alarm_buzz_phase > 12)
+                {
+                    // Done: 6 on/off cycles complete, ends OFF
+                    alarm_buzz_phase = 0;
+                    BUZZER = 0;
+                }
+                else
+                {
+                    BUZZER = (alarm_buzz_phase & 1) ? 1 : 0;
+                }
+            }
+        }
+
+        // Alarm flash toggle (~4Hz for line blanking)
+        alarm_flash_counter++;
+        if (alarm_flash_counter >= 3)  // ~150ms toggle = ~3.3Hz
+        {
+            alarm_flash_counter = 0;
+            uint8_t any_alarm = alarm_active[0] || alarm_active[1] || alarm_active[2]
+                               || system_config.active_stop_code;
+            if (any_alarm)
+                alarm_flash = !alarm_flash;
+            else
+                alarm_flash = 1;  // Always visible when no alarm
         }
 
         // =============================================================
@@ -826,7 +1123,99 @@ void main(void)
                 }
             }
 
-            // (RTC read moved to render block for coordination)
+            // =============================================================
+            // Bypass timer processing (1-second tick, RUN only)
+            // =============================================================
+            if (sys_state == SYS_RUN)
+            {
+                uint16_t adc_arr[3] = {adc_ch1, adc_ch2, adc_ch3};
+
+                for (uint8_t i = 0; i < 3; i++)
+                {
+                    if (!input_config[i].enable) continue;
+
+                    uint8_t st = input_config[i].sensor_type;
+                    uint8_t is_digital = (st == 3 || st == 5);
+                    uint8_t high_fault = 0, low_fault = 0;
+
+                    if (is_digital)
+                    {
+                        uint8_t pin = read_digital_input(i);
+                        // Fault when pin matches fault_polarity
+                        high_fault = (pin == input_config[i].fault_polarity);
+                        // Digital: low direction not used for fault detection
+                    }
+                    else
+                    {
+                        int16_t val = adc_to_eng(adc_arr[i],
+                                                  input_config[i].scale_4ma,
+                                                  input_config[i].scale_20ma);
+                        if (input_config[i].high_setpoint != 0 || input_config[i].primary_high_bypass > 0 || input_config[i].secondary_high_bypass > 0)
+                            high_fault = (val >= input_config[i].high_setpoint);
+                        if (input_config[i].low_setpoint != 0 || input_config[i].primary_low_bypass > 0 || input_config[i].secondary_low_bypass > 0)
+                            low_fault = (val <= input_config[i].low_setpoint);
+                    }
+
+                    // Process high direction
+                    uint8_t hi_result = process_bp(&bp_state[i].high, high_fault,
+                                                    input_config[i].secondary_high_bypass);
+                    if (hi_result)
+                    {
+                        uint8_t rly = (hi_result == 1) ? input_config[i].relay_pri_high_mode
+                                                       : input_config[i].relay_sec_high_mode;
+                        trigger_relay_pulse(rly == 0 ? 1 : 0);
+                        system_config.active_stop_code = (uint8_t)(2 + i * 2);  // 2,4,6
+                        save_power_flags();
+                        // Store bypass abbreviation for display
+                        const char *lbl = (hi_result == 1) ? bp_lbl_phi[st] : bp_lbl_shi[st];
+                        strncpy(alarm_code_text, lbl, 6);
+                        alarm_code_text[6] = '\0';
+                        alarm_input_idx = i;
+                        // Cancel ALL other bypass timers — can only stop once
+                        for (uint8_t j = 0; j < 3; j++)
+                        {
+                            if (j == i) { bp_state[j].low.phase = BP_INACTIVE; bp_state[j].low.countdown = 0; continue; }
+                            bp_state[j].high.phase = BP_INACTIVE; bp_state[j].high.countdown = 0;
+                            bp_state[j].low.phase = BP_INACTIVE; bp_state[j].low.countdown = 0;
+                        }
+                        start_alarm_buzzer();
+                        { char abuf[40]; sprintf(abuf, "ALARM: In%u HIGH %s", i + 1, alarm_code_text); uart_println(abuf); }
+                    }
+
+                    // Process low direction (analog only)
+                    if (!is_digital)
+                    {
+                        uint8_t lo_result = process_bp(&bp_state[i].low, low_fault,
+                                                        input_config[i].secondary_low_bypass);
+                        if (lo_result)
+                        {
+                            uint8_t rly = (lo_result == 1) ? input_config[i].relay_pri_low_mode
+                                                           : input_config[i].relay_sec_low_mode;
+                            trigger_relay_pulse(rly == 0 ? 1 : 0);
+                            system_config.active_stop_code = (uint8_t)(3 + i * 2);  // 3,5,7
+                            save_power_flags();
+                            // Store bypass abbreviation for display
+                            const char *lbl = (lo_result == 1) ? bp_lbl_plo[st] : bp_lbl_slo[st];
+                            strncpy(alarm_code_text, lbl, 6);
+                            alarm_code_text[6] = '\0';
+                            alarm_input_idx = i;
+                            // Cancel ALL other bypass timers — can only stop once
+                            for (uint8_t j = 0; j < 3; j++)
+                            {
+                                if (j == i) { bp_state[j].high.phase = BP_INACTIVE; bp_state[j].high.countdown = 0; continue; }
+                                bp_state[j].high.phase = BP_INACTIVE; bp_state[j].high.countdown = 0;
+                                bp_state[j].low.phase = BP_INACTIVE; bp_state[j].low.countdown = 0;
+                            }
+                            start_alarm_buzzer();
+                            { char abuf[40]; sprintf(abuf, "ALARM: In%u LOW %s", i + 1, alarm_code_text); uart_println(abuf); }
+                        }
+                    }
+
+                    // Update alarm flag for this input
+                    alarm_active[i] = (bp_state[i].high.phase == BP_ALARM ||
+                                       bp_state[i].low.phase == BP_ALARM);
+                }
+            }
         }
 
         // =============================================================
@@ -888,7 +1277,7 @@ void main(void)
                     extern system_config_t system_config;
                     extern void save_power_flags(void);
 
-                    if (boot_pwr_fail || system_config.active_stop_code)
+                    if (boot_pwr_fail || system_config.active_stop_code || ext_stop_flag)
                     {
                         // First press: clear fault, close relay if latched, don't enter menu
                         boot_pwr_fail = 0;
@@ -896,6 +1285,8 @@ void main(void)
                         system_config.active_stop_code = 0;
                         if (relay_state == 1)
                             relay_close();
+                        clear_bp_timers();  // Clear all bypass alarms
+                        ext_stop_flag = 0;
                         save_power_flags();
                         uart_println("Faults cleared (button)");
                         // Distinctive double-beep for fault acknowledgment
@@ -1020,8 +1411,32 @@ void main(void)
             menu_timeout_timer = 0;
         }
 
-        // Update power LED status
-        pca9535_update_power_led();
+        // LED flash toggle (2Hz = 250ms half-period = 5 × 50ms ticks)
+        led_flash_counter++;
+        if (led_flash_counter >= 5)
+        {
+            led_flash_counter = 0;
+            led_flash_state = !led_flash_state;
+        }
+
+        // Update LEDs via display board
+        {
+            uint8_t led_mask = 0;
+
+            // Power LED: solid on, flash 2Hz during power fail display
+            if (boot_pwr_fail)
+                led_mask |= (led_flash_state ? 0x01 : 0x00);
+            else
+                led_mask |= 0x01;  // Solid on
+
+            // Signal LED: solid when relay energized, flash 2Hz when de-energized
+            if (relay_state == 0)
+                led_mask |= 0x02;  // Solid on (relay energized)
+            else
+                led_mask |= (led_flash_state ? 0x02 : 0x00);  // Flash
+
+            disp_set_leds(led_mask);
+        }
 
         __delay_us(50);
     }

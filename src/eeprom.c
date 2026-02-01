@@ -44,7 +44,7 @@ const input_config_t factory_defaults[3] = {
         0, 0, 0, 0, {0, 0, 0, 0},           // relay modes all latch
         {0, 0, 0, 0},                        // reserved uint32
         "Flow Meter",                         // name
-        "L/M",                                // units
+        "%",                                  // units
         {0}                                   // padding
     }
 };

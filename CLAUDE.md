@@ -272,6 +272,8 @@ Digital types (3,5) have 12 menu items: Enable, Sensor, Fault Polarity, High Set
 
 Units are stored in `input_config.units` and displayed on the main screen alongside the sensor value.
 
+**Units design:** All values (scale, setpoints, display) operate in the user's chosen unit — there is no internal "standard unit" or display-time conversion. When a user selects kPa, they enter scale values in kPa (read from the sensor label, which lists multiple units), setpoints in kPa, and the main screen shows kPa. The `adc_to_eng()` function performs unit-agnostic linear interpolation between `scale_4ma` and `scale_20ma`, so the unit choice is implicit in those values.
+
 ### system_config_t (128 bytes)
 
 | Offset | Type | Field | Description |

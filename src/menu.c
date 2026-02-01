@@ -104,7 +104,7 @@ const item_options_t menu_item_options[] = {
     {OPT_FAULT_POL, 2, {"Low", "High", "", "", "", ""}},
     {OPT_UNITS_PRESS, 3, {"psi", "bar", "kPa", "", "", ""}},
     {OPT_UNITS_TEMP, 2, {"\xDF""C", "\xDF""F", "", "", "", ""}},
-    {OPT_UNITS_FLOW, 3, {"L/M", "%", "LpS", "", "", ""}},
+    {OPT_UNITS_FLOW, 3, {"%", "L/M", "LpS", "", "", ""}},
     {OPT_UNITS_OTHER, 1, {"Value", "", "", "", "", ""}},
 };
 
@@ -260,7 +260,9 @@ uint8_t is_numeric_field(uint8_t line, uint8_t sensor_type, uint8_t flow_type)
     {
         uint8_t tag = input_field_tags[line];
         return (tag == FT_SCALE_4MA || tag == FT_SCALE_20MA ||
-                tag == FT_HI_LIMIT || tag == FT_LO_LIMIT);
+                tag == FT_HI_LIMIT || tag == FT_LO_LIMIT ||
+                tag == FT_PRI_HI_BP || tag == FT_SEC_HI_BP ||
+                tag == FT_PRI_LO_BP || tag == FT_SEC_LO_BP);
     }
     else if (current_menu == 4) // UTILITY menu
     {
@@ -274,11 +276,9 @@ uint8_t is_time_field(uint8_t line, uint8_t sensor_type, uint8_t flow_type)
     (void)sensor_type;
     (void)flow_type;
 
-    if (current_menu == 1) // INPUT menu — use field tags
+    if (current_menu == 1) // INPUT menu — BP fields now use whole-number edit
     {
-        uint8_t tag = input_field_tags[line];
-        return (tag == FT_PRI_HI_BP || tag == FT_SEC_HI_BP ||
-                tag == FT_PRI_LO_BP || tag == FT_SEC_LO_BP);
+        return 0;  // No time fields in input menu (BP uses whole_edit_mode)
     }
     else if (current_menu == 4) // UTILITY menu
     {
@@ -1256,15 +1256,31 @@ void menu_update_edit_value(void)
     {
         char buf[10];
         int16_t v = menu.whole_edit_value;
-        if (menu.whole_edit_min >= 0)
-            sprintf(buf, "%03d", v);  // Unsigned: 3-digit padded
-        else if (v < 0)
-            sprintf(buf, "-%03d", -v);
-        else
-            sprintf(buf, "+%03d", v);
         if (current_menu == 1)
         {
             uint8_t tag = input_field_tags[menu.current_line];
+            // BP fields: display as MM:SS
+            if (tag == FT_PRI_HI_BP || tag == FT_SEC_HI_BP ||
+                tag == FT_PRI_LO_BP || tag == FT_SEC_LO_BP)
+            {
+                uint16_t secs = (uint16_t)v;
+                sprintf(buf, "%02u:%02u", secs / 60, secs % 60);
+                switch (tag)
+                {
+                case FT_PRI_HI_BP:  strcpy(value_pri_high_bp, buf); break;
+                case FT_SEC_HI_BP:  strcpy(value_sec_high_bp, buf); break;
+                case FT_PRI_LO_BP:  strcpy(value_pri_low_bp, buf); break;
+                case FT_SEC_LO_BP:  strcpy(value_sec_low_bp, buf); break;
+                }
+                return;
+            }
+            // Other numeric fields: signed/unsigned format
+            if (menu.whole_edit_min >= 0)
+                sprintf(buf, "%03d", v);
+            else if (v < 0)
+                sprintf(buf, "-%03d", -v);
+            else
+                sprintf(buf, "+%03d", v);
             switch (tag)
             {
             case FT_SCALE_4MA:  strcpy(value_scale4, buf); break;
@@ -1318,7 +1334,7 @@ static void save_input_field(uint8_t line, uint8_t idx)
             "Flow Switch", "Other 4-20mA", "Other Switch"
         };
         static const char *default_units[] = {
-            "psi", "\xDF""C", "L/M", "", "Value", ""
+            "psi", "\xDF""C", "%", "", "Value", ""
         };
         if (sensor_edit_flag <= 5)
         {
@@ -1353,19 +1369,19 @@ static void save_input_field(uint8_t line, uint8_t idx)
         input_config[idx].high_setpoint = menu.whole_edit_value;
         break;
     case FT_PRI_HI_BP:
-        input_config[idx].primary_high_bypass = menu.time_xx * 60 + menu.time_yy;
+        input_config[idx].primary_high_bypass = (uint16_t)menu.whole_edit_value;
         break;
     case FT_SEC_HI_BP:
-        input_config[idx].secondary_high_bypass = menu.time_xx * 60 + menu.time_yy;
+        input_config[idx].secondary_high_bypass = (uint16_t)menu.whole_edit_value;
         break;
     case FT_LO_LIMIT:
         input_config[idx].low_setpoint = menu.whole_edit_value;
         break;
     case FT_PRI_LO_BP:
-        input_config[idx].primary_low_bypass = menu.time_xx * 60 + menu.time_yy;
+        input_config[idx].primary_low_bypass = (uint16_t)menu.whole_edit_value;
         break;
     case FT_SEC_LO_BP:
-        input_config[idx].secondary_low_bypass = menu.time_xx * 60 + menu.time_yy;
+        input_config[idx].secondary_low_bypass = (uint16_t)menu.whole_edit_value;
         break;
     case FT_RLY_PRI_HI:
         input_config[idx].relay_pri_high_mode = relay_high_edit_flag;
@@ -1719,6 +1735,10 @@ void menu_handle_button(uint8_t press_type)
             case FT_SCALE_20MA: val = input_config[current_input].scale_20ma; break;
             case FT_HI_LIMIT:   val = input_config[current_input].high_setpoint; break;
             case FT_LO_LIMIT:   val = input_config[current_input].low_setpoint; break;
+            case FT_PRI_HI_BP:  val = (int16_t)input_config[current_input].primary_high_bypass; break;
+            case FT_SEC_HI_BP:  val = (int16_t)input_config[current_input].secondary_high_bypass; break;
+            case FT_PRI_LO_BP:  val = (int16_t)input_config[current_input].primary_low_bypass; break;
+            case FT_SEC_LO_BP:  val = (int16_t)input_config[current_input].secondary_low_bypass; break;
             }
 
             // All numeric fields use whole-number edit with acceleration
@@ -1726,7 +1746,13 @@ void menu_handle_button(uint8_t press_type)
             menu.edit_time_mode = 0;
             menu.edit_whole_mode = 1;
             menu.whole_edit_value = val;
-            if (tag == FT_HI_LIMIT || tag == FT_LO_LIMIT)
+            if (tag == FT_PRI_HI_BP || tag == FT_SEC_HI_BP ||
+                tag == FT_PRI_LO_BP || tag == FT_SEC_LO_BP)
+            {
+                menu.whole_edit_min = 0;
+                menu.whole_edit_max = 5999;  // 99:59
+            }
+            else if (tag == FT_HI_LIMIT || tag == FT_LO_LIMIT)
             {
                 menu.whole_edit_min = 0;
                 menu.whole_edit_max = 999;
