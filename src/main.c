@@ -293,6 +293,34 @@ int16_t adc_to_eng(uint16_t counts, int16_t scale_4ma, int16_t scale_20ma)
 }
 
 
+// =============================================================================
+// Unit conversion: SUSPENDED — may reinstate later
+// All values currently entered/displayed in standard units (psi, °C, %)
+// =============================================================================
+#if 0
+int16_t convert_for_display(int16_t val, const char *units)
+{
+    if (units[0] == 'b' && units[1] == 'a' && units[2] == 'r')
+    { int32_t tmp = (int32_t)val * 689 / 10000; return (int16_t)tmp; }
+    if (units[0] == 'k' && units[1] == 'P' && units[2] == 'a')
+    { int32_t tmp = (int32_t)val * 6895 / 1000; return (int16_t)tmp; }
+    if (units[0] == '\xDF' && units[1] == 'F')
+    { int32_t tmp = (int32_t)val * 9 / 5 + 32; return (int16_t)tmp; }
+    return val;
+}
+
+int16_t convert_to_standard(int16_t val, const char *units)
+{
+    if (units[0] == 'b' && units[1] == 'a' && units[2] == 'r')
+    { int32_t tmp = (int32_t)val * 10000 / 689; return (int16_t)tmp; }
+    if (units[0] == 'k' && units[1] == 'P' && units[2] == 'a')
+    { int32_t tmp = (int32_t)val * 1000 / 6895; return (int16_t)tmp; }
+    if (units[0] == '\xDF' && units[1] == 'F')
+    { int32_t tmp = ((int32_t)val - 32) * 5 / 9; return (int16_t)tmp; }
+    return val;
+}
+#endif
+
 // Forward declarations for bypass timer helpers
 static uint8_t read_digital_input(uint8_t input_idx);
 
@@ -399,10 +427,17 @@ void render_main_screen(uint16_t ch1, uint16_t ch2, uint16_t ch3, rtc_time_t *ti
             if (val < -999) val = -999;
             if (val > 999) val = 999;
 
-            if (val < 0)
-                sprintf(vbuf, "-%03d %s", -val, input_config[i].units);
-            else
+            if (st == 1) // Temperature: sign + 3 digits + °C
+            {
+                if (val < 0)
+                    sprintf(vbuf, "-%03d \xDF" "C", -val);
+                else
+                    sprintf(vbuf, "+%03d \xDF" "C", val);
+            }
+            else // Pressure, Flow, Other: 3 digits + units
+            {
                 sprintf(vbuf, "%03d %s", val, input_config[i].units);
+            }
         }
 
         // Build the full line: "val units  MM:SS" or "val units" padded to 20
@@ -504,12 +539,18 @@ static uint8_t process_bp(bp_dir_t *dir, uint8_t fault, uint16_t sec_time)
     switch (dir->phase)
     {
     case BP_PRIMARY:
-        // Countdown regardless of fault state (startup grace)
+        if (!fault)
+        {
+            // Threshold reached — bypass no longer needed
+            dir->phase = BP_NORMAL;
+            dir->countdown = 0;
+            break;
+        }
         if (dir->countdown > 0) dir->countdown--;
         if (dir->countdown == 0)
         {
-            if (fault) { dir->phase = BP_ALARM; return 1; }
-            else dir->phase = BP_NORMAL;
+            dir->phase = BP_ALARM;
+            return 1;
         }
         break;
 

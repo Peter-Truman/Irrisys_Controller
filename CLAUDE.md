@@ -28,6 +28,7 @@ Communication: Main → Display via serial (19200 baud, 8N1)
 | 2026-01-19 | Main  | 3      | Baseline - Knight Rider LED, full menu, AD7994, RTC, EEPROM |
 | 2026-01-19 | Display | 1    | Initial - LCD driver, LED control, PWM, test harness |
 | 2026-02-01 | Main  | 61     | Unified input menu, tag-based fields, 6 sensor types, sensor-specific units, digital inputs, save-on-exit, 4Hz edit flash |
+| 2026-02-01 | Main  | 61     | Suspend unit conversion (preserved in #if 0), fixed display format (psi/°C/%), bypass timer clears on threshold reached |
 
 ---
 
@@ -272,7 +273,15 @@ Digital types (3,5) have 12 menu items: Enable, Sensor, Fault Polarity, High Set
 
 Units are stored in `input_config.units` and displayed on the main screen alongside the sensor value.
 
-**Units design:** All values (scale, setpoints, display) operate in the user's chosen unit — there is no internal "standard unit" or display-time conversion. When a user selects kPa, they enter scale values in kPa (read from the sensor label, which lists multiple units), setpoints in kPa, and the main screen shows kPa. The `adc_to_eng()` function performs unit-agnostic linear interpolation between `scale_4ma` and `scale_20ma`, so the unit choice is implicit in those values.
+**Units design (current):** All values are entered and displayed in fixed standard units — psi for pressure, °C for temperature, % for flow. Unit selection menu items exist but display-time conversion is **suspended** (code preserved in `#if 0` block in `main.c` for future reinstatement). Conversion functions `convert_for_display()` and `convert_to_standard()` are ready but inactive.
+
+**Main screen display formatting:**
+| Sensor Type | Format | Example |
+|-------------|--------|---------|
+| Pressure | `%03d psi` | `030 psi` |
+| Temperature | `±%03d °C` | `+085 °C` |
+| Flow Meter | `%03d units` | `045 %` |
+| Other 4-20 | `%03d units` | `050 Value` |
 
 ### system_config_t (128 bytes)
 

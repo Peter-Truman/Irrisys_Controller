@@ -240,6 +240,8 @@ extern void lcd_print(const char *str);
 extern void beep(uint16_t duration_ms);
 extern void uart_println(const char *str);
 extern void lcd_clear(void);
+// extern int16_t convert_for_display(int16_t val, const char *units);  // SUSPENDED
+// extern int16_t convert_to_standard(int16_t val, const char *units);  // SUSPENDED
 void handle_time_rotation(int8_t direction);
 void menu_draw_utility(void);
 void menu_draw_main_menu(void);
