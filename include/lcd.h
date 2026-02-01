@@ -9,10 +9,6 @@
 
 #include <stdint.h>
 
-// LCD dimensions for 20x4 display
-#define LCD_WIDTH     20
-#define LCD_HEIGHT    4
-
 // LCD Buffer Functions
 void lcd_init(void);
 void lcd_clear(void);

@@ -247,7 +247,7 @@ void menu_draw_utility(void);
 void menu_draw_main_menu(void);
 void menu_draw_digital(void);
 void rebuild_main_menu(void);
-void rebuild_digital_menu(void);
+
 
 //=============================================================================
 // CONTEXT-AWARE FIELD DETECTION (unified - no sensor_type branching)
@@ -703,19 +703,6 @@ void rebuild_utility_menu(void)
     menu.top_line = 0;
 }
 
-void rebuild_digital_menu(void)
-{
-    for (uint8_t i = 0; i < 4; i++)
-    {
-        digital_menu[i].label = digital_menu_template[i].label;
-        digital_menu[i].editable = digital_menu_template[i].editable;
-        digital_menu[i].value = NULL;
-    }
-
-    menu.total_items = 4;
-    menu.current_line = 0;
-    menu.top_line = 0;
-}
 
 //=============================================================================
 // DRAW HELPER

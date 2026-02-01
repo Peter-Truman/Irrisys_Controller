@@ -293,17 +293,3 @@ void encoder_init(void)
     enc_state = ((ENC_A << 1) | ENC_B) & 0x03;
 }
 
-// Function to reset timeout (callable from ISR)
-void reset_menu_timeout(void)
-{
-    // Use a local constant or make timeout_seconds atomic
-    menu_timeout_timer = 30 * 500; // Default 30 seconds * 500 = 2ms units
-    menu_timeout_flag = 1;
-}
-
-// Stub function for relay timer - to be implemented in hardware phase
-void relay_timer_tick(void)
-{
-    // TODO: Implement relay pulse timer countdown
-    // This will decrement relay pulse timers when active
-}
