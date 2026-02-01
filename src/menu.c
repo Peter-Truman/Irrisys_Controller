@@ -64,7 +64,8 @@ uint8_t current_digital_input = 0; // legacy
 #define FT_SEC_BP        17  // Digital: secondary fault bypass
 #define FT_RLY_PRI_FAULT 18  // Digital: primary fault relay
 #define FT_RLY_SEC_FAULT 19  // Digital: secondary fault relay
-#define FT_BACK          99
+#define FT_BACK          98
+#define FT_EXIT          99
 
 static uint8_t input_field_tags[20]; // Tag for each line in input_menu
 
@@ -136,7 +137,7 @@ static void rebuild_options_menu(void)
     options_menu[n] = "Utility Menu";
     options_action[n] = OPT_ACT_UTILITY;
     n++;
-    options_menu[n] = "Exit";
+    options_menu[n] = "EXIT";
     options_action[n] = OPT_ACT_EXIT;
     n++;
     options_menu_count = n;
@@ -192,24 +193,26 @@ static uint8_t is_analog_type(uint8_t st)
 
 menu_item_t input_menu[20]; // Max items (analog=16, digital=8)
 
-// Clock menu template (3 items - no Save, no Display)
+// Clock menu template (4 items - no Save, no Display)
 const menu_item_t clock_menu_template[] = {
     {"Enable", NULL, 1},       // 0  - Option: Disabled/Enabled
     {"Rly Endrun", NULL, 1},   // 1  - Option: Latch/Pulse
-    {"Back", NULL, 0}          // 2
+    {"Back", NULL, 0},         // 2
+    {"EXIT", NULL, 0}          // 3
 };
 
-menu_item_t clock_menu[3];
+menu_item_t clock_menu[4];
 
-// Main menu template (2 items - no Save)
+// Main menu template (3 items - no Save)
 const menu_item_t main_menu_template[] = {
     {"Run Time", NULL, 1},     // 0  - Time edit HH:MM
-    {"Back", NULL, 0}          // 1
+    {"Back", NULL, 0},         // 1
+    {"EXIT", NULL, 0}          // 2
 };
 
-menu_item_t main_menu_items[2];
+menu_item_t main_menu_items[3];
 
-// Utility menu template (9 items - no Save)
+// Utility menu template (10 items - no Save)
 const menu_item_t utility_menu_template[] = {
     {"Set Clock", NULL, 0},    // 0 - Action: submenu
     {"View Log", NULL, 0},     // 1 - Action
@@ -219,20 +222,22 @@ const menu_item_t utility_menu_template[] = {
     {"Pwr Detect", NULL, 1},   // 5 - Time MM:SS
     {"Brightness", NULL, 1},   // 6 - Numeric
     {"Rly Pulse", NULL, 1},    // 7 - Time MM:SS
-    {"Back", NULL, 0}          // 8
+    {"Back", NULL, 0},         // 8
+    {"EXIT", NULL, 0}          // 9
 };
 
-menu_item_t utility_menu[9];
+menu_item_t utility_menu[10];
 
-// Digital input menu template (10 items)
+// Digital input menu template (5 items)
 const menu_item_t digital_menu_template[] = {
     {"Enable", NULL, 1},         // 0
     {"Polarity", NULL, 1},       // 1
     {"Relay", NULL, 1},          // 2
-    {"Back", NULL, 0}            // 3
+    {"Back", NULL, 0},           // 3
+    {"EXIT", NULL, 0}            // 4
 };
 
-menu_item_t digital_menu[4];
+menu_item_t digital_menu[5];
 
 // Function declarations
 extern void lcd_set_cursor(uint8_t row, uint8_t col);
@@ -433,6 +438,14 @@ void menu_init(void)
     current_menu = 0;
     rebuild_options_menu();
     menu.total_items = options_menu_count;
+
+    // Initialize digital menu from template
+    for (uint8_t i = 0; i < 5; i++)
+    {
+        digital_menu[i].label = digital_menu_template[i].label;
+        digital_menu[i].editable = digital_menu_template[i].editable;
+        digital_menu[i].value = NULL;
+    }
 }
 
 //=============================================================================
@@ -617,8 +630,9 @@ void rebuild_input_menu(void)
         n = add_menu_item(n, lbl_rly_slo[st], value_rly_sec_lo, 1, FT_RLY_SEC_LO);
     }
 
-    // Back
+    // Back / EXIT
     n = add_menu_item(n, "Back", NULL, 0, FT_BACK);
+    n = add_menu_item(n, "EXIT", NULL, 0, FT_EXIT);
 
     menu.total_items = n;
     menu.current_line = 0;
@@ -627,7 +641,7 @@ void rebuild_input_menu(void)
 
 void rebuild_clock_menu(void)
 {
-    for (uint8_t i = 0; i < 3; i++)
+    for (uint8_t i = 0; i < 4; i++)
     {
         clock_menu[i].label = clock_menu_template[i].label;
         clock_menu[i].editable = clock_menu_template[i].editable;
@@ -642,14 +656,14 @@ void rebuild_clock_menu(void)
     strcpy(value_end_runtime, end_runtime_edit_flag ? "Pulse" : "Latch");
     clock_menu[1].value = value_end_runtime;
 
-    menu.total_items = 3;
+    menu.total_items = 4;
     menu.current_line = 0;
     menu.top_line = 0;
 }
 
 void rebuild_main_menu(void)
 {
-    for (uint8_t i = 0; i < 2; i++)
+    for (uint8_t i = 0; i < 3; i++)
     {
         main_menu_items[i].label = main_menu_template[i].label;
         main_menu_items[i].editable = main_menu_template[i].editable;
@@ -662,14 +676,14 @@ void rebuild_main_menu(void)
             (uint16_t)(total_minutes % 60));
     main_menu_items[0].value = value_runtime;
 
-    menu.total_items = 2;
+    menu.total_items = 3;
     menu.current_line = 0;
     menu.top_line = 0;
 }
 
 void rebuild_utility_menu(void)
 {
-    for (uint8_t i = 0; i < 9; i++)
+    for (uint8_t i = 0; i < 10; i++)
     {
         utility_menu[i].label = utility_menu_template[i].label;
         utility_menu[i].editable = utility_menu_template[i].editable;
@@ -698,7 +712,7 @@ void rebuild_utility_menu(void)
             system_config.relay_pulse_time % 60);
     utility_menu[7].value = value_relay_pulse;
 
-    menu.total_items = 9;
+    menu.total_items = 10;
     menu.current_line = 0;
     menu.top_line = 0;
 }
@@ -757,7 +771,7 @@ static void draw_menu_line(uint8_t screen_row, uint8_t menu_line, uint8_t is_sel
 
 void menu_draw_options(void)
 {
-    lcd_print_at(0, 0, "=== OPTIONS ===     ");
+    lcd_print_at(0, 0, "===== OPTIONS ======");
     for (uint8_t row = 0; row < 3; row++)
     {
         uint8_t idx = menu.top_line + row;
@@ -787,7 +801,7 @@ void menu_draw_input(void)
         upper_name[i] = (src[i] >= 'a' && src[i] <= 'z') ? src[i] - 32 : src[i];
         upper_name[i + 1] = '\0';
     }
-    sprintf(title, "=== %-14s==", upper_name);
+    sprintf(title, "===== %-12s==", upper_name);
     lcd_print_at(0, 0, title);
 
     for (uint8_t row = 0; row < 3; row++)
@@ -799,14 +813,15 @@ void menu_draw_input(void)
 
 void menu_draw_setup(void)
 {
-    lcd_print_at(0, 0, "=== SETUP ===       ");
-    const char *setup_items[5];
+    lcd_print_at(0, 0, "====== SETUP =======");
+    const char *setup_items[6];
     for (uint8_t i = 0; i < 3; i++)
     {
         setup_items[i] = input_config[i].name;
     }
     setup_items[3] = "Clock";
     setup_items[4] = "Back";
+    setup_items[5] = "EXIT";
 
     for (uint8_t row = 0; row < 3; row++)
     {
@@ -815,7 +830,7 @@ void menu_draw_setup(void)
         memset(line_buf, ' ', 20);
         line_buf[20] = '\0';
         line_buf[0] = (idx == menu.current_line) ? '>' : ' ';
-        if (idx < 5)
+        if (idx < 6)
         {
             uint8_t len = strlen(setup_items[idx]);
             if (len > 19) len = 19;
@@ -827,17 +842,17 @@ void menu_draw_setup(void)
 
 void menu_draw_clock(void)
 {
-    lcd_print_at(0, 0, "=== CLOCK ===       ");
+    lcd_print_at(0, 0, "====== CLOCK =======");
     for (uint8_t row = 0; row < 3; row++)
     {
         uint8_t line = menu.top_line + row;
-        draw_menu_line(row + 1, line, (line == menu.current_line), clock_menu, 3);
+        draw_menu_line(row + 1, line, (line == menu.current_line), clock_menu, 4);
     }
 }
 
 void menu_draw_main_menu(void)
 {
-    lcd_print_at(0, 0, "=== CLOCK ===       ");
+    lcd_print_at(0, 0, "====== CLOCK =======");
 
     if (menu.in_edit_mode && menu.edit_time_mode == 4 && menu.current_line == 0)
     {
@@ -871,7 +886,7 @@ void menu_draw_main_menu(void)
         for (uint8_t row = 1; row < 3; row++)
         {
             uint8_t line = menu.top_line + row;
-            draw_menu_line(row + 1, line, (line == menu.current_line), main_menu_items, 2);
+            draw_menu_line(row + 1, line, (line == menu.current_line), main_menu_items, 3);
         }
     }
     else
@@ -879,14 +894,14 @@ void menu_draw_main_menu(void)
         for (uint8_t row = 0; row < 3; row++)
         {
             uint8_t line = menu.top_line + row;
-            draw_menu_line(row + 1, line, (line == menu.current_line), main_menu_items, 2);
+            draw_menu_line(row + 1, line, (line == menu.current_line), main_menu_items, 3);
         }
     }
 }
 
 void menu_draw_utility(void)
 {
-    lcd_print_at(0, 0, "=== UTILITY ===     ");
+    lcd_print_at(0, 0, "===== UTILITY ======");
     for (uint8_t row = 0; row < 3; row++)
     {
         uint8_t line = menu.top_line + row;
@@ -897,7 +912,7 @@ void menu_draw_utility(void)
 void menu_draw_digital(void)
 {
     char title[21];
-    sprintf(title, "=== DIGITAL %d ===   ", current_digital_input + 1);
+    sprintf(title, "==== DIGITAL %d =====", current_digital_input + 1);
     lcd_print_at(0, 0, title);
 
     // Set value pointers based on current_digital_input
@@ -933,7 +948,7 @@ void menu_draw_digital(void)
     for (uint8_t row = 0; row < 3; row++)
     {
         uint8_t line = menu.top_line + row;
-        draw_menu_line(row + 1, line, (line == menu.current_line), digital_menu, 4);
+        draw_menu_line(row + 1, line, (line == menu.current_line), digital_menu, 5);
     }
 }
 
@@ -1529,7 +1544,7 @@ void menu_handle_button(uint8_t press_type)
             {
                 // Done editing HH, move to MM
                 menu.time_edit_digit = 1;
-                beep(30);
+
             }
             else
             {
@@ -1550,7 +1565,7 @@ void menu_handle_button(uint8_t press_type)
                         menu.top_line = menu.current_line - 2;
                 }
 
-                beep(50);
+
             }
             return;
         }
@@ -1576,7 +1591,7 @@ void menu_handle_button(uint8_t press_type)
                         menu.top_line = menu.current_line - 2;
                 }
 
-                beep(50);
+
             }
             return;
         }
@@ -1598,7 +1613,7 @@ void menu_handle_button(uint8_t press_type)
                     menu.top_line = menu.current_line - 2;
             }
 
-            beep(50);
+
             return;
         }
 
@@ -1624,7 +1639,7 @@ void menu_handle_button(uint8_t press_type)
                     menu.top_line = menu.current_line - 2;
             }
 
-            beep(50);
+
             return;
         }
 
@@ -1649,7 +1664,7 @@ void menu_handle_button(uint8_t press_type)
                         menu.top_line = menu.current_line - 2;
                 }
 
-                beep(50);
+
             }
             return;
         }
@@ -1671,14 +1686,14 @@ void menu_handle_button(uint8_t press_type)
             current_menu = 2;
             menu.current_line = 0;
             menu.top_line = 0;
-            menu.total_items = 5;
+            menu.total_items = 6;
             break;
         case OPT_ACT_UTILITY:
             current_menu = 4;
             rebuild_utility_menu();
             break;
         case OPT_ACT_ABOUT:
-            beep(100);
+
             break;
         case OPT_ACT_EXIT:
             current_menu = 255;
@@ -1699,7 +1714,14 @@ void menu_handle_button(uint8_t press_type)
             current_menu = 2;
             menu.current_line = current_input;
             menu.top_line = current_input > 2 ? current_input - 2 : 0;
-            menu.total_items = 5;
+            menu.total_items = 6;
+            break;
+        }
+
+        if (tag == FT_EXIT)
+        {
+            current_menu = 255;
+            lcd_clear();
             break;
         }
 
@@ -1710,7 +1732,7 @@ void menu_handle_button(uint8_t press_type)
             {
                 menu.in_edit_mode = 1;
                 menu.edit_time_mode = 0;
-                beep(30);
+
             }
             break;
         }
@@ -1752,7 +1774,7 @@ void menu_handle_button(uint8_t press_type)
                 menu.whole_edit_max = 999;
             }
             encoder_ms_timer = 65535; // Start slow
-            beep(30);
+
             break;
         }
 
@@ -1768,7 +1790,7 @@ void menu_handle_button(uint8_t press_type)
             }
             init_time_editor(secs, 0); // MM:SS
             menu.in_edit_mode = 1;
-            beep(30);
+
             break;
         }
         break;
@@ -1793,6 +1815,10 @@ void menu_handle_button(uint8_t press_type)
             rebuild_options_menu();
             menu.total_items = options_menu_count;
             break;
+        case 5: // EXIT
+            current_menu = 255;
+            lcd_clear();
+            break;
         }
         break;
 
@@ -1804,7 +1830,13 @@ void menu_handle_button(uint8_t press_type)
             current_menu = 2;
             menu.current_line = 3; // Return to Clock position in setup
             menu.top_line = 1;
-            menu.total_items = 5;
+            menu.total_items = 6;
+            break;
+        }
+        if (line == 3) // EXIT
+        {
+            current_menu = 255;
+            lcd_clear();
             break;
         }
         if (is_option_field(line, 0, 0))
@@ -1814,7 +1846,7 @@ void menu_handle_button(uint8_t press_type)
             {
                 menu.in_edit_mode = 1;
                 menu.edit_time_mode = 0;
-                beep(30);
+
             }
         }
         break;
@@ -1830,6 +1862,12 @@ void menu_handle_button(uint8_t press_type)
             menu.top_line = 0;
             rebuild_options_menu();
             menu.total_items = options_menu_count;
+            break;
+        }
+        if (line == 9) // EXIT
+        {
+            current_menu = 255;
+            lcd_clear();
             break;
         }
 
@@ -1850,19 +1888,19 @@ void menu_handle_button(uint8_t press_type)
                 menu.time_min = now.minutes;
                 menu.time_ss = now.seconds;
             }
-            beep(30);
+
             break;
         }
 
         if (line == 1) // View Log
         {
-            beep(100);
+
             break;
         }
 
         if (line == 2) // Clear Log
         {
-            beep(100);
+
             break;
         }
 
@@ -1878,7 +1916,7 @@ void menu_handle_button(uint8_t press_type)
             case 6: val = system_config.brightness; break;
             }
             init_numeric_editor(val, is_unsigned);
-            beep(30);
+
             break;
         }
 
@@ -1893,7 +1931,7 @@ void menu_handle_button(uint8_t press_type)
             }
             init_time_editor(secs, 0); // MM:SS
             menu.in_edit_mode = 1;
-            beep(30);
+
             break;
         }
         break;
@@ -1911,6 +1949,12 @@ void menu_handle_button(uint8_t press_type)
             menu.total_items = options_menu_count;
             break;
         }
+        if (line == 2) // EXIT
+        {
+            current_menu = 255;
+            lcd_clear();
+            break;
+        }
         if (line == 0) // Run Time (HH:MM) - whole number edit
         {
             menu.edit_time_mode = 4; // Whole-number HH:MM mode
@@ -1920,7 +1964,7 @@ void menu_handle_button(uint8_t press_type)
             if (menu.time_xx > 99) menu.time_xx = 99;
             if (menu.time_yy > 59) menu.time_yy = 59;
             menu.in_edit_mode = 1;
-            beep(30);
+
         }
         break;
     }
@@ -1933,7 +1977,13 @@ void menu_handle_button(uint8_t press_type)
             current_menu = 2;
             menu.current_line = current_digital_input + 3; // Return to this digital input in setup
             menu.top_line = menu.current_line > 2 ? menu.current_line - 2 : 0;
-            menu.total_items = 8;
+            menu.total_items = 6;
+            break;
+        }
+        if (line == 4) // EXIT
+        {
+            current_menu = 255;
+            lcd_clear();
             break;
         }
         if (is_option_field(line, 0, 0))
@@ -1965,7 +2015,7 @@ void menu_handle_button(uint8_t press_type)
                 *flag = val;
                 menu.in_edit_mode = 1;
                 menu.edit_time_mode = 0;
-                beep(30);
+
             }
         }
         break;

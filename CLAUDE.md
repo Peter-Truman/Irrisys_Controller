@@ -28,6 +28,7 @@ Communication: Main → Display via serial (19200 baud, 8N1)
 | 2026-01-19 | Main  | 3      | Baseline - Knight Rider LED, full menu, AD7994, RTC, EEPROM |
 | 2026-01-19 | Display | 1    | Initial - LCD driver, LED control, PWM, test harness |
 | 2026-02-01 | Main  | 61     | Unified input menu, tag-based fields, 6 sensor types, sensor-specific units, digital inputs, save-on-exit, 4Hz edit flash |
+| 2026-02-01 | Main  | 62     | Back+EXIT on all sub-menus, long press exits to main screen, consistent menu titles, remove duplicate menu beeps (ISR beep only) |
 | 2026-02-01 | Main  | 61     | Suspend unit conversion (preserved in #if 0), fixed display format (psi/°C/%), bypass timer clears on threshold reached |
 | 2026-02-01 | Main  | 61     | RTC 1Hz INT0 as primary clock, remove unused code, End Run flash, encoder accel tuning |
 
@@ -363,26 +364,34 @@ Units are stored in `input_config.units` and displayed on the main screen alongs
 ### Menu Structure
 
 ```
-Menu 0: MAIN SCREEN
+MAIN SCREEN (current_menu = 255)
   Line 1: STOP HH:MM  or  RUN HH:MM
   Line 2: val units    (Input 1, left-justified)
   Line 3: val units    (Input 2, left-justified)
   Line 4: val units    (Input 3, left-justified)
+  Short press → OPTIONS menu
 
-Menu 5: MAIN MENU (long press from main screen)
-  ├─ Run Time → numeric edit
-  └─ Back
+OPTIONS (current_menu = 0, root menu)
+  ├─ Clock       → CLOCK menu (only shown if clock enabled)
+  ├─ Setup Menu  → SETUP menu
+  ├─ Utility Menu → UTILITY menu
+  └─ EXIT        → Main screen
 
-Menu 2: SETUP (short press from main screen)
-  ├─ Input 1 → Menu 1 (unified input menu)
-  ├─ Input 2 → Menu 1
-  ├─ Input 3 → Menu 1
-  ├─ Digital  → Menu 6
-  ├─ Clock    → Menu 3
-  └─ Back
+CLOCK (current_menu = 5, from OPTIONS > Clock)
+  ├─ Run Time → HH:MM edit
+  ├─ Back     → OPTIONS
+  └─ EXIT     → Main screen
 
-Menu 1: INPUT (unified, dynamic based on sensor type)
-  Analog (16 items):        Digital (12 items):
+SETUP (current_menu = 2, from OPTIONS > Setup Menu)
+  ├─ Input 1 → INPUT menu
+  ├─ Input 2 → INPUT menu
+  ├─ Input 3 → INPUT menu
+  ├─ Clock   → CLOCK CONFIG menu
+  ├─ Back    → OPTIONS
+  └─ EXIT    → Main screen
+
+INPUT (current_menu = 1, unified, dynamic based on sensor type)
+  Analog (17 items):        Digital (13 items):
   ├─ Enable                 ├─ Enable
   ├─ Sensor                 ├─ Sensor
   ├─ Units                  ├─ Fault Pol
@@ -395,31 +404,31 @@ Menu 1: INPUT (unified, dynamic based on sensor type)
   ├─ Pri Low BP             ├─ Rly Sec High
   ├─ Sec Low BP             ├─ Rly Pri Low
   ├─ Rly Pri High           ├─ Rly Sec Low
-  ├─ Rly Sec High           └─ Back
-  ├─ Rly Pri Low
+  ├─ Rly Sec High           ├─ Back → SETUP
+  ├─ Rly Pri Low            └─ EXIT → Main screen
   ├─ Rly Sec Low
-  └─ Back
+  ├─ Back     → SETUP
+  └─ EXIT     → Main screen
 
-Menu 6: DIGITAL INPUTS
-  ├─ DIG2 Enable / Polarity / Relay
-  ├─ DIG3 Enable / Polarity / Relay
-  ├─ DIG4 Enable / Polarity / Relay
-  └─ Back
-
-Menu 3: CLOCK
+CLOCK CONFIG (current_menu = 3, from SETUP > Clock)
   ├─ Enable (Disabled/Enabled)
   ├─ Rly Endrun (Latch/Pulse)
-  └─ Back
+  ├─ Back    → SETUP
+  └─ EXIT    → Main screen
 
-Menu 4: UTILITY
+UTILITY (current_menu = 4, from OPTIONS > Utility Menu)
   ├─ Set Clock / View Log / Clear Log / Log Entries
   ├─ Menu T/O / Pwr Detect / Brightness / Rly Pulse
-  └─ Back
+  ├─ Back    → OPTIONS
+  └─ EXIT    → Main screen
 ```
 
 ### Menu Behavior
+- **Navigation:** All sub-menus have "Back" (return to parent) and "EXIT" (return to main screen). Long press on encoder exits to main screen from any menu.
+- **Button beep:** Single 50ms beep on every button press, handled by the encoder ISR. No additional beeps from menu code — consistent across all actions.
+- **Menu titles:** Consistent `======` style format, 20 chars wide (e.g. `====== CLOCK =======`).
 - **Tag-based field system:** Each menu line has a field tag (FT_ENABLE, FT_SENSOR, etc.) stored in `input_field_tags[]`. All field detection, save, and edit logic uses tags rather than hardcoded line numbers.
-- **Dynamic rebuild:** `rebuild_input_menu()` reconstructs the input menu when sensor type changes, switching between analog (16 items) and digital (12 items) layouts with sensor-specific labels.
+- **Dynamic rebuild:** `rebuild_input_menu()` reconstructs the input menu when sensor type changes, switching between analog (17 items) and digital (13 items) layouts with sensor-specific labels.
 - **Save-on-exit:** Each field writes to EEPROM immediately when confirmed (no explicit Save menu item). Uses `save_input_config(n)` or `save_system_config()`.
 - **4Hz flash:** All field types (numeric, time, option) flash at ~4Hz when being edited via `blink_state` toggling in `draw_menu_line()`.
 - **Encoder acceleration:** Steps by 20 when encoder pulses are <112ms apart, otherwise steps by 1.

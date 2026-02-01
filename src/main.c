@@ -8,7 +8,7 @@
  *   - Hold >= 1000ms -> long beep (300ms), long press event, non-blocking
  */
 
-#define BUILD_VERSION 61  // Unified input menu, save-on-field-exit, digital input menu
+#define BUILD_VERSION 62  // Back+EXIT on all sub-menus, long press exit, consistent beeps
 
 #include "../include/config.h"
 #include "../include/encoder.h"
