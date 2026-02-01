@@ -29,6 +29,7 @@ Communication: Main → Display via serial (19200 baud, 8N1)
 | 2026-01-19 | Display | 1    | Initial - LCD driver, LED control, PWM, test harness |
 | 2026-02-01 | Main  | 61     | Unified input menu, tag-based fields, 6 sensor types, sensor-specific units, digital inputs, save-on-exit, 4Hz edit flash |
 | 2026-02-01 | Main  | 61     | Suspend unit conversion (preserved in #if 0), fixed display format (psi/°C/%), bypass timer clears on threshold reached |
+| 2026-02-01 | Main  | 61     | RTC 1Hz INT0 as primary clock, remove unused code, End Run flash, encoder accel tuning |
 
 ---
 
@@ -421,7 +422,9 @@ Menu 4: UTILITY
 - **Dynamic rebuild:** `rebuild_input_menu()` reconstructs the input menu when sensor type changes, switching between analog (16 items) and digital (12 items) layouts with sensor-specific labels.
 - **Save-on-exit:** Each field writes to EEPROM immediately when confirmed (no explicit Save menu item). Uses `save_input_config(n)` or `save_system_config()`.
 - **4Hz flash:** All field types (numeric, time, option) flash at ~4Hz when being edited via `blink_state` toggling in `draw_menu_line()`.
-- **Encoder acceleration:** Steps by 20 when encoder pulses are <150ms apart, otherwise steps by 1.
+- **Encoder acceleration:** Steps by 20 when encoder pulses are <112ms apart, otherwise steps by 1.
+- **Timing architecture:** 1-second tick from DS3231 RTC 1Hz SQW output via INT0/RB0 interrupt (`rtc_tick_flag`). Sub-second 50ms tick from Timer0 1ms ISR counter (`subtick_flag`). Main loop runs continuously without blocking delay.
+- **End Run display:** When runtime expires, line 1 shows "STOP End Run HH:MM" with "End Run" flashing at ~4Hz. Alarm buzzer sounds before relay action. Display is consistent whether run input has dropped or not.
 
 ---
 

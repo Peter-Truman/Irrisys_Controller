@@ -57,6 +57,11 @@ static uint8_t last_btn = 1;
 
 extern volatile uint8_t relay_latch_mode;
 
+// RTC 1Hz tick and 50ms sub-tick flags (set in ISR, cleared in main loop)
+volatile uint8_t rtc_tick_flag = 0;
+volatile uint8_t subtick_flag = 0;
+static uint8_t subtick_counter = 0;
+
 // Quadrature state machine lookup table
 static const int8_t enc_table[16] = {
     0, -1, 1, 0,
@@ -256,19 +261,22 @@ void __interrupt() isr(void)
             }
             break;
         }
+
+        // 50ms sub-tick counter (inside Timer0 1ms ISR)
+        subtick_counter++;
+        if (subtick_counter >= 50)
+        {
+            subtick_counter = 0;
+            subtick_flag = 1;
+        }
     }
 
-    // Timer1 interrupt - 1 second tick for relay timer
-    // if (PIR1bits.TMR1IF)
-    //{
-    // PIR1bits.TMR1IF = 0; // Clear flag
-    // TMR1H = 0x0B;        // Reload for next second
-    // TMR1L = 0xDC;        // @ 32MHz with 1:8 prescaler
-
-    // Call relay timer tick (declared extern)
-    // extern void relay_timer_tick(void);
-    // relay_timer_tick();
-    //}
+    // RTC 1Hz interrupt on INT0 (RB0 falling edge)
+    if (INTCONbits.INT0IF)
+    {
+        INTCONbits.INT0IF = 0;
+        rtc_tick_flag = 1;
+    }
 }
 
 void encoder_init(void)
@@ -287,6 +295,12 @@ void encoder_init(void)
     // Enable Timer0 interrupt
     INTCONbits.TMR0IF = 0;
     INTCONbits.TMR0IE = 1;
+
+    // Enable INT0 (RB0) for RTC 1Hz falling edge
+    INTCON2bits.INTEDG0 = 0;  // Falling edge trigger
+    INTCONbits.INT0IF = 0;
+    INTCONbits.INT0IE = 1;
+
     INTCONbits.GIE = 1;
 
     // Initialize encoder state

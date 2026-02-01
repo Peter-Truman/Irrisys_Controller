@@ -955,8 +955,8 @@ void menu_handle_encoder(int16_t delta)
         // Whole-number signed edit mode (acceleration)
         if (menu.edit_whole_mode)
         {
-            // Acceleration: fast spin (<150ms between detents) = step by 20
-            int16_t step = (encoder_ms_timer < 150) ? 20 : 1;
+            // Acceleration: fast spin (<112ms between detents) = step by 20
+            int16_t step = (encoder_ms_timer < 112) ? 20 : 1;
             encoder_ms_timer = 0; // Reset for next detent timing
 
             if (delta > 0)

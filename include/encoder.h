@@ -20,6 +20,10 @@ extern volatile uint8_t long_beep_flag;   // Request 300ms beep
 // Free-running ms counter for encoder acceleration
 extern volatile uint16_t encoder_ms_timer;
 
+// RTC 1Hz tick and 50ms sub-tick flags (set in ISR, cleared in main loop)
+extern volatile uint8_t rtc_tick_flag;
+extern volatile uint8_t subtick_flag;
+
 void encoder_init(void);
 
 #endif

@@ -253,7 +253,7 @@ static uint8_t sys_state = SYS_STOP;
 static uint32_t run_timer_secs = 0;
 static uint32_t stop_timer_secs = 0;
 static uint8_t flash_toggle = 0;
-static uint8_t tick_counter = 0;       // Counts 50ms loops for 1-second tick
+// tick_counter removed — 1-second tick now driven by RTC 1Hz interrupt (rtc_tick_flag)
 static uint8_t render_counter = 0;     // Display update throttle
 static uint16_t pwr_detect_countdown = 0;  // Non-blocking power detect delay (seconds)
 static uint8_t boot_pwr_fail = 0;             // Set once at boot if power_failure_flag was set in EEPROM
@@ -355,7 +355,7 @@ void render_main_screen(uint16_t ch1, uint16_t ch2, uint16_t ch3, rtc_time_t *ti
             // Stop code 1 = runtime expired (line 1 only)
             // Stop codes 2-7 = bypass alarm (shown on the fault input line instead)
             if (system_config.active_stop_code == 1)
-                sprintf(status, "STOP End RunTime");
+                sprintf(status, "STOP End Run");
             else
                 sprintf(status, "STOP");
         }
@@ -367,8 +367,10 @@ void render_main_screen(uint16_t ch1, uint16_t ch2, uint16_t ch3, rtc_time_t *ti
             sprintf(status, "STOP");
 
         // Show countdown HH:MM:SS when running with clock enabled and runtime > 0
+        // (but not after runtime expired — show "STOP End Run" instead)
         if (sys_state == SYS_RUN && system_config.clock_enabled &&
-            (system_config.runtime_hours > 0 || system_config.runtime_minutes > 0))
+            (system_config.runtime_hours > 0 || system_config.runtime_minutes > 0) &&
+            system_config.active_stop_code != 1)
         {
             uint32_t t = run_timer_secs;
             uint8_t hh = t / 3600;
@@ -382,11 +384,12 @@ void render_main_screen(uint16_t ch1, uint16_t ch2, uint16_t ch3, rtc_time_t *ti
             sprintf(line, "%-15s%02u:%02u", status, time->hours, time->minutes);
         }
     }
-    // Flash line 1 for End RunTime stop code
+    // Flash "End Run" only (keep "STOP" and time visible)
     if (system_config.active_stop_code == 1 && !alarm_flash)
-        lcd_print("                    ");
-    else
-        lcd_print(line);
+    {
+        memcpy(line + 5, "       ", 7);  // Blank columns 5-11 ("End Run")
+    }
+    lcd_print(line);
 
     // --- Lines 2-4: Input values with bypass timer and alarm flash ---
     for (uint8_t i = 0; i < 3; i++)
@@ -1045,7 +1048,11 @@ void main(void)
             adc_ch3 = adc_buf[2][adc_buf_idx ? adc_buf_idx - 1 : 0];
         }
 
-        __delay_ms(50);
+        // =============================================================
+        // 50ms sub-tick (driven by Timer0 ISR)
+        // =============================================================
+        if (!subtick_flag) continue;
+        subtick_flag = 0;
 
         // Non-blocking buzzer countdown (50ms per tick)
         if (buzzer_countdown > 0)
@@ -1092,12 +1099,11 @@ void main(void)
         }
 
         // =============================================================
-        // 1-second tick (every 20 × 50ms loops)
+        // 1-second tick (RTC 1Hz interrupt on INT0/RB0)
         // =============================================================
-        tick_counter++;
-        if (tick_counter >= 20)
+        if (rtc_tick_flag)
         {
-            tick_counter = 0;
+            rtc_tick_flag = 0;
             flash_toggle = !flash_toggle;
 
             if (sys_state == SYS_RUN)
@@ -1107,21 +1113,19 @@ void main(void)
                     run_timer_secs--;  // Countdown
                     if (run_timer_secs == 0)
                     {
-                        // Runtime expired — trigger relay action
+                        // Runtime expired — alarm first, then relay
+                        system_config.active_stop_code = 1;  // Triggers "End Run" flash
+                        save_power_flags();
+                        start_alarm_buzzer();
+
+                        // Relay action after alarm starts
                         uint8_t mode = system_config.end_runtime_mode;
                         if (mode == 0)
                             trigger_relay_pulse(1);  // Latch
                         else
                             trigger_relay_pulse(0);  // Pulse
 
-                        system_config.active_stop_code = 1;  // 1 = runtime expired
-                        save_power_flags();
-                        {
-                            char rbuf[60];
-                            sprintf(rbuf, "Runtime expired - mode=%u pulse_time=%u relay_state=%u latch=%u",
-                                    mode, system_config.relay_pulse_time, relay_state, relay_latch_mode);
-                            uart_println(rbuf);
-                        }
+                        uart_println("Runtime expired - End Run");
                     }
                 }
                 else if (!system_config.clock_enabled)
