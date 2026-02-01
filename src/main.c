@@ -8,7 +8,7 @@
  *   - Hold >= 1000ms -> long beep (300ms), long press event, non-blocking
  */
 
-#define BUILD_VERSION 62  // Back+EXIT on all sub-menus, long press exit, consistent beeps
+#define BUILD_VERSION 63  // Remove date/time, right-justify status msgs, fault LED, signal LED follows DIG_IN1
 
 #include "../include/config.h"
 #include "../include/encoder.h"
@@ -333,7 +333,7 @@ static const char *bp_lbl_slo[6] = {"SLPBP", "SLTBP", "SLFBP", "SNFBP", "SLVBP",
 // =============================================================================
 // Main screen rendering
 // =============================================================================
-void render_main_screen(uint16_t ch1, uint16_t ch2, uint16_t ch3, rtc_time_t *time)
+void render_main_screen(uint16_t ch1, uint16_t ch2, uint16_t ch3)
 {
     char line[21];
     uint16_t adc_vals[3];
@@ -347,27 +347,23 @@ void render_main_screen(uint16_t ch1, uint16_t ch2, uint16_t ch3, rtc_time_t *ti
     lcd_set_cursor(0, 0);
     // Use %-15s to left-pad status, then right-justify time at col 15
     {
-        char status[16];
+        const char *state = "STOP";
+        const char *msg = "";
+
         if (boot_pwr_fail)
-            sprintf(status, "STOP  PWR Fail");
+            msg = "Pwr Fail";
         else if (system_config.active_stop_code)
         {
-            // Stop code 1 = runtime expired (line 1 only)
-            // Stop codes 2-7 = bypass alarm (shown on the fault input line instead)
             if (system_config.active_stop_code == 1)
-                sprintf(status, "STOP End Run");
-            else
-                sprintf(status, "STOP");
+                msg = "End RunTime";
         }
         else if (sys_state == SYS_RUN)
-            sprintf(status, "RUN");
+            state = "RUN";
         else if (ext_stop_flag)
-            sprintf(status, "STOP  Ext Stop");
-        else
-            sprintf(status, "STOP");
+            msg = "Ext Stop";
 
         // Show countdown HH:MM:SS when running with clock enabled and runtime > 0
-        // (but not after runtime expired — show "STOP End Run" instead)
+        // (but not after runtime expired — show "STOP End RunTime" instead)
         if (sys_state == SYS_RUN && system_config.clock_enabled &&
             (system_config.runtime_hours > 0 || system_config.runtime_minutes > 0) &&
             system_config.active_stop_code != 1)
@@ -376,18 +372,24 @@ void render_main_screen(uint16_t ch1, uint16_t ch2, uint16_t ch3, rtc_time_t *ti
             uint8_t hh = t / 3600;
             uint8_t mm = (t % 3600) / 60;
             uint8_t ss = t % 60;
-            sprintf(line, "RUN  %02u:%02u:%02u  %02u:%02u",
-                    hh, mm, ss, time->hours, time->minutes);
+            sprintf(line, "RUN         %02u:%02u:%02u",
+                    hh, mm, ss);
         }
         else
         {
-            sprintf(line, "%-15s%02u:%02u", status, time->hours, time->minutes);
+            // State left-justified, message right-justified
+            sprintf(line, "%-20s", state);
+            if (msg[0])
+            {
+                uint8_t mlen = strlen(msg);
+                memcpy(line + 20 - mlen, msg, mlen);
+            }
         }
     }
-    // Flash "End Run" only (keep "STOP" and time visible)
+    // Flash "End RunTime" only (keep "STOP" visible)
     if (system_config.active_stop_code == 1 && !alarm_flash)
     {
-        memcpy(line + 5, "       ", 7);  // Blank columns 5-11 ("End Run")
+        memcpy(line + 9, "           ", 11);  // Blank columns 9-19 ("End RunTime")
     }
     lcd_print(line);
 
@@ -796,7 +798,7 @@ void main(void)
     static uint32_t blink_timer = 0;
     static uint16_t encoder_activity_timer = 0;
     uint16_t adc_ch1, adc_ch2, adc_ch3;
-    rtc_time_t current_time = {0};
+    // RTC used for 1Hz tick only (no date/time display)
 
     // Clear display board, wait 1 second, then render first main screen with debug
     uart_println("Sending CLS to display...");
@@ -813,7 +815,6 @@ void main(void)
 
     // Build first main screen manually with debug output
     uart_println("Building first main screen:");
-    rtc_read_time(&current_time);
     {
         uint16_t raw0 = adc_read(0);
         uint16_t raw1 = adc_read(1);
@@ -833,7 +834,7 @@ void main(void)
         sprintf(buf, "  ADC raw: %u %u %u", raw0, raw1, raw2);
         uart_println(buf);
 
-        render_main_screen(raw0, raw1, raw2, &current_time);
+        render_main_screen(raw0, raw1, raw2);
     }
     uart_println("render_main_screen done, now force_flush:");
     lcd_force_flush();
@@ -845,16 +846,6 @@ void main(void)
     uint8_t last_dig2 = DIG_IN2_PORT;
     uint8_t last_dig3 = DIG_IN3_PORT;
     uint8_t last_dig4 = DIG_IN4_PORT;
-
-    // Read initial RTC time
-    rtc_read_time(&current_time);
-    {
-        char tbuf[40];
-        sprintf(tbuf, "RTC: %02u:%02u:%02u %02u/%02u/%02u",
-                current_time.hours, current_time.minutes, current_time.seconds,
-                current_time.date, current_time.month, current_time.year);
-        uart_println(tbuf);
-    }
 
     while (1)
     {
@@ -936,8 +927,7 @@ void main(void)
                 // Immediate screen update BEFORE slow EEPROM saves
                 if (current_menu == 255)
                 {
-                    rtc_read_time(&current_time);
-                    render_main_screen(adc_ch1, adc_ch2, adc_ch3, &current_time);
+                    render_main_screen(adc_ch1, adc_ch2, adc_ch3);
                     render_counter = 0;
                 }
 
@@ -1007,8 +997,7 @@ void main(void)
             // Immediate screen update on state change
             if (current_menu == 255)
             {
-                rtc_read_time(&current_time);
-                render_main_screen(adc_ch1, adc_ch2, adc_ch3, &current_time);
+                render_main_screen(adc_ch1, adc_ch2, adc_ch3);
                 render_counter = 0;
             }
         }
@@ -1125,7 +1114,7 @@ void main(void)
                         else
                             trigger_relay_pulse(0);  // Pulse
 
-                        uart_println("Runtime expired - End Run");
+                        uart_println("Runtime expired - End RunTime");
                     }
                 }
                 else if (!system_config.clock_enabled)
@@ -1270,8 +1259,7 @@ void main(void)
         if (render_counter >= 5 && current_menu == 255)
         {
             render_counter = 0;
-            rtc_read_time(&current_time);
-            render_main_screen(adc_ch1, adc_ch2, adc_ch3, &current_time);
+            render_main_screen(adc_ch1, adc_ch2, adc_ch3);
         }
 
         // =============================================================
@@ -1339,8 +1327,7 @@ void main(void)
                         __delay_ms(80);
                         beep(50);
                         // Immediate screen update to clear fault message
-                        rtc_read_time(&current_time);
-                        render_main_screen(adc_ch1, adc_ch2, adc_ch3, &current_time);
+                        render_main_screen(adc_ch1, adc_ch2, adc_ch3);
                         render_counter = 0;
                     }
                     else
@@ -1474,11 +1461,13 @@ void main(void)
             else
                 led_mask |= 0x01;  // Solid on
 
-            // Signal LED: solid when relay energized, flash 2Hz when de-energized
-            if (relay_state == 0)
-                led_mask |= 0x02;  // Solid on (relay energized)
-            else
-                led_mask |= (led_flash_state ? 0x02 : 0x00);  // Flash
+            // Signal LED: on when run signal (DIG_IN1) is high, off when low
+            if (DIG_IN1_PORT)
+                led_mask |= 0x02;
+
+            // Fault LED (RA5): flash 2Hz when relay de-energized, off when energized
+            if (relay_state == 1)
+                led_mask |= (led_flash_state ? 0x04 : 0x00);  // Flash
 
             disp_set_leds(led_mask);
         }

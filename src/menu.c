@@ -214,19 +214,18 @@ menu_item_t main_menu_items[3];
 
 // Utility menu template (10 items - no Save)
 const menu_item_t utility_menu_template[] = {
-    {"Set Clock", NULL, 0},    // 0 - Action: submenu
-    {"View Log", NULL, 0},     // 1 - Action
-    {"Clear Log", NULL, 0},    // 2 - Action
-    {"Log Entries", NULL, 1},  // 3 - Numeric
-    {"Menu T/O", NULL, 1},     // 4 - Time MM:SS
-    {"Pwr Detect", NULL, 1},   // 5 - Time MM:SS
-    {"Brightness", NULL, 1},   // 6 - Numeric
-    {"Rly Pulse", NULL, 1},    // 7 - Time MM:SS
-    {"Back", NULL, 0},         // 8
-    {"EXIT", NULL, 0}          // 9
+    {"View Log", NULL, 0},     // 0 - Action
+    {"Clear Log", NULL, 0},    // 1 - Action
+    {"Log Entries", NULL, 1},  // 2 - Numeric
+    {"Menu T/O", NULL, 1},     // 3 - Time MM:SS
+    {"Pwr Detect", NULL, 1},   // 4 - Time MM:SS
+    {"Brightness", NULL, 1},   // 5 - Numeric
+    {"Rly Pulse", NULL, 1},    // 6 - Time MM:SS
+    {"Back", NULL, 0},         // 7
+    {"EXIT", NULL, 0}          // 8
 };
 
-menu_item_t utility_menu[10];
+menu_item_t utility_menu[9];
 
 // Digital input menu template (5 items)
 const menu_item_t digital_menu_template[] = {
@@ -273,7 +272,7 @@ uint8_t is_numeric_field(uint8_t line, uint8_t sensor_type, uint8_t flow_type)
     }
     else if (current_menu == 4) // UTILITY menu
     {
-        return (line == 3 || line == 6); // Log Entries, Brightness
+        return (line == 2 || line == 5); // Log Entries, Brightness
     }
     return 0;
 }
@@ -289,7 +288,7 @@ uint8_t is_time_field(uint8_t line, uint8_t sensor_type, uint8_t flow_type)
     }
     else if (current_menu == 4) // UTILITY menu
     {
-        return (line == 4 || line == 5 || line == 7); // Menu T/O, Pwr Detect, Rly Pulse
+        return (line == 3 || line == 4 || line == 6); // Menu T/O, Pwr Detect, Rly Pulse
     }
     else if (current_menu == 5) // MAIN menu
     {
@@ -683,7 +682,7 @@ void rebuild_main_menu(void)
 
 void rebuild_utility_menu(void)
 {
-    for (uint8_t i = 0; i < 10; i++)
+    for (uint8_t i = 0; i < 9; i++)
     {
         utility_menu[i].label = utility_menu_template[i].label;
         utility_menu[i].editable = utility_menu_template[i].editable;
@@ -691,28 +690,28 @@ void rebuild_utility_menu(void)
     }
 
     sprintf(value_log_entries, "%u", system_config.log_entries);
-    utility_menu[3].value = value_log_entries;
+    utility_menu[2].value = value_log_entries;
 
     // Menu T/O: stored as raw value in menu_timeout field (×2 = seconds)
     uint16_t timeout_secs = system_config.menu_timeout * 2;
     sprintf(value_menu_timeout, "%02u:%02u", timeout_secs / 60, timeout_secs % 60);
-    utility_menu[4].value = value_menu_timeout;
+    utility_menu[3].value = value_menu_timeout;
 
     // Pwr Detect: stored as seconds
     sprintf(value_pwr_fail, "%02u:%02u",
             system_config.power_fail_delay / 60,
             system_config.power_fail_delay % 60);
-    utility_menu[5].value = value_pwr_fail;
+    utility_menu[4].value = value_pwr_fail;
 
     sprintf(value_brightness, "%u", system_config.brightness);
-    utility_menu[6].value = value_brightness;
+    utility_menu[5].value = value_brightness;
 
     sprintf(value_relay_pulse, "%02u:%02u",
             system_config.relay_pulse_time / 60,
             system_config.relay_pulse_time % 60);
-    utility_menu[7].value = value_relay_pulse;
+    utility_menu[6].value = value_relay_pulse;
 
-    menu.total_items = 10;
+    menu.total_items = 9;
     menu.current_line = 0;
     menu.top_line = 0;
 }
@@ -1426,28 +1425,28 @@ static void save_utility_field(uint8_t line)
 {
     switch (line)
     {
-    case 3: // Log Entries
+    case 2: // Log Entries
     {
         int16_t val = menu.digit_100 * 100 + menu.digit_10 * 10 + menu.digit_1;
         system_config.log_entries = (uint16_t)val;
         break;
     }
-    case 4: // Menu T/O
+    case 3: // Menu T/O
     {
         uint16_t secs = menu.time_xx * 60 + menu.time_yy;
         system_config.menu_timeout = secs / 2; // Store as 2-second increments
         break;
     }
-    case 5: // Pwr Detect
+    case 4: // Pwr Detect
         system_config.power_fail_delay = menu.time_xx * 60 + menu.time_yy;
         break;
-    case 6: // Brightness
+    case 5: // Brightness
     {
         int16_t val = menu.digit_100 * 100 + menu.digit_10 * 10 + menu.digit_1;
         system_config.brightness = (uint8_t)val;
         break;
     }
-    case 7: // Rly Pulse
+    case 6: // Rly Pulse
         system_config.relay_pulse_time = menu.time_xx * 60 + menu.time_yy;
         break;
     }
@@ -1855,7 +1854,7 @@ void menu_handle_button(uint8_t press_type)
     case 4: // UTILITY menu
     {
         uint8_t line = menu.current_line;
-        if (line == 8) // Back
+        if (line == 7) // Back
         {
             current_menu = 0;
             menu.current_line = 2; // Return to Utility position
@@ -1864,41 +1863,20 @@ void menu_handle_button(uint8_t press_type)
             menu.total_items = options_menu_count;
             break;
         }
-        if (line == 9) // EXIT
+        if (line == 8) // EXIT
         {
             current_menu = 255;
             lcd_clear();
             break;
         }
 
-        if (line == 0) // Set Clock
-        {
-            // Enter datetime submenu
-            menu.in_datetime_submenu = 1;
-            menu.datetime_field = 0;
-            menu.datetime_edit_digit = 0;
-            // Load current RTC values
-            rtc_time_t now;
-            if (rtc_read_time(&now))
-            {
-                menu.date_dd = now.date;
-                menu.date_mm = now.month;
-                menu.date_yy = now.year;
-                menu.time_hh = now.hours;
-                menu.time_min = now.minutes;
-                menu.time_ss = now.seconds;
-            }
-
-            break;
-        }
-
-        if (line == 1) // View Log
+        if (line == 0) // View Log
         {
 
             break;
         }
 
-        if (line == 2) // Clear Log
+        if (line == 1) // Clear Log
         {
 
             break;
@@ -1912,8 +1890,8 @@ void menu_handle_button(uint8_t press_type)
             uint8_t is_unsigned = 1;
             switch (line)
             {
-            case 3: val = (int16_t)system_config.log_entries; break;
-            case 6: val = system_config.brightness; break;
+            case 2: val = (int16_t)system_config.log_entries; break;
+            case 5: val = system_config.brightness; break;
             }
             init_numeric_editor(val, is_unsigned);
 
@@ -1925,9 +1903,9 @@ void menu_handle_button(uint8_t press_type)
             uint16_t secs = 0;
             switch (line)
             {
-            case 4: secs = system_config.menu_timeout * 2; break;
-            case 5: secs = system_config.power_fail_delay; break;
-            case 7: secs = system_config.relay_pulse_time; break;
+            case 3: secs = system_config.menu_timeout * 2; break;
+            case 4: secs = system_config.power_fail_delay; break;
+            case 6: secs = system_config.relay_pulse_time; break;
             }
             init_time_editor(secs, 0); // MM:SS
             menu.in_edit_mode = 1;
