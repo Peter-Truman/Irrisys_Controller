@@ -8,7 +8,7 @@
  *   - Hold >= 1000ms -> long beep (300ms), long press event, non-blocking
  */
 
-#define BUILD_VERSION 63  // Remove date/time, right-justify status msgs, fault LED, signal LED follows DIG_IN1
+#define BUILD_VERSION 64  // Event log on M24M01 external EEPROM, View Log menu
 
 #include "../include/config.h"
 #include "../include/encoder.h"
@@ -18,6 +18,7 @@
 #include "../include/rtc.h"
 #include "../include/pca9535.h"
 #include "../include/lcd.h"
+#include "../include/eventlog.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -697,6 +698,11 @@ void main(void)
     // Initialize I2C bus
     i2c_init();
 
+    // Initialize event log from external EEPROM (must be after i2c_init)
+    eventlog_init();
+    if (boot_pwr_fail)
+        eventlog_write(STOP_PWR_FAIL);
+
     // Initialize PCA9535 and run LED test
     pca9535_init();
     pca9535_led_init();
@@ -959,7 +965,10 @@ void main(void)
             stop_timer_secs = 0;
             // Set ext_stop_flag if no alarm/stop code caused this (pure external stop)
             if (!system_config.active_stop_code)
+            {
                 ext_stop_flag = 1;
+                eventlog_write(STOP_EXT_STOP);
+            }
             BUZZER = 1; buzzer_countdown = 10;  // 500ms non-blocking beep
             // Start non-blocking power detect delay before clearing flag
             pwr_detect_countdown = system_config.power_fail_delay;
@@ -1103,8 +1112,9 @@ void main(void)
                     if (run_timer_secs == 0)
                     {
                         // Runtime expired — alarm first, then relay
-                        system_config.active_stop_code = 1;  // Triggers "End Run" flash
+                        system_config.active_stop_code = 1;  // Triggers "End RunTime" flash
                         save_power_flags();
+                        eventlog_write(STOP_END_RUNTIME);
                         start_alarm_buzzer();
 
                         // Relay action after alarm starts
@@ -1200,6 +1210,7 @@ void main(void)
                         trigger_relay_pulse(rly == 0 ? 1 : 0);
                         system_config.active_stop_code = (uint8_t)(2 + i * 2);  // 2,4,6
                         save_power_flags();
+                        eventlog_write(system_config.active_stop_code);
                         // Store bypass abbreviation for display
                         const char *lbl = (hi_result == 1) ? bp_lbl_phi[st] : bp_lbl_shi[st];
                         strncpy(alarm_code_text, lbl, 6);
@@ -1228,6 +1239,7 @@ void main(void)
                             trigger_relay_pulse(rly == 0 ? 1 : 0);
                             system_config.active_stop_code = (uint8_t)(3 + i * 2);  // 3,5,7
                             save_power_flags();
+                            eventlog_write(system_config.active_stop_code);
                             // Store bypass abbreviation for display
                             const char *lbl = (lo_result == 1) ? bp_lbl_plo[st] : bp_lbl_slo[st];
                             strncpy(alarm_code_text, lbl, 6);
@@ -1289,6 +1301,7 @@ void main(void)
             else if (current_menu == 4) menu_draw_utility();
             else if (current_menu == 5) menu_draw_main_menu();
             else if (current_menu == 6) menu_draw_digital();
+            else if (current_menu == 7) menu_draw_log_view();
 
             lcd_flush();
         }
@@ -1352,6 +1365,7 @@ void main(void)
                 else if (current_menu == 4) menu_draw_utility();
                 else if (current_menu == 5) menu_draw_main_menu();
                 else if (current_menu == 6) menu_draw_digital();
+            else if (current_menu == 7) menu_draw_log_view();
 
                 lcd_flush();
             }
@@ -1400,7 +1414,7 @@ void main(void)
                     menu_draw_clock();
                     break;
                 case 4:
-                    if (!menu.in_datetime_submenu && (menu.current_line == 4 || menu.current_line == 5 || menu.current_line == 7))
+                    if (menu.current_line == 3 || menu.current_line == 4 || menu.current_line == 6)
                         menu_update_time_value();
                     else
                         menu_draw_utility();
@@ -1410,6 +1424,9 @@ void main(void)
                     break;
                 case 6:
                     menu_draw_digital();
+                    break;
+                case 7:
+                    menu_draw_log_view();
                     break;
                 }
 

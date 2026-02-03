@@ -3,7 +3,10 @@
 ## Project Overview
 
 **Product:** IRRISYS Irrigation Pump Protection System
-**Hardware Version:** Ver_B Rev_1
+**Hardware Version:**
+
+Display is IrrisysPG_Ver_B_Display_Rev_2. Mainboard is IrrisysPG_MainBrd_Ver_B_Rev_2
+
 **Repository:** Firmware only (GitHub) - Two-board system
 
 ---
@@ -12,10 +15,10 @@
 
 The system consists of two boards communicating via serial:
 
-| Board | MCU | Function |
-|-------|-----|----------|
-| **Main Board** | PIC18F26K22 @ 32MHz | Control logic, ADC, RTC, relay, encoder, EEPROM |
-| **Display Board** | PIC18F14K22 @ 8MHz | LCD display, LEDs, brightness/contrast PWM |
+| Board             | MCU                 | Function                                        |
+| ----------------- | ------------------- | ----------------------------------------------- |
+| **Main Board**    | PIC18F26K22 @ 32MHz | Control logic, ADC, RTC, relay, encoder, EEPROM |
+| **Display Board** | PIC18F14K22 @ 8MHz  | LCD display, LEDs, brightness/contrast PWM      |
 
 Communication: Main → Display via serial (19200 baud, 8N1)
 
@@ -23,14 +26,15 @@ Communication: Main → Display via serial (19200 baud, 8N1)
 
 ## Changelog
 
-| Date       | Board | FW Ver | Description |
-|------------|-------|--------|-------------|
-| 2026-01-19 | Main  | 3      | Baseline - Knight Rider LED, full menu, AD7994, RTC, EEPROM |
-| 2026-01-19 | Display | 1    | Initial - LCD driver, LED control, PWM, test harness |
-| 2026-02-01 | Main  | 61     | Unified input menu, tag-based fields, 6 sensor types, sensor-specific units, digital inputs, save-on-exit, 4Hz edit flash |
-| 2026-02-01 | Main  | 62     | Back+EXIT on all sub-menus, long press exits to main screen, consistent menu titles, remove duplicate menu beeps (ISR beep only) |
-| 2026-02-01 | Main  | 61     | Suspend unit conversion (preserved in #if 0), fixed display format (psi/°C/%), bypass timer clears on threshold reached |
-| 2026-02-01 | Main  | 61     | RTC 1Hz INT0 as primary clock, remove unused code, End Run flash, encoder accel tuning |
+| Date       | Board   | FW Ver | Description                                                                                                                            |
+| ---------- | ------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-01-19 | Main    | 3      | Baseline - Knight Rider LED, full menu, AD7994, RTC, EEPROM                                                                            |
+| 2026-01-19 | Display | 1      | Initial - LCD driver, LED control, PWM, test harness                                                                                   |
+| 2026-02-01 | Main    | 61     | Unified input menu, tag-based fields, 6 sensor types, sensor-specific units, digital inputs, save-on-exit, 4Hz edit flash              |
+| 2026-02-01 | Main    | 62     | Back+EXIT on all sub-menus, long press exits to main screen, consistent menu titles, remove duplicate menu beeps (ISR beep only)       |
+| 2026-02-01 | Main    | 61     | Suspend unit conversion (preserved in #if 0), fixed display format (psi/°C/%), bypass timer clears on threshold reached                |
+| 2026-02-01 | Main    | 61     | RTC 1Hz INT0 as primary clock, remove unused code, End Run flash, encoder accel tuning                                                 |
+| 2026-02-02 | Main    | 63     | Remove date/time display, right-justify status msgs & runtime clock, fault LED 2Hz flash, signal LED follows DIG_IN1, remove Set Clock |
 
 ---
 
@@ -38,13 +42,14 @@ Communication: Main → Display via serial (19200 baud, 8N1)
 
 ### What Goes Where
 
-| Asset Type | Storage | Versioning |
-|------------|---------|------------|
-| Firmware (C source, headers) | GitHub | Git commits + BUILD_VERSION |
+| Asset Type                               | Storage  | Versioning                     |
+| ---------------------------------------- | -------- | ------------------------------ |
+| Firmware (C source, headers)             | GitHub   | Git commits + BUILD_VERSION    |
 | Hardware (schematics, PCB, gerbers, BOM) | OneDrive | Folder structure (Ver_X/Rev_Y) |
-| Datasheets, reference docs | Either | N/A |
+| Datasheets, reference docs               | Either   | N/A                            |
 
 ### Rationale
+
 - **Git/GitHub** is optimized for text-based source code with line-by-line diff tracking
 - **OneDrive** handles large binary files (DipTrace, STEP, Excel) with built-in versioning and sync
 - Mixing binary hardware files in Git causes repository bloat and poor diff support
@@ -56,6 +61,7 @@ Communication: Main → Display via serial (19200 baud, 8N1)
 ### BUILD_VERSION Increment Policy
 
 Each board has its own BUILD_VERSION in its `main.c`:
+
 - Main board: `mainboard/src/main.c`
 - Display board: `display/src/main.c`
 
@@ -64,6 +70,7 @@ Each board has its own BUILD_VERSION in its `main.c`:
 ```
 
 **MUST increment for:**
+
 - New features or functionality
 - Bug fixes that change behavior
 - Peripheral driver changes
@@ -71,6 +78,7 @@ Each board has its own BUILD_VERSION in its `main.c`:
 - Menu structure changes
 
 **Do NOT increment for:**
+
 - Code comments or documentation
 - Formatting/whitespace only
 - Debug code added temporarily
@@ -85,6 +93,7 @@ Each board has its own BUILD_VERSION in its `main.c`:
 4. **Always verify** both boards compile before committing
 
 ### Branch Strategy
+
 - `main` or `irrisys-working` - stable, tested code
 - Feature branches for experimental work if needed
 
@@ -129,11 +138,13 @@ Irrisys_Controller/
 ## Hardware File Management
 
 ### Location (OneDrive)
+
 ```
 C:\Users\PeeWee\OneDrive\Documents\DipTrace\PCT_HEADER\ALL_Files\Control_Point_Pump_Guard\IRRISYS_PG_Ver_B\
 ```
 
 ### Folder Structure
+
 ```
 IRRISYS_PG_Ver_B/
 ├── Irrisys_PG_Ver_B_Rev_1/                    # Current revision
@@ -145,6 +156,7 @@ IRRISYS_PG_Ver_B/
 ```
 
 ### Hardware Revision Policy
+
 - **Version (Ver_X):** Major hardware redesign
 - **Revision (Rev_Y):** Minor changes (routing, component swaps)
 - Each revision folder contains ALL related files (schematic, PCB, BOM, gerbers, P&P)
@@ -156,6 +168,7 @@ IRRISYS_PG_Ver_B/
 See `display/CLAUDE.md` for full protocol specification.
 
 ### Frame Structure
+
 ```
 [STX] [CMD] [LEN] [DATA...] [CRC16-LO] [CRC16-HI] [ETX]
  0x02  1 byte 1 byte 0-24 bytes  Fletcher-16       0x03
@@ -163,15 +176,16 @@ See `display/CLAUDE.md` for full protocol specification.
 
 ### Commands Summary
 
-| CMD | Description |
-|-----|-------------|
+| CMD     | Description                                      |
+| ------- | ------------------------------------------------ |
 | `1`-`4` | Text for lines 1-4 (with embedded control codes) |
-| `C` | Clear display |
-| `B` | LCD Brightness (0-100) |
-| `K` | LCD Contrast (0-100) |
-| `L` | LED state (bit mask) |
+| `C`     | Clear display                                    |
+| `B`     | LCD Brightness (0-100)                           |
+| `K`     | LCD Contrast (0-100)                             |
+| `L`     | LED state (bit mask)                             |
 
 ### Embedded Control Codes
+
 `\x10`-`\x11` Blink on/off, `\x12`-`\x13` Underline on/off, `\x14`-`\x15` Cursor show/hide, `\x16`-`\x17` Cursor left/right, `\x18` Cursor to column, `\x19`-`\x1C` Scroll
 
 ---
@@ -180,83 +194,84 @@ See `display/CLAUDE.md` for full protocol specification.
 
 ### Main Board (PIC18F26K22)
 
-| Component | Part | Interface | Notes |
-|-----------|------|-----------|-------|
-| MCU | PIC18F26K22 | - | 32MHz (8MHz + 4x PLL) |
-| Encoder | Rotary + switch | GPIO + interrupt | Short/long press |
-| RTC | DS3231 | I2C (0x68) | 1Hz square wave |
-| ADC | AD7994 | I2C (0x22) | 3 channels |
-| Digital Input | MAX22193 | GPIO | 4 channels |
-| Relay | - | GPIO | Normally energized (closed=pump runs). De-energize to stop pump. Fail-safe: power loss drops relay and stops pump. Pulse/latch modes. |
-| Buzzer | - | GPIO | User feedback |
-| Serial TX | - | UART | To display board |
+| Component     | Part            | Interface        | Notes                                                                                                                                 |
+| ------------- | --------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| MCU           | PIC18F26K22     | -                | 32MHz (8MHz + 4x PLL)                                                                                                                 |
+| Encoder       | Rotary + switch | GPIO + interrupt | Short/long press                                                                                                                      |
+| RTC           | DS3231          | I2C (0x68)       | 1Hz square wave                                                                                                                       |
+| ADC           | AD7994          | I2C (0x22)       | 3 channels                                                                                                                            |
+| Digital Input | MAX22193        | GPIO             | 4 channels                                                                                                                            |
+| Relay         | -               | GPIO             | Normally energized (closed=pump runs). De-energize to stop pump. Fail-safe: power loss drops relay and stops pump. Pulse/latch modes. |
+| Buzzer        | -               | GPIO             | User feedback                                                                                                                         |
+| Serial TX     | -               | UART             | To display board                                                                                                                      |
 
 ### Display Board (PIC18F14K22)
 
-| Pin | Function | Notes |
-|-----|----------|-------|
-| RA2 | PWR LED | Active LOW |
-| RA4 | Signal LED | Active LOW |
-| RA5 | Fault LED | Active LOW |
-| RB5 | Serial RX | From main board |
-| RC0-3 | LCD DB4-7 | 4-bit mode |
-| RC4 | Brightness | PWM |
-| RC5 | Contrast | PWM (CCP1) |
-| RC6 | LCD E | Enable |
-| RC7 | LCD RS | Register Select |
+| Pin   | Function   | Notes           |
+| ----- | ---------- | --------------- |
+| RA2   | PWR LED    | Active LOW      |
+| RA4   | Signal LED | Active LOW      |
+| RA5   | Fault LED  | Active LOW      |
+| RB5   | Serial RX  | From main board |
+| RC0-3 | LCD DB4-7  | 4-bit mode      |
+| RC4   | Brightness | PWM             |
+| RC5   | Contrast   | PWM (CCP1)      |
+| RC6   | LCD E      | Enable          |
+| RC7   | LCD RS     | Register Select |
 
 ---
 
 ## EEPROM Configuration Structures
 
 ### Memory Layout
-| Region | Address | Size | Description |
-|--------|---------|------|-------------|
-| Input 1 config | 0x000 | 128 bytes | `input_config_t` |
-| Input 2 config | 0x080 | 128 bytes | `input_config_t` |
-| Input 3 config | 0x100 | 128 bytes | `input_config_t` |
-| System config | 0x180 | 128 bytes | `system_config_t` |
-| Checksum | 0x200 | 2 bytes | Fletcher-16 over all config |
+
+| Region         | Address | Size      | Description                 |
+| -------------- | ------- | --------- | --------------------------- |
+| Input 1 config | 0x000   | 128 bytes | `input_config_t`            |
+| Input 2 config | 0x080   | 128 bytes | `input_config_t`            |
+| Input 3 config | 0x100   | 128 bytes | `input_config_t`            |
+| System config  | 0x180   | 128 bytes | `system_config_t`           |
+| Checksum       | 0x200   | 2 bytes   | Fletcher-16 over all config |
 
 ### input_config_t (128 bytes per input)
 
-| Offset | Type | Field | Description |
-|--------|------|-------|-------------|
-| 0 | uint8 | enable | 0=Disabled, 1=Enabled |
-| 1 | uint8 | sensor_type | 0=Pressure, 1=Temp, 2=FlowMeter, 3=FlowSw, 4=Oth4-20, 5=OthSw |
-| 2 | uint8 | fault_polarity | Digital types: 0=Fault Low, 1=Fault High |
-| 3 | uint8 | config_flags | Bit flags for per-input options |
-| 4-7 | uint8[4] | reserved1 | Future expansion |
-| 8-9 | int16 | scale_4ma | 4mA scaling value (-999 to +999) |
-| 10-11 | int16 | scale_20ma | 20mA scaling value (-999 to +999) |
-| 12-13 | int16 | high_setpoint | High setpoint (signed) |
-| 14-15 | int16 | low_setpoint | Low setpoint (signed) |
-| 16-23 | int16[4] | reserved_signed | Future signed values |
-| 24-25 | uint16 | primary_high_bypass | Pri high BP (seconds) / Digital: pri fault BP |
-| 26-27 | uint16 | secondary_high_bypass | Sec high BP (seconds) / Digital: sec fault BP |
-| 28-29 | uint16 | primary_low_bypass | Pri low BP (seconds) |
-| 30-31 | uint16 | secondary_low_bypass | Sec low BP (seconds) |
-| 32-55 | uint16[12] | reserved_uint16 | Future 16-bit values |
-| 56 | uint8 | relay_pri_high_mode | 0=Latch, 1=Pulse |
-| 57 | uint8 | relay_sec_high_mode | 0=Latch, 1=Pulse |
-| 58 | uint8 | relay_pri_low_mode | 0=Latch, 1=Pulse |
-| 59 | uint8 | relay_sec_low_mode | 0=Latch, 1=Pulse |
-| 60-63 | uint8[4] | reserved_relay | Future relay config |
-| 64-79 | uint32[4] | reserved_uint32 | Future large values |
-| 80-95 | char[16] | name | Sensor name (null-terminated, max 15 chars) |
-| 96-103 | char[8] | units | Units string (null-terminated, e.g. "psi", "°C", "L/M") |
-| 104-127 | uint8[24] | padding | Expansion space |
+| Offset  | Type       | Field                 | Description                                                   |
+| ------- | ---------- | --------------------- | ------------------------------------------------------------- |
+| 0       | uint8      | enable                | 0=Disabled, 1=Enabled                                         |
+| 1       | uint8      | sensor_type           | 0=Pressure, 1=Temp, 2=FlowMeter, 3=FlowSw, 4=Oth4-20, 5=OthSw |
+| 2       | uint8      | fault_polarity        | Digital types: 0=Fault Low, 1=Fault High                      |
+| 3       | uint8      | config_flags          | Bit flags for per-input options                               |
+| 4-7     | uint8[4]   | reserved1             | Future expansion                                              |
+| 8-9     | int16      | scale_4ma             | 4mA scaling value (-999 to +999)                              |
+| 10-11   | int16      | scale_20ma            | 20mA scaling value (-999 to +999)                             |
+| 12-13   | int16      | high_setpoint         | High setpoint (signed)                                        |
+| 14-15   | int16      | low_setpoint          | Low setpoint (signed)                                         |
+| 16-23   | int16[4]   | reserved_signed       | Future signed values                                          |
+| 24-25   | uint16     | primary_high_bypass   | Pri high BP (seconds) / Digital: pri fault BP                 |
+| 26-27   | uint16     | secondary_high_bypass | Sec high BP (seconds) / Digital: sec fault BP                 |
+| 28-29   | uint16     | primary_low_bypass    | Pri low BP (seconds)                                          |
+| 30-31   | uint16     | secondary_low_bypass  | Sec low BP (seconds)                                          |
+| 32-55   | uint16[12] | reserved_uint16       | Future 16-bit values                                          |
+| 56      | uint8      | relay_pri_high_mode   | 0=Latch, 1=Pulse                                              |
+| 57      | uint8      | relay_sec_high_mode   | 0=Latch, 1=Pulse                                              |
+| 58      | uint8      | relay_pri_low_mode    | 0=Latch, 1=Pulse                                              |
+| 59      | uint8      | relay_sec_low_mode    | 0=Latch, 1=Pulse                                              |
+| 60-63   | uint8[4]   | reserved_relay        | Future relay config                                           |
+| 64-79   | uint32[4]  | reserved_uint32       | Future large values                                           |
+| 80-95   | char[16]   | name                  | Sensor name (null-terminated, max 15 chars)                   |
+| 96-103  | char[8]    | units                 | Units string (null-terminated, e.g. "psi", "°C", "L/M")       |
+| 104-127 | uint8[24]  | padding               | Expansion space                                               |
 
 ### Sensor Types
 
-| Value | Type | Analog/Digital | Labels (High/Low) | Bypass Prefixes |
-|-------|------|----------------|--------------------|--------------------|
-| 0 | Pressure | Analog | High Press / Low Press | PHP, SHP, PLP, SLP |
-| 1 | Temperature | Analog | High Temp / Low Temp | PHT, SHT, PLT, SLT |
-| 2 | Flow Meter | Analog | High Flow / Low Flow | PHF, SHF, PLF, SLF |
-| 3 | Flow Switch | Digital | Flow (high only) | PF, SF, PNF, SNF |
-| 4 | Other 4-20 | Analog | High Value / Low Value | PHV, SHV, PLV, SLV |
-| 5 | Other Switch | Digital | Aux (high only) | PA, SA, PNA, SNA |
+| Value | Type         | Analog/Digital | Labels (High/Low)      | Bypass Prefixes    |
+| ----- | ------------ | -------------- | ---------------------- | ------------------ |
+| 0     | Pressure     | Analog         | High Press / Low Press | PHP, SHP, PLP, SLP |
+| 1     | Temperature  | Analog         | High Temp / Low Temp   | PHT, SHT, PLT, SLT |
+| 2     | Flow Meter   | Analog         | High Flow / Low Flow   | PHF, SHF, PLF, SLF |
+| 3     | Flow Switch  | Digital        | Flow (high only)       | PF, SF, PNF, SNF   |
+| 4     | Other 4-20   | Analog         | High Value / Low Value | PHV, SHV, PLV, SLV |
+| 5     | Other Switch | Digital        | Aux (high only)        | PA, SA, PNA, SNA   |
 
 Analog types (0,1,2,4) have 16 menu items: Enable, Sensor, Units, Scale 4mA, Scale 20mA, High Setpoint, 4 bypass timers, Low Setpoint, 4 bypass timers, 4 relay modes, Back.
 
@@ -264,14 +279,14 @@ Digital types (3,5) have 12 menu items: Enable, Sensor, Fault Polarity, High Set
 
 ### Sensor-Specific Units
 
-| Sensor Type | Available Units |
-|-------------|----------------|
-| Pressure | psi, bar, kPa |
-| Temperature | °C, °F |
-| Flow Meter | L/M, %, LpS |
-| Flow Switch | (none) |
-| Other 4-20 | Value |
-| Other Switch | (none) |
+| Sensor Type  | Available Units |
+| ------------ | --------------- |
+| Pressure     | psi, bar, kPa   |
+| Temperature  | °C, °F          |
+| Flow Meter   | L/M, %, LpS     |
+| Flow Switch  | (none)          |
+| Other 4-20   | Value           |
+| Other Switch | (none)          |
 
 Units are stored in `input_config.units` and displayed on the main screen alongside the sensor value.
 
@@ -287,35 +302,35 @@ Units are stored in `input_config.units` and displayed on the main screen alongs
 
 ### system_config_t (128 bytes)
 
-| Offset | Type | Field | Description |
-|--------|------|-------|-------------|
-| 0 | uint8 | clock_enabled | 0=Disabled (count up), 1=Enabled (countdown) |
-| 1 | uint8 | menu_timeout | Menu timeout (seconds) |
-| 2-3 | uint16 | runtime_hours | Runtime hours |
-| 4-5 | uint16 | runtime_minutes | Runtime minutes |
-| 6 | uint8 | end_runtime_mode | Relay mode for end of runtime |
-| 7 | uint8 | relay_pulse_time | Relay pulse duration (1-120 seconds) |
-| 8 | uint8 | config_flags | Bit flags for system options |
-| 9-15 | uint8[7] | reserved_time | Future timing config |
-| 16 | uint8 | contrast | LCD contrast (3-10) |
-| 17 | uint8 | brightness | LCD brightness (3-10) |
-| 18-19 | uint16 | power_fail_delay | Power fail delay (seconds) |
-| 20 | uint8 | power_failure_flag | 1=power failure occurred |
-| 21 | uint8 | active_stop_code | Latched stop code (persists across power cycles) |
-| 22-31 | uint8[10] | reserved_display | Future display config |
-| 32 | uint8 | dig2_enable | DIG2: 0=Disabled, 1=Enabled |
-| 33 | uint8 | dig2_fault_polarity | DIG2: 0=Fault Low, 1=Fault High |
-| 34 | uint8 | dig2_relay_mode | DIG2: 0=Latch, 1=Pulse |
-| 35 | uint8 | dig3_enable | DIG3: 0=Disabled, 1=Enabled |
-| 36 | uint8 | dig3_fault_polarity | DIG3: 0=Fault Low, 1=Fault High |
-| 37 | uint8 | dig3_relay_mode | DIG3: 0=Latch, 1=Pulse |
-| 38 | uint8 | dig4_enable | DIG4: 0=Disabled, 1=Enabled |
-| 39 | uint8 | dig4_fault_polarity | DIG4: 0=Fault Low, 1=Fault High |
-| 40 | uint8 | dig4_relay_mode | DIG4: 0=Latch, 1=Pulse |
-| 41-47 | uint8[7] | reserved_digital | Future digital config |
-| 48-49 | uint16 | log_entries | Number of log entries |
-| 50-63 | uint8[14] | reserved_log | Future logging config |
-| 64-127 | uint8[64] | padding | Expansion space |
+| Offset | Type      | Field               | Description                                      |
+| ------ | --------- | ------------------- | ------------------------------------------------ |
+| 0      | uint8     | clock_enabled       | 0=Disabled (count up), 1=Enabled (countdown)     |
+| 1      | uint8     | menu_timeout        | Menu timeout (seconds)                           |
+| 2-3    | uint16    | runtime_hours       | Runtime hours                                    |
+| 4-5    | uint16    | runtime_minutes     | Runtime minutes                                  |
+| 6      | uint8     | end_runtime_mode    | Relay mode for end of runtime                    |
+| 7      | uint8     | relay_pulse_time    | Relay pulse duration (1-120 seconds)             |
+| 8      | uint8     | config_flags        | Bit flags for system options                     |
+| 9-15   | uint8[7]  | reserved_time       | Future timing config                             |
+| 16     | uint8     | contrast            | LCD contrast (3-10)                              |
+| 17     | uint8     | brightness          | LCD brightness (3-10)                            |
+| 18-19  | uint16    | power_fail_delay    | Power fail delay (seconds)                       |
+| 20     | uint8     | power_failure_flag  | 1=power failure occurred                         |
+| 21     | uint8     | active_stop_code    | Latched stop code (persists across power cycles) |
+| 22-31  | uint8[10] | reserved_display    | Future display config                            |
+| 32     | uint8     | dig2_enable         | DIG2: 0=Disabled, 1=Enabled                      |
+| 33     | uint8     | dig2_fault_polarity | DIG2: 0=Fault Low, 1=Fault High                  |
+| 34     | uint8     | dig2_relay_mode     | DIG2: 0=Latch, 1=Pulse                           |
+| 35     | uint8     | dig3_enable         | DIG3: 0=Disabled, 1=Enabled                      |
+| 36     | uint8     | dig3_fault_polarity | DIG3: 0=Fault Low, 1=Fault High                  |
+| 37     | uint8     | dig3_relay_mode     | DIG3: 0=Latch, 1=Pulse                           |
+| 38     | uint8     | dig4_enable         | DIG4: 0=Disabled, 1=Enabled                      |
+| 39     | uint8     | dig4_fault_polarity | DIG4: 0=Fault Low, 1=Fault High                  |
+| 40     | uint8     | dig4_relay_mode     | DIG4: 0=Latch, 1=Pulse                           |
+| 41-47  | uint8[7]  | reserved_digital    | Future digital config                            |
+| 48-49  | uint16    | log_entries         | Number of log entries                            |
+| 50-63  | uint8[14] | reserved_log        | Future logging config                            |
+| 64-127 | uint8[64] | padding             | Expansion space                                  |
 
 ### Factory Defaults
 
@@ -365,7 +380,7 @@ Units are stored in `input_config.units` and displayed on the main screen alongs
 
 ```
 MAIN SCREEN (current_menu = 255)
-  Line 1: STOP HH:MM  or  RUN HH:MM
+  Line 1: "STOP" left / msg right  or  "RUN" left / HH:MM:SS right
   Line 2: val units    (Input 1, left-justified)
   Line 3: val units    (Input 2, left-justified)
   Line 4: val units    (Input 3, left-justified)
@@ -417,13 +432,14 @@ CLOCK CONFIG (current_menu = 3, from SETUP > Clock)
   └─ EXIT    → Main screen
 
 UTILITY (current_menu = 4, from OPTIONS > Utility Menu)
-  ├─ Set Clock / View Log / Clear Log / Log Entries
+  ├─ View Log / Clear Log / Log Entries
   ├─ Menu T/O / Pwr Detect / Brightness / Rly Pulse
   ├─ Back    → OPTIONS
   └─ EXIT    → Main screen
 ```
 
 ### Menu Behavior
+
 - **Navigation:** All sub-menus have "Back" (return to parent) and "EXIT" (return to main screen). Long press on encoder exits to main screen from any menu.
 - **Button beep:** Single 50ms beep on every button press, handled by the encoder ISR. No additional beeps from menu code — consistent across all actions.
 - **Menu titles:** Consistent `======` style format, 20 chars wide (e.g. `====== CLOCK =======`).
@@ -433,18 +449,21 @@ UTILITY (current_menu = 4, from OPTIONS > Utility Menu)
 - **4Hz flash:** All field types (numeric, time, option) flash at ~4Hz when being edited via `blink_state` toggling in `draw_menu_line()`.
 - **Encoder acceleration:** Steps by 20 when encoder pulses are <112ms apart, otherwise steps by 1.
 - **Timing architecture:** 1-second tick from DS3231 RTC 1Hz SQW output via INT0/RB0 interrupt (`rtc_tick_flag`). Sub-second 50ms tick from Timer0 1ms ISR counter (`subtick_flag`). Main loop runs continuously without blocking delay.
-- **End Run display:** When runtime expires, line 1 shows "STOP End Run HH:MM" with "End Run" flashing at ~4Hz. Alarm buzzer sounds before relay action. Display is consistent whether run input has dropped or not.
+- **Main screen line 1 format:** State word ("RUN"/"STOP") left-justified, status message right-justified. Messages: "End RunTime" (runtime expired, flashes ~4Hz), "Pwr Fail", "Ext Stop". Runtime countdown "HH:MM:SS" right-justified when clock enabled. RTC used for 1Hz tick only (no date/time display).
+- **LEDs:** Power LED solid on (flashes 2Hz during power fail). Signal LED on solid when DIG_IN1 (run signal) is high, off when low. Fault LED (RA5) flashes 2Hz when relay de-energised, off when energised.
 
 ---
 
 ## Session Checklist
 
 ### Starting a Session
+
 1. Pull latest from remote: `git pull`
 2. Note current BUILD_VERSION for each board
 3. Review recent commits for context
 
 ### Ending a Session
+
 1. Verify both boards compile
 2. Increment BUILD_VERSION if changes were significant
 3. Update changelog in this file
@@ -457,6 +476,7 @@ UTILITY (current_menu = 4, from OPTIONS > Utility Menu)
 ## Build Notes
 
 ### XC8 Compiler Invocation
+
 When running the XC8 compiler from Claude Code, **use PowerShell, not cmd.exe**. The `cmd /c` approach produces no stdout/stderr output, making it impossible to see compilation errors or warnings. Use:
 
 ```powershell

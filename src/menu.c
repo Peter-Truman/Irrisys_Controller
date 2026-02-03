@@ -10,6 +10,7 @@
 #include "../include/eeprom.h"
 #include "../include/rtc.h"
 #include "../include/lcd.h"
+#include "../include/eventlog.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -17,6 +18,9 @@
 // Menu state
 menu_state_t menu;
 static char original_value[10];
+
+// Log viewer state
+static uint16_t log_view_top = 0;  // Top visible entry (display index, 0=newest)
 
 // Option field edit flags
 uint8_t enable_edit_flag = 1;
@@ -951,12 +955,60 @@ void menu_draw_digital(void)
     }
 }
 
+void menu_draw_log_view(void)
+{
+    uint16_t count = eventlog_count();
+    char line_buf[21];
+
+    if (count == 0)
+    {
+        lcd_print_at(0, 0, "====== LOG =========");
+        lcd_print_at(1, 0, "                    ");
+        lcd_print_at(2, 0, "    (no entries)    ");
+        lcd_print_at(3, 0, "                    ");
+        return;
+    }
+
+    sprintf(line_buf, "== LOG %3u entries =", count);
+    lcd_print_at(0, 0, line_buf);
+
+    for (uint8_t row = 0; row < 3; row++)
+    {
+        uint16_t idx = log_view_top + row;
+        if (idx < count)
+        {
+            uint8_t code = eventlog_read(idx);
+            const char *reason = eventlog_reason_str(code);
+            sprintf(line_buf, "%3u: %-16s", idx + 1, reason);
+        }
+        else
+        {
+            sprintf(line_buf, "                    ");
+        }
+        lcd_print_at(row + 1, 0, line_buf);
+    }
+}
+
 //=============================================================================
 // ENCODER HANDLING
 //=============================================================================
 
 void menu_handle_encoder(int16_t delta)
 {
+    if (current_menu == 7) // Log viewer
+    {
+        uint16_t count = eventlog_count();
+        if (count == 0) return;
+
+        int32_t new_top = (int32_t)log_view_top + delta;
+        if (new_top < 0) new_top = 0;
+        // Allow scrolling until last entry visible on bottom row
+        uint16_t max_top = (count > 3) ? count - 3 : 0;
+        if ((uint16_t)new_top > max_top) new_top = max_top;
+        log_view_top = (uint16_t)new_top;
+        return;
+    }
+
     if (menu.in_edit_mode)
     {
         // In edit mode, handle value changes
@@ -1531,6 +1583,14 @@ void menu_handle_button(uint8_t press_type)
         return;
     }
 
+    // Short press in log viewer = return to utility menu
+    if (current_menu == 7)
+    {
+        current_menu = 4;
+        rebuild_utility_menu();
+        return;
+    }
+
     // Short press
     if (menu.in_edit_mode)
     {
@@ -1872,13 +1932,14 @@ void menu_handle_button(uint8_t press_type)
 
         if (line == 0) // View Log
         {
-
+            current_menu = 7;
+            log_view_top = 0;
             break;
         }
 
         if (line == 1) // Clear Log
         {
-
+            eventlog_clear();
             break;
         }
 
