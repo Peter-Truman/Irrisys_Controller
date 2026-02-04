@@ -37,6 +37,12 @@ typedef struct
     int16_t whole_edit_value;     // Current value being edited
     int16_t whole_edit_min;       // Min clamp
     int16_t whole_edit_max;       // Max clamp
+    // Name editor state
+    uint8_t name_edit_mode;       // 0=off, 1=editing name, 2=editing units
+    uint8_t name_edit_pos;        // Current cursor position (0-10 for name, 0-2 for units)
+    uint8_t name_char_index;      // Current char in charset (0-96: ASCII 32-126 + Back + Done)
+    char name_buffer[12];         // Working buffer (11 chars + null)
+    char units_buffer[4];         // Working buffer (3 chars + null)
 } menu_state_t;
 
 // Field detection functions
@@ -97,6 +103,11 @@ void lcd_print_at(uint8_t row, uint8_t col, const char *str);
 void lcd_clear_line(uint8_t row);
 void init_time_editor(uint16_t value_seconds, uint8_t mode);
 void menu_update_time_value(void);
+
+// Name editor functions
+void init_name_editor(uint8_t mode, const char *initial);  // mode: 1=name, 2=units
+void handle_name_rotation(int8_t delta);
+uint8_t handle_name_button(void);  // Returns: 0=still editing, 1=done, 2=cancelled
 
 // Helper function to get the edit flag pointer for current field
 uint8_t *get_option_edit_flag(uint8_t line, uint8_t sensor_type, uint8_t flow_type);

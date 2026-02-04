@@ -68,8 +68,18 @@ uint8_t current_digital_input = 0; // legacy
 #define FT_SEC_BP        17  // Digital: secondary fault bypass
 #define FT_RLY_PRI_FAULT 18  // Digital: primary fault relay
 #define FT_RLY_SEC_FAULT 19  // Digital: secondary fault relay
+#define FT_NAME          20  // Custom name field (Other 4-20, Other Switch)
+#define FT_CUSTOM_UNITS  21  // Custom units field (Other 4-20 only)
 #define FT_BACK          98
 #define FT_EXIT          99
+
+// Character set for name editor: ASCII 32 (space) to 126 (~), then Back, then Done
+#define CHARSET_START   32
+#define CHARSET_END     126
+#define CHARSET_SIZE    (CHARSET_END - CHARSET_START + 1)  // 95 printable chars
+#define BACK_INDEX      CHARSET_SIZE       // 95 = "Back" option
+#define DONE_INDEX      (CHARSET_SIZE + 1) // 96 = "Done" option
+#define TOTAL_CHAR_OPTIONS (CHARSET_SIZE + 2)  // 97 total options
 
 static uint8_t input_field_tags[20]; // Tag for each line in input_menu
 
@@ -165,6 +175,24 @@ static char value_rly_sec_lo[10] = "Latch";
 static char value_units[10] = "psi";
 static char value_fault_pol[10] = "Fault Lo";
 static char value_back[5] = "Back";
+static char value_custom_name[12] = "";      // For "Other" sensor types
+static char value_custom_units[5] = "";      // For "Other 4-20" type
+
+// Saved state for name editor cancel/restore
+static char saved_name[16] = "";             // Original name before name editor
+static char saved_units[8] = "";             // Original units before name editor
+static uint8_t saved_sensor_type = 0;        // Original sensor type (for auto-open cancel)
+static uint8_t name_editor_auto_opened = 0;  // Flag: 1 if auto-opened after sensor change
+
+// Dynamic bypass labels for custom names (types 4 and 5)
+static char custom_bp_phi[8] = "";   // Primary high bypass label
+static char custom_bp_shi[8] = "";   // Secondary high bypass label
+static char custom_bp_plo[8] = "";   // Primary low bypass label
+static char custom_bp_slo[8] = "";   // Secondary low bypass label
+static char custom_rly_phi[12] = ""; // Relay primary high label
+static char custom_rly_shi[12] = ""; // Relay secondary high label
+static char custom_rly_plo[12] = ""; // Relay primary low label
+static char custom_rly_slo[12] = ""; // Relay secondary low label
 
 // Clock menu value buffers
 static char value_clock_enable[10] = "Enabled";
@@ -255,6 +283,7 @@ void menu_draw_utility(void);
 void menu_draw_main_menu(void);
 void menu_draw_digital(void);
 void rebuild_main_menu(void);
+static void draw_name_editor(void);
 
 
 //=============================================================================
@@ -478,6 +507,41 @@ static const char *lbl_rly_shi[6] = {"Rly SHPBP",   "Rly SHTBP",  "Rly SHFBP",  
 static const char *lbl_rly_plo[6] = {"Rly PLPBP",   "Rly PLTBP",  "Rly PLFBP",  "Rly PNFBP",  "Rly PLVBP",  "Rly PNABP"};
 static const char *lbl_rly_slo[6] = {"Rly SLPBP",   "Rly SLTBP",  "Rly SLFBP",  "Rly SNFBP",  "Rly SLVBP",  "Rly SNABP"};
 
+// Generate custom bypass labels from name (first 2 uppercase chars)
+// Format: P/S + XX + H/L + BP (e.g., "TANK" -> PTAHBP, STAHBP, PTALBP, STALBP)
+static void generate_custom_bp_labels(const char *name)
+{
+    char c1 = 'X', c2 = 'X';
+
+    // Get first 2 uppercase alpha chars from name
+    uint8_t found = 0;
+    for (uint8_t i = 0; name[i] && found < 2; i++)
+    {
+        char c = name[i];
+        // Convert to uppercase
+        if (c >= 'a' && c <= 'z') c -= 32;
+        // Only use alpha characters
+        if (c >= 'A' && c <= 'Z')
+        {
+            if (found == 0) c1 = c;
+            else c2 = c;
+            found++;
+        }
+    }
+
+    // Generate bypass labels: P/S + XX + H/L + BP
+    sprintf(custom_bp_phi, "P%c%cHBP", c1, c2);
+    sprintf(custom_bp_shi, "S%c%cHBP", c1, c2);
+    sprintf(custom_bp_plo, "P%c%cLBP", c1, c2);
+    sprintf(custom_bp_slo, "S%c%cLBP", c1, c2);
+
+    // Generate relay labels
+    sprintf(custom_rly_phi, "Rly P%c%cHBP", c1, c2);
+    sprintf(custom_rly_shi, "Rly S%c%cHBP", c1, c2);
+    sprintf(custom_rly_plo, "Rly P%c%cLBP", c1, c2);
+    sprintf(custom_rly_slo, "Rly S%c%cLBP", c1, c2);
+}
+
 void rebuild_input_menu(void)
 {
     uint8_t idx = current_input;
@@ -491,37 +555,30 @@ void rebuild_input_menu(void)
     enable_edit_flag = input_config[idx].enable;
     sensor_edit_flag = st;
     strcpy(value_enable, enable_edit_flag ? "Enabled" : "Disabled");
-    strcpy(value_sensor, sensor_names[st]);
+
+    // For "Other" types with custom name, show the name; otherwise show sensor type
+    if ((st == 4 || st == 5) && input_config[idx].name[0] != '\0')
+    {
+        strncpy(value_sensor, input_config[idx].name, 11);
+        value_sensor[11] = '\0';
+    }
+    else
+    {
+        strcpy(value_sensor, sensor_names[st]);
+    }
 
     n = add_menu_item(n, "Enable", value_enable, 1, FT_ENABLE);
     n = add_menu_item(n, "Sensor", value_sensor, 1, FT_SENSOR);
 
+    // Generate custom bypass labels from name
+    generate_custom_bp_labels(input_config[idx].name);
+
     if (is_analog_type(st))
     {
-        // --- ANALOG menu (16 items) ---
-        // Units — find matching index in sensor-specific options
-        {
-            const item_options_t *uopts = NULL;
-            switch (st)
-            {
-            case 0: uopts = &menu_item_options[OPT_UNITS_PRESS]; break;
-            case 1: uopts = &menu_item_options[OPT_UNITS_TEMP]; break;
-            case 2: uopts = &menu_item_options[OPT_UNITS_FLOW]; break;
-            case 4: uopts = &menu_item_options[OPT_UNITS_OTHER]; break;
-            default: uopts = &menu_item_options[OPT_UNITS_OTHER]; break;
-            }
-            flow_units_edit_flag = 0; // Default to first option
-            for (uint8_t u = 0; u < uopts->option_count; u++)
-            {
-                if (strcmp(input_config[idx].units, uopts->options[u]) == 0)
-                {
-                    flow_units_edit_flag = u;
-                    break;
-                }
-            }
-            strcpy(value_units, uopts->options[flow_units_edit_flag]);
-        }
-        n = add_menu_item(n, "Units", value_units, 1, FT_UNITS);
+        // --- ANALOG menu - Units are customizable via name editor
+        strncpy(value_custom_units, input_config[idx].units, 3);
+        value_custom_units[3] = '\0';
+        n = add_menu_item(n, "Units", value_custom_units, 1, FT_CUSTOM_UNITS);
 
         // Scale 4mA
         {
@@ -543,17 +600,27 @@ void rebuild_input_menu(void)
         sprintf(value_high_sp, "%03d", input_config[idx].high_setpoint);
         n = add_menu_item(n, lbl_high[st], value_high_sp, 1, FT_HI_LIMIT);
 
+        // Use custom labels for type 4 (Other 4-20), or default labels for others
+        const char *bp_phi = (st == 4) ? custom_bp_phi : lbl_phi_bp[st];
+        const char *bp_shi = (st == 4) ? custom_bp_shi : lbl_shi_bp[st];
+        const char *bp_plo = (st == 4) ? custom_bp_plo : lbl_plo_bp[st];
+        const char *bp_slo = (st == 4) ? custom_bp_slo : lbl_slo_bp[st];
+        const char *rly_phi = (st == 4) ? custom_rly_phi : lbl_rly_phi[st];
+        const char *rly_shi = (st == 4) ? custom_rly_shi : lbl_rly_shi[st];
+        const char *rly_plo = (st == 4) ? custom_rly_plo : lbl_rly_plo[st];
+        const char *rly_slo = (st == 4) ? custom_rly_slo : lbl_rly_slo[st];
+
         // Primary high bypass
         sprintf(value_pri_high_bp, "%02u:%02u",
                 input_config[idx].primary_high_bypass / 60,
                 input_config[idx].primary_high_bypass % 60);
-        n = add_menu_item(n, lbl_phi_bp[st], value_pri_high_bp, 1, FT_PRI_HI_BP);
+        n = add_menu_item(n, bp_phi, value_pri_high_bp, 1, FT_PRI_HI_BP);
 
         // Secondary high bypass
         sprintf(value_sec_high_bp, "%02u:%02u",
                 input_config[idx].secondary_high_bypass / 60,
                 input_config[idx].secondary_high_bypass % 60);
-        n = add_menu_item(n, lbl_shi_bp[st], value_sec_high_bp, 1, FT_SEC_HI_BP);
+        n = add_menu_item(n, bp_shi, value_sec_high_bp, 1, FT_SEC_HI_BP);
 
         // Low setpoint
         sprintf(value_low_sp, "%03d", input_config[idx].low_setpoint);
@@ -563,13 +630,13 @@ void rebuild_input_menu(void)
         sprintf(value_pri_low_bp, "%02u:%02u",
                 input_config[idx].primary_low_bypass / 60,
                 input_config[idx].primary_low_bypass % 60);
-        n = add_menu_item(n, lbl_plo_bp[st], value_pri_low_bp, 1, FT_PRI_LO_BP);
+        n = add_menu_item(n, bp_plo, value_pri_low_bp, 1, FT_PRI_LO_BP);
 
         // Secondary low bypass
         sprintf(value_sec_low_bp, "%02u:%02u",
                 input_config[idx].secondary_low_bypass / 60,
                 input_config[idx].secondary_low_bypass % 60);
-        n = add_menu_item(n, lbl_slo_bp[st], value_sec_low_bp, 1, FT_SEC_LO_BP);
+        n = add_menu_item(n, bp_slo, value_sec_low_bp, 1, FT_SEC_LO_BP);
 
         // Relay modes (4 relays for analog)
         relay_high_edit_flag = input_config[idx].relay_pri_high_mode;
@@ -582,14 +649,24 @@ void rebuild_input_menu(void)
         strcpy(value_rly_pri_lo, relay_low_edit_flag ? "Pulse" : "Latch");
         strcpy(value_rly_sec_lo, relay_sec_low_edit_flag ? "Pulse" : "Latch");
 
-        n = add_menu_item(n, lbl_rly_phi[st], value_rly_pri_hi, 1, FT_RLY_PRI_HI);
-        n = add_menu_item(n, lbl_rly_shi[st], value_rly_sec_hi, 1, FT_RLY_SEC_HI);
-        n = add_menu_item(n, lbl_rly_plo[st], value_rly_pri_lo, 1, FT_RLY_PRI_LO);
-        n = add_menu_item(n, lbl_rly_slo[st], value_rly_sec_lo, 1, FT_RLY_SEC_LO);
+        n = add_menu_item(n, rly_phi, value_rly_pri_hi, 1, FT_RLY_PRI_HI);
+        n = add_menu_item(n, rly_shi, value_rly_sec_hi, 1, FT_RLY_SEC_HI);
+        n = add_menu_item(n, rly_plo, value_rly_pri_lo, 1, FT_RLY_PRI_LO);
+        n = add_menu_item(n, rly_slo, value_rly_sec_lo, 1, FT_RLY_SEC_LO);
     }
     else
     {
         // --- DIGITAL/SWITCH menu (12 items) ---
+        // Use custom labels for type 5 (Other Switch), or default labels for Flow Switch
+        const char *bp_phi = (st == 5) ? custom_bp_phi : lbl_phi_bp[st];
+        const char *bp_shi = (st == 5) ? custom_bp_shi : lbl_shi_bp[st];
+        const char *bp_plo = (st == 5) ? custom_bp_plo : lbl_plo_bp[st];
+        const char *bp_slo = (st == 5) ? custom_bp_slo : lbl_slo_bp[st];
+        const char *rly_phi = (st == 5) ? custom_rly_phi : lbl_rly_phi[st];
+        const char *rly_shi = (st == 5) ? custom_rly_shi : lbl_rly_shi[st];
+        const char *rly_plo = (st == 5) ? custom_rly_plo : lbl_rly_plo[st];
+        const char *rly_slo = (st == 5) ? custom_rly_slo : lbl_rly_slo[st];
+
         // Polarity: Flow (High/Low) or Aux (High/Low)
         fault_polarity_edit_flag = input_config[idx].fault_polarity;
         strcpy(value_fault_pol, fault_polarity_edit_flag ? "High" : "Low");
@@ -599,22 +676,22 @@ void rebuild_input_menu(void)
         sprintf(value_pri_high_bp, "%02u:%02u",
                 input_config[idx].primary_high_bypass / 60,
                 input_config[idx].primary_high_bypass % 60);
-        n = add_menu_item(n, lbl_phi_bp[st], value_pri_high_bp, 1, FT_PRI_HI_BP);
+        n = add_menu_item(n, bp_phi, value_pri_high_bp, 1, FT_PRI_HI_BP);
 
         sprintf(value_sec_high_bp, "%02u:%02u",
                 input_config[idx].secondary_high_bypass / 60,
                 input_config[idx].secondary_high_bypass % 60);
-        n = add_menu_item(n, lbl_shi_bp[st], value_sec_high_bp, 1, FT_SEC_HI_BP);
+        n = add_menu_item(n, bp_shi, value_sec_high_bp, 1, FT_SEC_HI_BP);
 
         sprintf(value_pri_low_bp, "%02u:%02u",
                 input_config[idx].primary_low_bypass / 60,
                 input_config[idx].primary_low_bypass % 60);
-        n = add_menu_item(n, lbl_plo_bp[st], value_pri_low_bp, 1, FT_PRI_LO_BP);
+        n = add_menu_item(n, bp_plo, value_pri_low_bp, 1, FT_PRI_LO_BP);
 
         sprintf(value_sec_low_bp, "%02u:%02u",
                 input_config[idx].secondary_low_bypass / 60,
                 input_config[idx].secondary_low_bypass % 60);
-        n = add_menu_item(n, lbl_slo_bp[st], value_sec_low_bp, 1, FT_SEC_LO_BP);
+        n = add_menu_item(n, bp_slo, value_sec_low_bp, 1, FT_SEC_LO_BP);
 
         // 4 relay modes
         relay_high_edit_flag = input_config[idx].relay_pri_high_mode;
@@ -627,10 +704,10 @@ void rebuild_input_menu(void)
         strcpy(value_rly_pri_lo, relay_low_edit_flag ? "Pulse" : "Latch");
         strcpy(value_rly_sec_lo, relay_sec_low_edit_flag ? "Pulse" : "Latch");
 
-        n = add_menu_item(n, lbl_rly_phi[st], value_rly_pri_hi, 1, FT_RLY_PRI_HI);
-        n = add_menu_item(n, lbl_rly_shi[st], value_rly_sec_hi, 1, FT_RLY_SEC_HI);
-        n = add_menu_item(n, lbl_rly_plo[st], value_rly_pri_lo, 1, FT_RLY_PRI_LO);
-        n = add_menu_item(n, lbl_rly_slo[st], value_rly_sec_lo, 1, FT_RLY_SEC_LO);
+        n = add_menu_item(n, rly_phi, value_rly_pri_hi, 1, FT_RLY_PRI_HI);
+        n = add_menu_item(n, rly_shi, value_rly_sec_hi, 1, FT_RLY_SEC_HI);
+        n = add_menu_item(n, rly_plo, value_rly_pri_lo, 1, FT_RLY_PRI_LO);
+        n = add_menu_item(n, rly_slo, value_rly_sec_lo, 1, FT_RLY_SEC_LO);
     }
 
     // Back / EXIT
@@ -794,15 +871,32 @@ void menu_draw_options(void)
 
 void menu_draw_input(void)
 {
+    // If in name editor mode, draw the editor instead
+    if (menu.name_edit_mode > 0)
+    {
+        draw_name_editor();
+        return;
+    }
+
     // Title shows sensor name for this input
     char title[21];
     char upper_name[16];
+    upper_name[0] = '\0';  // Initialize in case name is empty
     // Convert name to uppercase for title
     const char *src = input_config[current_input].name;
     for (uint8_t i = 0; i < 15 && src[i]; i++)
     {
         upper_name[i] = (src[i] >= 'a' && src[i] <= 'z') ? src[i] - 32 : src[i];
         upper_name[i + 1] = '\0';
+    }
+    // If name is empty, use sensor type name instead
+    if (upper_name[0] == '\0')
+    {
+        static const char *type_names[] = {"PRESSURE", "TEMPERATURE", "FLOW METER", "FLOW SWITCH", "OTHER 4-20", "OTHER SWITCH"};
+        uint8_t st = input_config[current_input].sensor_type;
+        if (st > 5) st = 0;
+        strncpy(upper_name, type_names[st], 12);
+        upper_name[12] = '\0';
     }
     sprintf(title, "===== %-12s==", upper_name);
     lcd_print_at(0, 0, title);
@@ -1006,6 +1100,13 @@ void menu_handle_encoder(int16_t delta)
         uint16_t max_top = (count > 3) ? count - 3 : 0;
         if ((uint16_t)new_top > max_top) new_top = max_top;
         log_view_top = (uint16_t)new_top;
+        return;
+    }
+
+    // Name editor mode
+    if (menu.name_edit_mode > 0)
+    {
+        handle_name_rotation((int8_t)delta);
         return;
     }
 
@@ -1231,6 +1332,219 @@ void handle_time_rotation(int8_t direction)
     menu_update_time_value();
 }
 
+//=============================================================================
+// NAME EDITOR
+//=============================================================================
+
+// Get display character at charset index
+static char get_char_at_index(uint8_t index)
+{
+    if (index < CHARSET_SIZE)
+        return (char)(CHARSET_START + index);
+    return ' ';  // Back/Done are not single chars
+}
+
+// Check if index is a special option
+static uint8_t is_special_index(uint8_t index)
+{
+    if (index == BACK_INDEX) return 1;  // Back
+    if (index == DONE_INDEX) return 2;  // Done
+    return 0;  // Regular character
+}
+
+// Find charset index for a character
+static uint8_t char_to_index(char c)
+{
+    if (c >= CHARSET_START && c <= CHARSET_END)
+        return (uint8_t)(c - CHARSET_START);
+    return 33;  // Default to 'A' (index 33 = ASCII 65)
+}
+
+void init_name_editor(uint8_t mode, const char *initial)
+{
+    menu.name_edit_mode = mode;
+    menu.name_edit_pos = 0;
+    menu.name_char_index = 33;  // Start at 'A'
+
+    if (mode == 1)  // Name editing (10 chars max)
+    {
+        memset(menu.name_buffer, 0, 11);
+        if (initial && initial[0])
+        {
+            strncpy(menu.name_buffer, initial, 10);
+            menu.name_buffer[10] = '\0';
+            // Position cursor at end of existing text
+            uint8_t len = strlen(menu.name_buffer);
+            if (len > 0 && len < 10)
+            {
+                menu.name_edit_pos = len;
+                menu.name_char_index = 33;  // Start at 'A' for new char
+            }
+            else if (len > 0)
+            {
+                // Buffer full, position at last char
+                menu.name_edit_pos = len - 1;
+                menu.name_char_index = char_to_index(menu.name_buffer[menu.name_edit_pos]);
+            }
+        }
+    }
+    else if (mode == 2)  // Units editing (3 chars max)
+    {
+        memset(menu.units_buffer, 0, 4);
+        if (initial && initial[0])
+        {
+            strncpy(menu.units_buffer, initial, 3);
+            menu.units_buffer[3] = '\0';
+            uint8_t len = strlen(menu.units_buffer);
+            if (len > 0 && len < 3)
+            {
+                menu.name_edit_pos = len;
+                menu.name_char_index = 33;
+            }
+            else if (len > 0)
+            {
+                menu.name_edit_pos = len - 1;
+                menu.name_char_index = char_to_index(menu.units_buffer[menu.name_edit_pos]);
+            }
+        }
+    }
+
+    menu.in_edit_mode = 1;
+}
+
+void handle_name_rotation(int8_t delta)
+{
+    // If currently on Done or Back, rotating resets to 'A'
+    if (menu.name_char_index >= BACK_INDEX)
+    {
+        menu.name_char_index = 33;  // 'A'
+        return;
+    }
+
+    // Cycle through charset with wrapping
+    int16_t new_index = (int16_t)menu.name_char_index + delta;
+
+    if (new_index < 0)
+        new_index = TOTAL_CHAR_OPTIONS - 1;
+    else if (new_index >= TOTAL_CHAR_OPTIONS)
+        new_index = 0;
+
+    menu.name_char_index = (uint8_t)new_index;
+}
+
+// Handle button press in name editor
+// Returns: 0=still editing, 1=done, 2=cancelled (Back at pos 0)
+uint8_t handle_name_button(void)
+{
+    uint8_t special = is_special_index(menu.name_char_index);
+    uint8_t max_pos = (menu.name_edit_mode == 1) ? 10 : 2;  // 11 chars or 3 chars
+    char *buffer = (menu.name_edit_mode == 1) ? menu.name_buffer : menu.units_buffer;
+
+    if (special == 2)  // Done
+    {
+        // Null-terminate at current position
+        buffer[menu.name_edit_pos] = '\0';
+        return 1;  // Done
+    }
+
+    if (special == 1)  // Back
+    {
+        if (menu.name_edit_pos == 0)
+        {
+            // Back at position 0 = cancel
+            return 2;  // Cancelled
+        }
+        // Erase last char and move back
+        menu.name_edit_pos--;
+        buffer[menu.name_edit_pos] = '\0';
+        // Set char index to the previous char if any, otherwise 'A'
+        if (menu.name_edit_pos > 0)
+            menu.name_char_index = char_to_index(buffer[menu.name_edit_pos - 1]);
+        else
+            menu.name_char_index = 33;  // 'A'
+        return 0;  // Still editing
+    }
+
+    // Regular character - insert at current position
+    buffer[menu.name_edit_pos] = get_char_at_index(menu.name_char_index);
+    buffer[menu.name_edit_pos + 1] = '\0';
+
+    if (menu.name_edit_pos >= max_pos)
+    {
+        // Buffer full - auto-complete
+        return 1;  // Done
+    }
+
+    // Advance to next position
+    menu.name_edit_pos++;
+    menu.name_char_index = DONE_INDEX;  // Jump to Done for quick access
+
+    return 0;  // Still editing
+}
+
+// Draw the name editor screen
+static void draw_name_editor(void)
+{
+    char line_buf[21];
+    char *buffer = (menu.name_edit_mode == 1) ? menu.name_buffer : menu.units_buffer;
+    uint8_t max_len = (menu.name_edit_mode == 1) ? 11 : 3;
+    const char *title = (menu.name_edit_mode == 1) ? "===== NAME =========" : "===== UNITS ========";
+
+    lcd_print_at(0, 0, title);
+
+    uint8_t special = is_special_index(menu.name_char_index);
+
+    if (special == 0)
+    {
+        // Editing a character - show buffer with current char (no cursor)
+        memset(line_buf, ' ', 20);
+        line_buf[20] = '\0';
+
+        // Copy existing chars
+        for (uint8_t i = 0; i < menu.name_edit_pos && i < max_len; i++)
+        {
+            line_buf[i] = buffer[i];
+        }
+
+        // Show current char at edit position
+        line_buf[menu.name_edit_pos] = get_char_at_index(menu.name_char_index);
+
+        lcd_print_at(1, 0, line_buf);
+        lcd_print_at(2, 0, "< Short=OK Long=X   ");
+        lcd_print_at(3, 0, "                    ");
+    }
+    else
+    {
+        // On Back or Done - show complete buffer and flashing option
+        memset(line_buf, ' ', 20);
+        line_buf[20] = '\0';
+
+        // Show buffer content
+        uint8_t len = strlen(buffer);
+        for (uint8_t i = 0; i < len && i < max_len; i++)
+        {
+            line_buf[i] = buffer[i];
+        }
+
+        lcd_print_at(1, 0, line_buf);
+
+        // Show Back/Done on line 2 (flashing)
+        memset(line_buf, ' ', 20);
+        line_buf[20] = '\0';
+
+        if (menu.blink_state)
+        {
+            if (special == 1)
+                memcpy(&line_buf[7], "[Back]", 6);
+            else
+                memcpy(&line_buf[7], "[Done]", 6);
+        }
+
+        lcd_print_at(2, 0, line_buf);
+        lcd_print_at(3, 0, "                    ");
+    }
+}
+
 void menu_update_time_value(void)
 {
     char buf[6];
@@ -1382,14 +1696,21 @@ static void save_input_field(uint8_t line, uint8_t idx)
         break;
     case FT_SENSOR:
     {
+        // Save original state before changing (for cancel/restore)
+        saved_sensor_type = input_config[idx].sensor_type;
+        strncpy(saved_name, input_config[idx].name, 15);
+        saved_name[15] = '\0';
+        strncpy(saved_units, input_config[idx].units, 7);
+        saved_units[7] = '\0';
+
         input_config[idx].sensor_type = sensor_edit_flag;
         // Update name and units to defaults for this sensor type
         static const char *default_names[] = {
             "Pressure", "Temperature", "Flow Meter",
-            "Flow Switch", "Other 4-20mA", "Other Switch"
+            "Flow Switch", "Other 4-20", "Other Sw"
         };
         static const char *default_units[] = {
-            "psi", "\xDF""C", "%", "", "Value", ""
+            "psi", "\xDF""C", "%", "", "", ""  // Empty for digital types
         };
         if (sensor_edit_flag <= 5)
         {
@@ -1401,6 +1722,18 @@ static void save_input_field(uint8_t line, uint8_t idx)
         // Rebuild menu since analog/digital layout may change
         save_input_config(idx);
         rebuild_input_menu();
+
+        // For "Other" types, automatically open name editor with empty string
+        if (sensor_edit_flag == 4 || sensor_edit_flag == 5)
+        {
+            // Position cursor on the Name field (line 2)
+            menu.current_line = 2;
+            menu.top_line = 0;
+            // Mark as auto-opened so cancel can restore previous state
+            name_editor_auto_opened = 1;
+            // Open name editor with empty string
+            init_name_editor(1, "");
+        }
         return;
     }
     case FT_UNITS:
@@ -1452,6 +1785,22 @@ static void save_input_field(uint8_t line, uint8_t idx)
         break;
     case FT_FAULT_POL:
         input_config[idx].fault_polarity = fault_polarity_edit_flag;
+        break;
+    case FT_NAME:
+        // Copy name from edit buffer to config
+        strncpy(input_config[idx].name, menu.name_buffer, 15);
+        input_config[idx].name[15] = '\0';
+        // Update display buffer
+        strncpy(value_custom_name, menu.name_buffer, 11);
+        value_custom_name[11] = '\0';
+        break;
+    case FT_CUSTOM_UNITS:
+        // Copy units from edit buffer to config
+        strncpy(input_config[idx].units, menu.units_buffer, 7);
+        input_config[idx].units[7] = '\0';
+        // Update display buffer
+        strncpy(value_custom_units, menu.units_buffer, 3);
+        value_custom_units[3] = '\0';
         break;
     }
 
@@ -1578,6 +1927,19 @@ void menu_handle_button(uint8_t press_type)
 {
     if (press_type == 2) // Long press = back to main screen
     {
+        // If in name editor that was auto-opened, restore previous state
+        if (menu.name_edit_mode > 0 && name_editor_auto_opened)
+        {
+            input_config[current_input].sensor_type = saved_sensor_type;
+            strncpy(input_config[current_input].name, saved_name, 15);
+            input_config[current_input].name[15] = '\0';
+            strncpy(input_config[current_input].units, saved_units, 7);
+            input_config[current_input].units[7] = '\0';
+            save_input_config(current_input);
+            name_editor_auto_opened = 0;
+        }
+        menu.name_edit_mode = 0;
+        menu.in_edit_mode = 0;
         current_menu = 255;
         lcd_clear();
         return;
@@ -1588,6 +1950,69 @@ void menu_handle_button(uint8_t press_type)
     {
         current_menu = 4;
         rebuild_utility_menu();
+        return;
+    }
+
+    // Name editor mode
+    if (menu.name_edit_mode > 0)
+    {
+        uint8_t result = handle_name_button();
+        if (result == 1)  // Done
+        {
+            uint8_t was_name_edit = (menu.name_edit_mode == 1);
+            menu.name_edit_mode = 0;
+            menu.in_edit_mode = 0;
+            name_editor_auto_opened = 0;  // Clear auto-open flag on success
+
+            // Save to config
+            if (current_menu == 1)
+            {
+                if (was_name_edit)
+                {
+                    // Save name directly from buffer
+                    strncpy(input_config[current_input].name, menu.name_buffer, 15);
+                    input_config[current_input].name[15] = '\0';
+                }
+                else
+                {
+                    // Save units directly from buffer
+                    strncpy(input_config[current_input].units, menu.units_buffer, 7);
+                    input_config[current_input].units[7] = '\0';
+                }
+                save_input_config(current_input);
+                rebuild_input_menu();  // Refresh menu with new name
+            }
+
+            // Advance cursor to next item
+            if (menu.current_line + 1 < menu.total_items)
+            {
+                menu.current_line++;
+                if (menu.current_line >= menu.top_line + 3)
+                    menu.top_line = menu.current_line - 2;
+            }
+        }
+        else if (result == 2)  // Cancelled (Back at pos 0)
+        {
+            menu.name_edit_mode = 0;
+            menu.in_edit_mode = 0;
+
+            // If name editor was auto-opened after sensor change, restore previous state
+            if (name_editor_auto_opened && current_menu == 1)
+            {
+                input_config[current_input].sensor_type = saved_sensor_type;
+                strncpy(input_config[current_input].name, saved_name, 15);
+                input_config[current_input].name[15] = '\0';
+                strncpy(input_config[current_input].units, saved_units, 7);
+                input_config[current_input].units[7] = '\0';
+                save_input_config(current_input);
+                name_editor_auto_opened = 0;
+            }
+
+            // Rebuild menu with restored values
+            if (current_menu == 1)
+                rebuild_input_menu();
+        }
+        // result == 0: still editing, do nothing
         return;
     }
 
@@ -1781,6 +2206,20 @@ void menu_handle_button(uint8_t press_type)
         {
             current_menu = 255;
             lcd_clear();
+            break;
+        }
+
+        // Name field - enter name editor
+        if (tag == FT_NAME)
+        {
+            init_name_editor(1, input_config[current_input].name);
+            break;
+        }
+
+        // Custom units field - enter units editor
+        if (tag == FT_CUSTOM_UNITS)
+        {
+            init_name_editor(2, input_config[current_input].units);
             break;
         }
 

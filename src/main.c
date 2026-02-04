@@ -8,7 +8,7 @@
  *   - Hold >= 1000ms -> long beep (300ms), long press event, non-blocking
  */
 
-#define BUILD_VERSION 64  // Event log on M24M01 external EEPROM, View Log menu
+#define BUILD_VERSION 74  // Fix name/units saving after editor completes
 
 #include "../include/config.h"
 #include "../include/encoder.h"
