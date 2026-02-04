@@ -86,6 +86,10 @@ extern uint8_t end_runtime_edit_flag;
 extern uint8_t current_menu;
 extern uint8_t current_input;
 
+// Deferred EEPROM save flags (set in menu, saved after 1-second tick)
+extern uint8_t input_config_dirty[3];  // Per-input dirty flags
+extern uint8_t system_config_dirty;    // System config dirty flag
+
 // Function prototypes
 void menu_init(void);
 void menu_draw_options(void);

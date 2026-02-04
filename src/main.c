@@ -1,6 +1,10 @@
 /**
  * IRRISYS - Full System with Buffered LCD
- * PIC18F26K22 @ 32MHz (Ver_B_Rev_1)
+ * PIC18F26K22 @ 32MHz
+ *
+ * Version: Ver_B_Rev_0
+ *   - Ver_B = Hardware version (alphabetic, increments on pin/peripheral changes)
+ *   - Rev_0 = Firmware revision for this hardware version
  *
  * Button behavior:
  *   - Press -> immediate short beep (50ms)
@@ -8,7 +12,8 @@
  *   - Hold >= 1000ms -> long beep (300ms), long press event, non-blocking
  */
 
-#define BUILD_VERSION 75  // Scrolling main screen for bypass timer transitions
+#define HW_VERSION  'B'   // Hardware version (A, B, C, ...)
+#define FW_REVISION 0     // Firmware revision for this hardware
 
 #include "../include/config.h"
 #include "../include/encoder.h"
@@ -690,9 +695,9 @@ void main(void)
 
     uart_println("");
     uart_println("================================");
-    uart_println("IRRISYS Full System");
+    uart_println("IRRISYS Pump Protection");
     char buf[60];
-    sprintf(buf, "Build: %d", BUILD_VERSION);
+    sprintf(buf, "Ver_%c_Rev_%d", HW_VERSION, FW_REVISION);
     uart_println(buf);
     uart_println("================================");
 
@@ -738,14 +743,14 @@ void main(void)
     // Splash screen
     lcd_clear();
     lcd_set_cursor(0, 0);
-    lcd_print("    IRRISYS v1.0    ");
+    lcd_print("       IRRISYS      ");
     lcd_set_cursor(1, 0);
-    sprintf(buf, "   Mainboard v%d    ", BUILD_VERSION);
-    lcd_print(buf);
+    lcd_print("  Pump Protection   ");
     lcd_set_cursor(2, 0);
     lcd_print("                    ");
     lcd_set_cursor(3, 0);
-    lcd_print("  Pump Protection   ");
+    sprintf(buf, "    Ver_%c_Rev_%d    ", HW_VERSION, FW_REVISION);
+    lcd_print(buf);
     lcd_flush();
 
     // Startup beeps
@@ -1263,6 +1268,24 @@ void main(void)
                                        bp_state[i].low.phase == BP_ALARM);
                 }
             }
+        }
+
+        // =============================================================
+        // Deferred EEPROM saves (after RTC tick processing completes)
+        // This ensures bypass timer processing is never blocked by EEPROM writes
+        // =============================================================
+        for (uint8_t i = 0; i < 3; i++)
+        {
+            if (input_config_dirty[i])
+            {
+                save_input_config(i);
+                input_config_dirty[i] = 0;
+            }
+        }
+        if (system_config_dirty)
+        {
+            save_system_config();
+            system_config_dirty = 0;
         }
 
         // =============================================================

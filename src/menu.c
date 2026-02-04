@@ -47,6 +47,10 @@ uint8_t current_menu = 0;
 uint8_t current_input = 0;
 uint8_t current_digital_input = 0; // legacy
 
+// Deferred EEPROM save flags (set here, saved in main.c after 1-second tick)
+uint8_t input_config_dirty[3] = {0, 0, 0};
+uint8_t system_config_dirty = 0;
+
 // Field tag system — each line in input_menu has a tag identifying what it represents
 #define FT_ENABLE       0
 #define FT_SENSOR       1
@@ -1720,7 +1724,7 @@ static void save_input_field(uint8_t line, uint8_t idx)
             input_config[idx].units[7] = '\0';
         }
         // Rebuild menu since analog/digital layout may change
-        save_input_config(idx);
+        input_config_dirty[idx] = 1;  // Defer EEPROM write to after 1-second tick
         rebuild_input_menu();
 
         // For "Other" types, automatically open name editor with empty string
@@ -1805,7 +1809,7 @@ static void save_input_field(uint8_t line, uint8_t idx)
     }
 
     // Write to EEPROM immediately
-    save_input_config(idx);
+    input_config_dirty[idx] = 1;  // Defer EEPROM write to after 1-second tick
 }
 
 static void save_clock_field(uint8_t line)
@@ -1819,7 +1823,7 @@ static void save_clock_field(uint8_t line)
         system_config.end_runtime_mode = end_runtime_edit_flag;
         break;
     }
-    save_system_config();
+    system_config_dirty = 1;  // Defer EEPROM write
 }
 
 static void save_utility_field(uint8_t line)
@@ -1851,7 +1855,7 @@ static void save_utility_field(uint8_t line)
         system_config.relay_pulse_time = menu.time_xx * 60 + menu.time_yy;
         break;
     }
-    save_system_config();
+    system_config_dirty = 1;  // Defer EEPROM write
 }
 
 static void save_main_field(uint8_t line)
@@ -1861,7 +1865,7 @@ static void save_main_field(uint8_t line)
         system_config.runtime_hours = menu.time_xx;
         system_config.runtime_minutes = menu.time_yy;
     }
-    save_system_config();
+    system_config_dirty = 1;  // Defer EEPROM write
 }
 
 static void save_digital_field(uint8_t line)
@@ -1889,7 +1893,7 @@ static void save_digital_field(uint8_t line)
         else system_config.dig4_relay_mode = *flag;
         break;
     }
-    save_system_config();
+    system_config_dirty = 1;  // Defer EEPROM write
 }
 
 //=============================================================================
@@ -1935,7 +1939,7 @@ void menu_handle_button(uint8_t press_type)
             input_config[current_input].name[15] = '\0';
             strncpy(input_config[current_input].units, saved_units, 7);
             input_config[current_input].units[7] = '\0';
-            save_input_config(current_input);
+            input_config_dirty[current_input] = 1;  // Defer EEPROM write
             name_editor_auto_opened = 0;
         }
         menu.name_edit_mode = 0;
@@ -1979,7 +1983,7 @@ void menu_handle_button(uint8_t press_type)
                     strncpy(input_config[current_input].units, menu.units_buffer, 7);
                     input_config[current_input].units[7] = '\0';
                 }
-                save_input_config(current_input);
+                input_config_dirty[current_input] = 1;  // Defer EEPROM write
                 rebuild_input_menu();  // Refresh menu with new name
             }
 
@@ -2004,7 +2008,7 @@ void menu_handle_button(uint8_t press_type)
                 input_config[current_input].name[15] = '\0';
                 strncpy(input_config[current_input].units, saved_units, 7);
                 input_config[current_input].units[7] = '\0';
-                save_input_config(current_input);
+                input_config_dirty[current_input] = 1;  // Defer EEPROM write
                 name_editor_auto_opened = 0;
             }
 
