@@ -8,7 +8,7 @@
  *   - Hold >= 1000ms -> long beep (300ms), long press event, non-blocking
  */
 
-#define BUILD_VERSION 74  // Fix name/units saving after editor completes
+#define BUILD_VERSION 75  // Scrolling main screen for bypass timer transitions
 
 #include "../include/config.h"
 #include "../include/encoder.h"
@@ -394,7 +394,7 @@ void render_main_screen(uint16_t ch1, uint16_t ch2, uint16_t ch3)
     }
     lcd_print(line);
 
-    // --- Lines 2-4: Input values with bypass timer and alarm flash ---
+    // --- Lines 2-4: Input values with bypass timer display ---
     for (uint8_t i = 0; i < 3; i++)
     {
         lcd_set_cursor(i + 1, 0);
@@ -446,21 +446,12 @@ void render_main_screen(uint16_t ch1, uint16_t ch2, uint16_t ch3)
             }
         }
 
-        // Build the full line: "val units  MM:SS" or "val units" padded to 20
-        memset(line, ' ', 20);
-        line[20] = '\0';
-
-        uint8_t vlen = (uint8_t)strlen(vbuf);
-        if (vlen > 12) vlen = 12;
-        memcpy(line, vbuf, vlen);
-
         // Find most urgent active timer and its label
         uint16_t display_timer = 0;
         const char *bp_label = "";
         if (bp_state[i].high.countdown > 0)
         {
             display_timer = bp_state[i].high.countdown;
-            // Primary or secondary?
             if (bp_state[i].high.phase == BP_PRIMARY)
                 bp_label = bp_lbl_phi[st];
             else
@@ -476,24 +467,46 @@ void render_main_screen(uint16_t ch1, uint16_t ch2, uint16_t ch3)
                 bp_label = bp_lbl_slo[st];
         }
 
-        if (display_timer > 0)
-        {
-            uint8_t mm = (uint8_t)(display_timer / 60);
-            uint8_t ss = (uint8_t)(display_timer % 60);
-            // Format "LABEL MM:SS" right-justified
-            char tbuf[14];
-            sprintf(tbuf, "%s %02u:%02u", bp_label, mm, ss);
-            uint8_t tlen = (uint8_t)strlen(tbuf);
-            if (tlen <= 20)
-                memcpy(line + 20 - tlen, tbuf, tlen);
-        }
+        // Build the line based on whether bypass is active
+        memset(line, ' ', 20);
+        line[20] = '\0';
 
-        // Alarm: show bypass abbreviation right-justified (e.g. "PLPBP")
+        uint8_t vlen = (uint8_t)strlen(vbuf);
+
+        // Alarm active: show name + alarm code only (no value)
         if (alarm_active[i] && i == alarm_input_idx && alarm_code_text[0] != '\0')
         {
+            uint8_t nlen = (uint8_t)strlen(input_config[i].name);
+            if (nlen > 12) nlen = 12;
+            memcpy(line, input_config[i].name, nlen);
+
             uint8_t clen = (uint8_t)strlen(alarm_code_text);
             if (clen > 0 && clen <= 6)
                 memcpy(line + 20 - clen, alarm_code_text, clen);
+        }
+        else if (display_timer > 0)
+        {
+            // Bypass active: value left, timer right
+            if (vlen > 8) vlen = 8;
+            memcpy(line, vbuf, vlen);
+
+            uint8_t mm = (uint8_t)(display_timer / 60);
+            uint8_t ss = (uint8_t)(display_timer % 60);
+            char tbuf[14];
+            sprintf(tbuf, "%s %02u:%02u", bp_label, mm, ss);
+            uint8_t tlen = (uint8_t)strlen(tbuf);
+            if (tlen > 12) tlen = 12;
+            memcpy(line + 20 - tlen, tbuf, tlen);
+        }
+        else
+        {
+            // Normal: name left, value right
+            uint8_t nlen = (uint8_t)strlen(input_config[i].name);
+            if (nlen > 12) nlen = 12;
+            memcpy(line, input_config[i].name, nlen);
+
+            if (vlen > 8) vlen = 8;
+            memcpy(line + 20 - vlen, vbuf, vlen);
         }
 
         lcd_print(line);
@@ -603,41 +616,29 @@ static uint8_t process_bp(bp_dir_t *dir, uint8_t fault, uint16_t sec_time)
 // Initialize bypass timers for one input on RUN start
 static void init_bp_timers(uint8_t i)
 {
-    // High direction
-    uint8_t high_mon = (input_config[i].primary_high_bypass > 0 ||
-                        input_config[i].secondary_high_bypass > 0);
-    if (high_mon && input_config[i].primary_high_bypass > 0)
+    // High direction: always monitor if input is enabled
+    // Primary bypass > 0: start in BP_PRIMARY with countdown
+    // Primary bypass = 0: start in BP_NORMAL (immediate monitoring)
+    if (input_config[i].primary_high_bypass > 0)
     {
         bp_state[i].high.phase = BP_PRIMARY;
         bp_state[i].high.countdown = input_config[i].primary_high_bypass;
     }
-    else if (high_mon)
+    else
     {
         bp_state[i].high.phase = BP_NORMAL;
         bp_state[i].high.countdown = 0;
     }
-    else
-    {
-        bp_state[i].high.phase = BP_INACTIVE;
-        bp_state[i].high.countdown = 0;
-    }
 
-    // Low direction
-    uint8_t low_mon = (input_config[i].primary_low_bypass > 0 ||
-                       input_config[i].secondary_low_bypass > 0);
-    if (low_mon && input_config[i].primary_low_bypass > 0)
+    // Low direction: always monitor if input is enabled
+    if (input_config[i].primary_low_bypass > 0)
     {
         bp_state[i].low.phase = BP_PRIMARY;
         bp_state[i].low.countdown = input_config[i].primary_low_bypass;
     }
-    else if (low_mon)
-    {
-        bp_state[i].low.phase = BP_NORMAL;
-        bp_state[i].low.countdown = 0;
-    }
     else
     {
-        bp_state[i].low.phase = BP_INACTIVE;
+        bp_state[i].low.phase = BP_NORMAL;
         bp_state[i].low.countdown = 0;
     }
 
