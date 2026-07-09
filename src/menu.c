@@ -1055,7 +1055,7 @@ void menu_draw_digital(void)
 
 void menu_draw_log_view(void)
 {
-    uint16_t count = eventlog_count();
+    uint16_t count = 0;  // LOG DISABLED (was eventlog_count())
     char line_buf[21];
 
     if (count == 0)
@@ -1072,9 +1072,10 @@ void menu_draw_log_view(void)
         uint16_t idx = log_view_top + row;
         if (idx < count)
         {
-            uint8_t code = eventlog_read(idx);
-            const char *reason = eventlog_reason_str(code);
-            sprintf(line_buf, "%02u %-17s", (uint8_t)(idx + 1), reason);
+            // LOG DISABLED (dead branch — count is always 0)
+            // uint8_t code = eventlog_read(idx);
+            // const char *reason = eventlog_reason_str(code);
+            sprintf(line_buf, "                    ");
         }
         else
         {
@@ -1092,7 +1093,7 @@ void menu_handle_encoder(int16_t delta)
 {
     if (current_menu == 7) // Log viewer
     {
-        uint16_t count = eventlog_count();
+        uint16_t count = 0;  // LOG DISABLED (was eventlog_count())
         if (count == 0) return;
 
         int32_t new_top = (int32_t)log_view_top + delta;
@@ -2379,7 +2380,7 @@ void menu_handle_button(uint8_t press_type)
 
         if (line == 1) // Clear Log
         {
-            eventlog_clear();
+            // eventlog_clear();  // LOG DISABLED
             break;
         }
 

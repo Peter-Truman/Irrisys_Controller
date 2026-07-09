@@ -711,12 +711,12 @@ void main(void)
     // Initialize I2C bus
     i2c_init();
 
-    // Initialize event log from external EEPROM (must be after i2c_init)
-    eventlog_init();
-    if (boot_pwr_fail)
-        eventlog_write(EVT_PWR_FAIL);
-    else
-        eventlog_write(EVT_POWER_ON);
+    // LOG DISABLED: event-log concept abandoned (code preserved at tag pre-refactor-restore)
+    // eventlog_init();
+    // if (boot_pwr_fail)
+    //     eventlog_write(EVT_PWR_FAIL);
+    // else
+    //     eventlog_write(EVT_POWER_ON);
 
     // Initialize PCA9535 and run LED test
     pca9535_init();
@@ -971,7 +971,7 @@ void main(void)
                     else
                         { bp_state[i].high.phase = BP_INACTIVE; bp_state[i].low.phase = BP_INACTIVE; alarm_active[i] = 0; }
                 }
-                eventlog_write(EVT_START);
+                // eventlog_write(EVT_START);  // LOG DISABLED
                 uart_println("STATE: RUN (pwr fail armed, timers init)");
             }
         }
@@ -983,7 +983,7 @@ void main(void)
             if (!system_config.active_stop_code)
             {
                 ext_stop_flag = 1;
-                eventlog_write(EVT_EXT_STOP);
+                // eventlog_write(EVT_EXT_STOP);  // LOG DISABLED
             }
             BUZZER = 1; buzzer_countdown = 10;  // 500ms non-blocking beep
             // Start non-blocking power detect delay before clearing flag
@@ -1130,7 +1130,7 @@ void main(void)
                         // Runtime expired — alarm first, then relay
                         system_config.active_stop_code = 1;  // Triggers "End RunTime" flash
                         save_power_flags();
-                        eventlog_write(EVT_END_RUNTIME);
+                        // eventlog_write(EVT_END_RUNTIME);  // LOG DISABLED
                         start_alarm_buzzer();
 
                         // Relay action after alarm starts
@@ -1179,7 +1179,7 @@ void main(void)
                     system_config.power_failure_flag = 0;
                     boot_pwr_fail = 0;
                     save_power_flags();
-                    eventlog_write(EVT_PWR_RESTORED);
+                    // eventlog_write(EVT_PWR_RESTORED);  // LOG DISABLED
                     uart_println("Power fail flag cleared (normal stop)");
                 }
             }
@@ -1227,9 +1227,9 @@ void main(void)
                         trigger_relay_pulse(rly == 0 ? 1 : 0);
                         system_config.active_stop_code = (uint8_t)(2 + i * 2);  // 2,4,6
                         save_power_flags();
-                        // Log specific bypass event: input base (10/20/30) + pri=0/sec=1
-                        uint8_t evt_hi = (uint8_t)((i + 1) * 10 + (hi_result == 1 ? 0 : 1));
-                        eventlog_write(evt_hi);
+                        // LOG DISABLED: bypass event logging removed
+                        // uint8_t evt_hi = (uint8_t)((i + 1) * 10 + (hi_result == 1 ? 0 : 1));
+                        // eventlog_write(evt_hi);
                         // Store bypass abbreviation for display
                         const char *lbl = (hi_result == 1) ? bp_lbl_phi[st] : bp_lbl_shi[st];
                         strncpy(alarm_code_text, lbl, 6);
@@ -1258,9 +1258,9 @@ void main(void)
                             trigger_relay_pulse(rly == 0 ? 1 : 0);
                             system_config.active_stop_code = (uint8_t)(3 + i * 2);  // 3,5,7
                             save_power_flags();
-                            // Log specific bypass event: input base (10/20/30) + pri_lo=2/sec_lo=3
-                            uint8_t evt_lo = (uint8_t)((i + 1) * 10 + (lo_result == 1 ? 2 : 3));
-                            eventlog_write(evt_lo);
+                            // LOG DISABLED: bypass event logging removed
+                            // uint8_t evt_lo = (uint8_t)((i + 1) * 10 + (lo_result == 1 ? 2 : 3));
+                            // eventlog_write(evt_lo);
                             // Store bypass abbreviation for display
                             const char *lbl = (lo_result == 1) ? bp_lbl_plo[st] : bp_lbl_slo[st];
                             strncpy(alarm_code_text, lbl, 6);
