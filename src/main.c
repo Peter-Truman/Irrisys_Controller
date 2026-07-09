@@ -257,7 +257,6 @@ typedef struct {
 
 static uint8_t sys_state = SYS_STOP;
 static uint32_t run_timer_secs = 0;
-static uint32_t stop_timer_secs = 0;
 static uint8_t flash_toggle = 0;
 // tick_counter removed — 1-second tick now driven by RTC 1Hz interrupt (rtc_tick_flag)
 static uint8_t render_counter = 0;     // Display update throttle
@@ -790,7 +789,6 @@ void main(void)
     // Initialize system state from DIG_IN1
     sys_state = DIG_IN1_PORT ? SYS_RUN : SYS_STOP;
     run_timer_secs = 0;
-    stop_timer_secs = 0;
 
     // After boot sequence: check for latched fault
     if (system_config.active_stop_code)
@@ -978,7 +976,6 @@ void main(void)
         else if (!dig1 && sys_state == SYS_RUN)
         {
             sys_state = SYS_STOP;
-            stop_timer_secs = 0;
             // Set ext_stop_flag if no alarm/stop code caused this (pure external stop)
             if (!system_config.active_stop_code)
             {
@@ -1146,10 +1143,6 @@ void main(void)
                 else if (!system_config.clock_enabled)
                     run_timer_secs++;  // Count up
             }
-            // else
-            // {
-            //     stop_timer_secs++;
-            // }
 
             // Relay pulse countdown (starts when DIG_IN1 goes low)
             if (relay_state == 1)

@@ -161,7 +161,6 @@ Irrisys_Controller/
 │   ├── lcd.c                  # Buffered LCD via serial to display board
 │   ├── i2c.c                  # I2C bus driver
 │   ├── rtc.c                  # DS3231 RTC driver
-│   ├── ad7994.c               # AD7994 ADC driver (legacy, now using internal ADC)
 │   └── pca9535.c              # PCA9535 I/O expander (legacy)
 │
 ├── include/                    # Main board headers
@@ -173,7 +172,6 @@ Irrisys_Controller/
 │   ├── lcd.h                  # LCD/display protocol interface
 │   ├── i2c.h                  # I2C driver interface
 │   ├── rtc.h                  # RTC driver interface
-│   ├── ad7994.h               # AD7994 ADC interface (legacy)
 │   └── pca9535.h              # PCA9535 I/O expander interface (legacy)
 │
 ├── display/                    # Display board (PIC18F14K22) - separate build
@@ -717,7 +715,7 @@ State word ("RUN"/"STOP") left-justified, status message right-justified:
 When running the XC8 compiler from Claude Code, **use PowerShell, not cmd.exe**. The `cmd /c` approach produces no stdout/stderr output, making it impossible to see compilation errors or warnings. Use:
 
 ```powershell
-powershell.exe -Command "cd 'c:\Users\PeeWee\Documents\engineering_repo\Irrisys_Controller'; & 'C:\Program Files\Microchip\xc8\v3.00\bin\xc8-cc.exe' -mcpu=18F26K22 src\main.c src\encoder.c src\menu.c src\eeprom.c src\lcd.c src\i2c.c src\rtc.c src\pca9535.c src\ad7994.c -o src\main.hex -I include 2>&1; Write-Host EXIT_CODE:$LASTEXITCODE"
+powershell.exe -Command "cd 'c:\Users\PeeWee\Documents\engineering_repo\Irrisys_Controller'; & 'C:\Program Files\Microchip\xc8\v3.00\bin\xc8-cc.exe' -mcpu=18F26K22 src\main.c src\encoder.c src\menu.c src\eeprom.c src\lcd.c src\i2c.c src\rtc.c src\pca9535.c -o src\main.hex -I include 2>&1; Write-Host EXIT_CODE:$LASTEXITCODE"
 ```
 
 Do **not** use `cmd /c build.bat` or `cmd /c "..."` -- output is silently lost.
@@ -726,7 +724,7 @@ Do **not** use `cmd /c build.bat` or `cmd /c "..."` -- output is silently lost.
 
 ```
 src\main.c src\encoder.c src\menu.c src\eeprom.c src\lcd.c
-src\i2c.c src\rtc.c src\pca9535.c src\ad7994.c
+src\i2c.c src\rtc.c src\pca9535.c
 ```
 
 ### Last Known Build Size (Ver_B_Rev_0)

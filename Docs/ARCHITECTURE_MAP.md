@@ -23,6 +23,27 @@ Both are set in the `encoder.c` ISR and cleared in the main loop. **Both are boo
 
 ---
 
+## 1a. Design Requirements (AUTHORITATIVE — user, 2026-07-09)
+
+These govern the Phase 2 refactor and override any conflicting current behavior.
+
+- **R1 — First bypass timer to reach 0 triggers the stop.** All active bypass timers (every parameter, every direction) count down **independently and simultaneously** while the pump runs. Whichever reaches **0 seconds first** triggers its associated stop, de-energizes the relay, and cancels all other timers (the pump can only stop once). No priority comparison or timer-duration sorting is needed — the shortest *remaining* countdown wins by construction. *Example: if over-pressure (1 s bypass) and over-temperature (5 min bypass) are both out of bounds simultaneously, pressure always trips first.* Aim: tightest applicable timeout always governs → best pump protection. (Edge case: if two timers hit 0 on the same 1 s tick, break the tie deterministically, e.g. lowest input index, then high-before-low direction.) *This is essentially the current behavior (first-to-ALARM cancels others); the refactor must preserve it — the key invariant is that all timers run concurrently, not one-at-a-time.*
+- **R2 — Relay modes:** **Latch** (stays de-energized/open until a button press clears it) OR **Pulse** (auto-resets, ready for the next run). Per-trip-source configurable (matches existing `relay_*_mode` fields).
+- **R3 — No/minimal blocking code.** Where blocking is unavoidable, run it as a **state machine**, never a busy-wait. (Addresses C1/C2 — beeps, LCD flush, EEPROM writes, I2C all become non-blocking or state-machined.)
+- **R4 — RTC tick is a PRIORITY interrupt.** Enable interrupt priorities (IPEN) and put INT0 (DS3231 1Hz) on **high priority** so the safety-critical 1Hz tick can never be delayed or dropped by other ISR work. Combine with C1 (tick as counter, not boolean) so no second is ever lost.
+- **R5 — Watchdog ON** to mitigate F/W hang risk (C4). Recommended config below.
+
+### WDT recommendation (PIC18F26K22)
+
+WDT base period ≈ 4 ms × `WDTPS`. Current config is `WDTEN=OFF`, `WDTPS=32768`.
+
+- **Interim (before de-blocking):** `WDTEN=ON`, **`WDTPS=1024` → ~4.1 s** timeout. Must exceed the current worst-case blocking op: a full `save_current_config()` ≈ ~2 s of internal-EEPROM writes. Add `CLRWDT()` in the main loop **and inside the EEPROM block-write loop** (`eeprom_write_block`) so long saves don't false-trip.
+- **Target (after R3 de-blocking, step 5):** once no single operation blocks >~50 ms, tighten to **`WDTPS=64`–`256` → ~256 ms–1 s** for fast hang detection. Keep a single `CLRWDT()` at the top of the main loop only; a hang anywhere else then trips within ~1 s.
+- Use config-bit `WDTEN=ON` (always-on) rather than `SWON` so the watchdog cannot be left disabled by a code path. Keep `WDTPS` in the config bits.
+- Pair with a **reset-cause check at boot** (`RCON` STKFUL/STKUNF/`/TO`/`/PD`): on a WDT-reset, log/flag it and boot into a SAFE state (relay de-energized / pump stopped) rather than assuming RUN.
+
+---
+
 ## 2. Main Loop Execution Order (`src/main.c`, loop at :871)
 
 **Every iteration (~20Hz, ungated):**
@@ -156,9 +177,9 @@ Ordered by risk-reduction per step, each independently compilable + hardware-ver
 1. **Quarantine `mainboard/src/` + clean generated artifacts** (C10) — remove the wrong-tree hazard first. Zero behavior change.
 2. **Remove fully-dead code** (ad7994, dead tags, DIGITAL menu, stop_timer_secs) — shrinks surface. Behavior-neutral.
 3. **Harden persistence** (C3 checksum-over-image, C5 GIE guard, C9 real checksum, `_Static_assert(sizeof==128)`) — data-integrity, isolated to eeprom.c.
-4. **Harden ISR boundary + timing** (C1 tick counter, C6 atomic accessors, C4 i2c timeout) — the real-time foundation the control core sits on.
-5. **De-block the loop** (C2 non-blocking beep) — prerequisite for C1 to actually help.
-6. **Extract `control.c`/`control.h`** — move bypass SM + evaluation + trip into a module with a clean interface; fix C7 (explicit monitored flag) and unify the split monitor logic. *The original "control section" goal.*
+4. **Harden ISR boundary + timing + WDT** (R4 IPEN + INT0 high-priority, C1 tick counter, C6 atomic accessors, C4 i2c timeout, R5 WDT-on + boot reset-cause safe state) — the real-time foundation the control core sits on.
+5. **De-block the loop** (R3, C2 non-blocking beep; state-machine LCD flush / EEPROM / I2C) — prerequisite for C1 and for tightening the WDT.
+6. **Extract `control.c`/`control.h`** — move bypass SM + evaluation + trip into a module with a clean interface; implement **R1 (shortest-timer-wins priority)**, **R2 (latch/pulse)**; fix C7 (explicit monitored flag) and unify the split monitor logic. *The original "control section" goal.*
 7. **Fix + restructure menu.c** (C8 off-by-one, then the deferred UTILITY log-item removal, then tackle the file's size/duplication).
 8. **Wire standalone DIG2-4** (if still wanted) on the new control module.
 9. **ADC reference / 220R scaling** (Rev 2 hardware) once the VREF decision is made.

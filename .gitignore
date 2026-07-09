@@ -33,3 +33,6 @@ nbproject/private/
 
 # Stray Windows redirect artifact
 nul
+
+# Datasheets / binaries belong in OneDrive, not git (repo bloat)
+*.pdf
