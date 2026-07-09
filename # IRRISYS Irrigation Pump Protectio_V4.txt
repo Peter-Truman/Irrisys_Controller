@@ -1,104 +1,300 @@
 # IRRISYS Irrigation Pump Protection System
-## PIC18F2525 Menu System Implementation
+## Ver_B Rev_1 — Two-Board System
 
 ### PROJECT STATUS
-Last Updated: [03/10/25 - 1200]
-Version: 0.8.5
+Last Updated: 30/01/26
+Build Version: 60 (Main Board)
+Build Version: 34 (Display Board)
 
-### COMPLETED FEATURES
+---
 
-#### Core Infrastructure
-- ✅ Menu navigation with rotary encoder and button
-- ✅ 3-line LCD display with scrolling
-- ✅ EEPROM configuration storage with checksum validation
-- ✅ Factory defaults and configuration management
-- ✅ Menu timeout (returns to main after 30 seconds)
-- ✅ Multi-level menu system (OPTIONS → SETUP → INPUT)
+### SYSTEM OVERVIEW
 
-#### Editing Systems
-- ✅ Numeric field editor
-  - Signed values (-999 to +999) for Scale 4mA/20mA
-  - Unsigned values (0-999) for pressure setpoints
-  - Digit-by-digit editing with flashing current digit
-  - Automatic value limiting (e.g., max 500 for certain fields)
-  
-- ✅ Time field editor
-  - MM:SS format for bypass times
-  - Two-field editing (minutes then seconds)
-  - Proper value constraints (0-99 minutes, 0-59 seconds)
-  - Mode support for future HH:MM with 24-hour limit
+The IRRISYS Pump Guard protects irrigation pumps by monitoring up to 3 analog
+sensor inputs (4-20mA) and controlling a relay output. The system monitors
+pressure, temperature and flow conditions, applying configurable bypass timers
+at startup and during operation, and stopping the pump when thresholds are
+exceeded.
 
-- ✅ Option field editor (partial)
-  - Working for Enable/Disable (index 0)
-  - Working for Sensor type (index 1)
-  - Infrastructure ready for additional option fields
+**Two-Board Architecture:**
+- Main Board (PIC18F26K22 @ 32MHz) — control logic, ADC, RTC, relay, encoder
+- Display Board (PIC18F14K22 @ 8MHz) — 4x20 LCD, 3x LEDs, brightness/contrast PWM
+- Communication: Main → Display via serial (19200 baud, 8N1)
 
-#### Menu Implementations
-- ✅ OPTIONS menu (Main/Setup/Utility/About/Exit)
-- ✅ SETUP menu 
-  - Shows actual sensor types (Pressure/Temp/Flow)
-  - Enable indicator (*) in column 20
-  - Dynamic based on input configuration
-  
-- ✅ INPUT menu - Pressure sensor
-  - All 14 fields displaying correctly
-  - Enable, Sensor, Scale 4mA/20mA editable
-  - Hi/Low Pressure setpoints editable
-  - All bypass times (High PBP, PLPBP, SLPBP) editable
-  
-- ✅ INPUT menu - Temperature sensor
-  - 9 fields with proper Back button
-  - Basic field editing working
+---
 
-- ⚠️ INPUT menu - Flow sensor
-  - Templates created (Digital: 8 items, Analog: 11 items)
-  - Display working but editing incomplete
+### HARDWARE
+
+| Component | Part / Pin | Notes |
+|-----------|------------|-------|
+| MCU (Main) | PIC18F26K22 | 32MHz (8MHz + 4x PLL) |
+| MCU (Display) | PIC18F14K22 | 8MHz internal oscillator |
+| ADC Inputs | RA0, RA1, RA2 | 3x 4-20mA, 10-bit, FVR 2.048V ref |
+| Digital Inputs | RA4-RA7 | DIG1=Run/Stop, DIG2-4=future |
+| Relay Output | RB5 | Normally energized (closed=pump runs). De-energize to stop. Fail-safe: power loss drops relay. |
+| Relay 2 | RB4 | Reserved (not currently used) |
+| Encoder | RB1(ChA), RB2(ChB), RB3(Btn) | Interrupt-driven rotation, short/long press |
+| RTC | DS3231 via I2C (0x68) | 1Hz interrupt on RB0 |
+| Buzzer | RC0 | Active high, non-blocking beeps |
+| I2C | RC3(SCL), RC4(SDA) | RTC + PCA9535 (legacy LED driver) |
+| UART1 (Display) | RC6 TX | 19200 baud to display board |
+| UART2 (Debug) | RB6 TX, RB7 RX | 9600 baud debug console |
+| EEPROM WP | RC2 | External EEPROM write protect |
+| LCD | 4x20 HD44780 | NHD-0420AZ-FL-YBW-33V3 |
+| LEDs | RA2(PWR), RA4(Signal), RA5(Fault) | Active LOW, software PWM dimming |
+| Backlight | RC4 | Software PWM (0-100%) |
+| Contrast | RC5 | PWM (CCP1) |
+
+---
+
+### RELAY & STOP CODE SYSTEM
+
+The relay is normally energized (closed = pump can run). The controller
+de-energizes (opens) the relay to stop the pump. This is fail-safe: if the
+controller loses power, the relay drops and the pump stops.
+
+**Two Relay Modes:**
+
+| Mode | Behaviour |
+|------|-----------|
+| Pulse | Relay opens on threshold. Stays open while DIG_IN1 is high. When DIG_IN1 goes low (pump stopped), waits relay_pulse_time seconds then re-energizes. Ready for next run. |
+| Latch | Relay opens on threshold. Stays open until momentary button is pressed. Survives power cycles. DIG_IN1 cycling cannot clear a latched fault. |
+
+**Stop Codes** (persisted to EEPROM):
+
+| Code | Text | Trigger |
+|------|------|---------|
+| 0 | (none) | Normal operation |
+| 1 | End Clk | Runtime countdown expired |
+| 2+ | (future) | Sensor threshold faults |
+
+**Stop Code Clearing:**
+- Button press: clears any stop code, closes relay
+- DIG_IN1 going high: clears non-latched stop codes only
+- Latched faults: button press is the ONLY way to clear
+
+**Boot Sequence:**
+1. Relay starts de-energized (safe)
+2. Boot completes (peripherals, splash screen)
+3. Check for active_stop_code in EEPROM
+4. If latched fault: relay stays de-energized, blocked until button press
+5. If no fault: relay energizes, ready to run
+
+---
+
+### CLOCK & RUNTIME SYSTEM
+
+When the clock is enabled, a countdown timer runs during SYS_RUN state.
+
+**Main Screen Line 1 (when running with clock):**
+```
+RUN  HH:MM:SS  HH:MM
+     countdown  current time
+```
+
+**When clock disabled:** run_timer_secs counts UP (elapsed time).
+
+**Runtime Expiry:**
+- Timer reaches zero → trigger_relay_pulse(mode) based on end_runtime_mode
+- Stop code 1 ("End Clk") set and saved to EEPROM
+- Relay action (pulse or latch) per clock menu setting
+
+**Timer Restart:**
+- When DIG_IN1 cycles (STOP→RUN), timer reloads from configured runtime
+
+---
+
+### ADC & SENSOR INPUTS
+
+**3 Analog Inputs (4-20mA):**
+- 10-bit ADC with FVR 2.048V reference
+- 4mA = ~205 counts, 20mA = ~1000 counts
+- 4-sample rolling average at ~20Hz
+- Engineering units: linear interpolation between scale_4ma and scale_20ma
+
+**Sensor Types (per input):**
+
+| Type | Display | Fields |
+|------|---------|--------|
+| Pressure | PPP psi | Scale 4/20mA, Hi/Lo setpoints, High/PLP/SLP bypass, relay modes |
+| Temperature | ±TT C | Scale 4/20mA, Hi/Lo setpoints, High bypass, relay mode |
+| Flow | FFF L/m or FLOW/NO FLOW | Analog or Digital mode, scale, low flow setpoint/bypass |
+
+**Main Screen Lines 2-4:** Show enabled inputs with engineering values and units.
+Asterisk (*) at column 19 indicates input is enabled.
+
+---
+
+### BYPASS TIMER SYSTEM
+
+Bypass timers allow threshold conditions to exist temporarily without triggering
+a stop. This handles startup transients (e.g., pressure takes time to build).
+
+**Primary Low Pressure Bypass (PLPBP) — one-shot, startup only:**
+- Loaded when RUN input goes high
+- Decrements while pressure < low threshold
+- If pressure reaches threshold: PLPBP cancelled (served its purpose)
+- If PLPBP expires while still below threshold: pump stops (PLPBP fault)
+- Cannot be reused within a single RUN cycle
+
+**Secondary Low Pressure Bypass (SLPBP) — reusable, episode-based:**
+- Ignored while PLPBP is still active
+- Activates only after PLPBP has been cancelled (pressure reached threshold)
+- Each pressure-drop episode reloads the timer
+- Episode ends when pressure recovers above threshold
+- If SLPBP expires during an episode: pump stops (SLPBP fault)
+- PLPBP cannot flow into SLPBP — if pressure never reaches threshold during
+  PLPBP, the pump stops immediately. No second chance.
+
+**High Pressure Bypass (HPBP):** Episode-based (like SLPBP) for high pressure.
+
+**Low Flow Bypass:** Episode-based for low flow conditions.
+
+**Status:** Bypass timer logic is defined but not yet implemented in firmware.
+The relay/stop code infrastructure is ready to support it.
+
+---
+
+### POWER FAILURE DETECTION
+
+1. On RUN entry: power_failure_flag armed (set to 1, saved to EEPROM)
+2. On normal STOP (DIG_IN1 goes low): start pwr_detect_countdown
+3. Countdown expires: clear power_failure_flag (normal stop confirmed)
+4. If power fails during RUN: flag remains set in EEPROM
+5. On next boot: detect flag, display "PWR FAIL", button acknowledges
+
+---
+
+### MENU STRUCTURE
+
+```
+Main Screen (current_menu = 255)
+  └─ Short press → OPTIONS (menu 0)
+
+Menu 0: OPTIONS
+  ├─ Main Menu    → Menu 5 (Run Time editor)
+  ├─ Setup Menu   → Menu 2
+  ├─ Utility Menu → Menu 4
+  ├─ About        (shows build info)
+  └─ Exit         (return to main screen)
+
+Menu 2: SETUP
+  ├─ Input 1 → Menu 1 (configured for input 0)
+  ├─ Input 2 → Menu 1 (configured for input 1)
+  ├─ Input 3 → Menu 1 (configured for input 2)
+  ├─ Clock   → Menu 3
+  └─ Back
+
+Menu 1: INPUT (dynamic, changes per sensor_type)
+  Pressure (15 items):
+    Enable, Sensor, Scale 4mA, Scale 20mA, Hi Pressure, High PBP,
+    Low Pressure, PLPBP, SLPBP, Rly High, Rly PLP, Rly SLP,
+    Display, Save, Back
+  Temperature (10 items):
+    Enable, Sensor, Scale 4mA, Scale 20mA, High Temp, High TBP,
+    Rly High, Display, Save, Back
+  Flow Digital (9 items):
+    Enable, Sensor, Type, No Flow, No Flow BP, Rly Low,
+    Display, Save, Back
+  Flow Analog (12 items):
+    Enable, Sensor, Type, Units, Scale 4mA, Scale 20mA,
+    Low Flow, Low Flow BP, Rly Low, Display, Save, Back
+
+Menu 3: CLOCK
+  ├─ Enable     (Disabled/Enabled)
+  ├─ Rly Endrun (Latch/Pulse/Not Used)
+  ├─ Display    (Hide/Show)
+  ├─ Save
+  └─ Back
+
+Menu 4: UTILITY
+  ├─ Set Clock   (RTC date/time editor)
+  ├─ View Log
+  ├─ Clear Log
+  ├─ Log Entries (numeric 1-999)
+  ├─ Menu T/O    (MM:SS, menu timeout)
+  ├─ Pwr Detect  (MM:SS, power fail delay)
+  ├─ Brightness  (0-9)
+  ├─ Rly Pulse   (MM:SS, relay pulse duration)
+  ├─ Save
+  └─ Back
+
+Menu 5: MAIN MENU
+  ├─ Run Time (HH:MM)
+  ├─ Save
+  └─ Back
+```
+
+**Field Editor Types:**
+- Option: rotate through discrete values (Enable/Disable, Latch/Pulse, etc.)
+- Numeric: signed (-999 to +999) or unsigned (0-999), encoder increments
+- Time: MM:SS or HH:MM, digit-by-digit editing with blinking
+
+---
+
+### EEPROM MEMORY MAP
+
+| Address | Size | Content |
+|---------|------|---------|
+| 0x000 | 128 | Input 1 config (input_config_t) |
+| 0x080 | 128 | Input 2 config |
+| 0x100 | 128 | Input 3 config |
+| 0x180 | 128 | System config (system_config_t) |
+| 0x200 | 2 | Checksum |
+
+**Per-Input Structure (128 bytes):**
+- Basic: enable, sensor_type, flow_type, flow_units, display_enabled
+- Signed 16-bit: scale_4ma, scale_20ma, temp_low
+- Unsigned 16-bit: high_setpoint, high_bypass_time, plp_bypass_time,
+  slp_bypass_time, low_flow_setpoint, low_flow_bypass
+- Relay modes: relay_high_mode, relay_plp_mode, relay_slp_mode, relay_low_mode
+- Padding for future expansion
+
+**System Structure (128 bytes):**
+- Clock: clock_enabled, menu_timeout, runtime_hours, runtime_minutes,
+  end_runtime_mode, relay_pulse_time
+- Display: contrast, brightness, power_fail_delay, power_failure_flag
+- Logging: log_entries
+- Runtime: active_stop_code
+
+---
+
+### SOURCE FILES
+
+| File | Purpose |
+|------|---------|
+| src/main.c | Entry point, state machine, ADC, render, relay logic |
+| src/menu.c | All menu templates, drawing, field editing |
+| src/encoder.c | Rotary encoder ISR, button debounce, Timer0 |
+| src/eeprom.c | EEPROM read/write, factory defaults, config sync |
+| src/lcd.c | Buffered LCD via serial protocol to display board |
+| src/i2c.c | I2C bus driver |
+| src/rtc.c | DS3231 RTC driver |
+| src/pca9535.c | PCA9535 I/O expander (legacy LED control) |
+| include/config.h | Pin definitions, clock config, hardware constants |
+| include/eeprom.h | Data structures (input_config_t, system_config_t) |
+| include/menu.h | Menu structures and function prototypes |
+| include/lcd.h | LCD/display protocol functions |
+
+---
+
+### BUILD
+
+```
+XC8 v3.00 targeting PIC18F26K22
+build.bat compiles from src/ with -I include/
+Output: src/main.hex
+Programmer: MELabs via meProg.exe
+```
+
+---
 
 ### PENDING IMPLEMENTATION
 
-#### Flow Sensor Completion
-1. Option field handling for indices 2,3,5,6,8,9
-2. Dynamic menu rebuild when Type changes (Analog↔Digital)
-3. Field-specific edit flags (flow_type_edit_flag, etc.)
-
-#### Additional Features
-- Low pressure setpoint (needs EEPROM structure addition)
-- Clock configuration menu
-- Main display screen
-- Alarm handling
-- Relay control logic
-
-### CODE ARCHITECTURE
-
-#### Key Files
-- main.c - Main loop, encoder/button handling, display refresh
-- menu.c - Menu logic, drawing, field editing
-- menu.h - Menu structures and declarations
-- eeprom.c - Configuration storage and factory defaults
-- eeprom.h - Data structures for configuration
-
-#### Helper Functions
-- is_numeric_field() - Identifies numeric editable fields
-- is_time_field() - Identifies time editable fields  
-- is_option_field() - Needed for remaining option fields
-- get_item_options() - Returns options for editable fields
-- rebuild_input_menu() - Dynamically builds INPUT menu based on sensor
-
-#### Edit Flag Pattern
-Option fields use edit flags to track selection:
-- enable_edit_flag - Enable/Disable selection
-- sensor_edit_flag - Pressure/Temp/Flow selection
-- flow_type_edit_flag - Analog/Digital (needs implementation)
-- no_flow_edit_flag - Low/High (needs implementation)
-
-### EEPROM STRUCTURE
-Each input has 128 bytes allocated:
-- Basic config (8 bytes): enable, sensor_type, flow_type, flow_units, display
-- Signed values (16 bytes): scale_4ma, scale_20ma, temp_low
-- Unsigned values (32 bytes): setpoints, bypass times, flow limits
-- Relay modes (8 bytes): high, plp, slp, low modes
-- Reserved space for expansion
-
-### NEXT IMPLEMENTATION PHASE
-Focus: Complete Flow sensor option field editing
-Priority: Get one field working completely before adding others
+- Bypass timer logic (PLPBP, SLPBP, HPBP, Low Flow BP) — infrastructure ready
+- Sensor threshold monitoring and fault triggering
+- Additional stop codes for sensor faults
+- Flow sensor editing (partially complete)
+- Logging system
+- LED fault/status indication via display board
+- Contrast PWM on display board

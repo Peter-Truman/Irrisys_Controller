@@ -353,7 +353,7 @@ void render_main_screen(uint16_t ch1, uint16_t ch2, uint16_t ch3)
     lcd_set_cursor(0, 0);
     // Use %-15s to left-pad status, then right-justify time at col 15
     {
-        const char *state = "STOP";
+        const char *state = "Standby";
         const char *msg = "";
 
         if (boot_pwr_fail)
@@ -364,7 +364,7 @@ void render_main_screen(uint16_t ch1, uint16_t ch2, uint16_t ch3)
                 msg = "End RunTime";
         }
         else if (sys_state == SYS_RUN)
-            state = "RUN";
+            state = "Running";
         else if (ext_stop_flag)
             msg = "Ext Stop";
 
@@ -378,7 +378,7 @@ void render_main_screen(uint16_t ch1, uint16_t ch2, uint16_t ch3)
             uint8_t hh = t / 3600;
             uint8_t mm = (t % 3600) / 60;
             uint8_t ss = t % 60;
-            sprintf(line, "RUN         %02u:%02u:%02u",
+            sprintf(line, "Running     %02u:%02u:%02u",
                     hh, mm, ss);
         }
         else
@@ -417,10 +417,13 @@ void render_main_screen(uint16_t ch1, uint16_t ch2, uint16_t ch3)
             continue;
         }
 
-        // Build value + units string
-        char vbuf[16];
+        // Build value and units separately
+        char vbuf[8];   // Value string (max 5 chars: sign + 4 digits)
+        char ubuf[4];   // Units string (max 3 chars)
         uint8_t st = input_config[i].sensor_type;
         uint8_t is_digital = (st == 3 || st == 5);
+
+        ubuf[0] = '\0';
 
         if (is_digital)
         {
@@ -435,20 +438,14 @@ void render_main_screen(uint16_t ch1, uint16_t ch2, uint16_t ch3)
                                       input_config[i].scale_4ma,
                                       input_config[i].scale_20ma);
             int16_t val = eng;
-            if (val < -999) val = -999;
-            if (val > 999) val = 999;
+            if (val < -9999) val = -9999;
+            if (val > 9999) val = 9999;
 
-            if (st == 1) // Temperature: sign + 3 digits + °C
-            {
-                if (val < 0)
-                    sprintf(vbuf, "-%03d \xDF" "C", -val);
-                else
-                    sprintf(vbuf, "+%03d \xDF" "C", val);
-            }
-            else // Pressure, Flow, Other: 3 digits + units
-            {
-                sprintf(vbuf, "%03d %s", val, input_config[i].units);
-            }
+            sprintf(vbuf, "%5d", val);
+
+            // Copy units (max 3 chars)
+            strncpy(ubuf, input_config[i].units, 3);
+            ubuf[3] = '\0';
         }
 
         // Find most urgent active timer and its label
@@ -482,7 +479,7 @@ void render_main_screen(uint16_t ch1, uint16_t ch2, uint16_t ch3)
         if (alarm_active[i] && i == alarm_input_idx && alarm_code_text[0] != '\0')
         {
             uint8_t nlen = (uint8_t)strlen(input_config[i].name);
-            if (nlen > 12) nlen = 12;
+            if (nlen > 11) nlen = 11;
             memcpy(line, input_config[i].name, nlen);
 
             uint8_t clen = (uint8_t)strlen(alarm_code_text);
@@ -491,26 +488,36 @@ void render_main_screen(uint16_t ch1, uint16_t ch2, uint16_t ch3)
         }
         else if (display_timer > 0)
         {
-            // Bypass active: value left, timer right
-            if (vlen > 8) vlen = 8;
-            memcpy(line, vbuf, vlen);
+            // Bypass active: code left (0-6), timer at col 7 (7-11), value right (15-19)
+            uint8_t blen = (uint8_t)strlen(bp_label);
+            if (blen > 7) blen = 7;
+            memcpy(line, bp_label, blen);
 
             uint8_t mm = (uint8_t)(display_timer / 60);
             uint8_t ss = (uint8_t)(display_timer % 60);
-            char tbuf[14];
-            sprintf(tbuf, "%s %02u:%02u", bp_label, mm, ss);
-            uint8_t tlen = (uint8_t)strlen(tbuf);
-            if (tlen > 12) tlen = 12;
-            memcpy(line + 20 - tlen, tbuf, tlen);
+            char tbuf[6];
+            sprintf(tbuf, "%02u:%02u", mm, ss);
+            memcpy(line + 7, tbuf, 5);
+
+            // Value right-justified ending at col 19
+            if (vlen > 5) vlen = 5;
+            memcpy(line + 20 - vlen, vbuf, vlen);
         }
         else
         {
-            // Normal: name left, value right
+            // Normal: name left (0-10), units right@13 (11-13), value right@19 (15-19)
             uint8_t nlen = (uint8_t)strlen(input_config[i].name);
-            if (nlen > 12) nlen = 12;
+            if (nlen > 11) nlen = 11;
             memcpy(line, input_config[i].name, nlen);
 
-            if (vlen > 8) vlen = 8;
+            // Units right-justified ending at col 13
+            uint8_t ulen = (uint8_t)strlen(ubuf);
+            if (ulen > 3) ulen = 3;
+            if (ulen > 0)
+                memcpy(line + 14 - ulen, ubuf, ulen);
+
+            // Value right-justified ending at col 19
+            if (vlen > 5) vlen = 5;
             memcpy(line + 20 - vlen, vbuf, vlen);
         }
 
@@ -707,7 +714,9 @@ void main(void)
     // Initialize event log from external EEPROM (must be after i2c_init)
     eventlog_init();
     if (boot_pwr_fail)
-        eventlog_write(STOP_PWR_FAIL);
+        eventlog_write(EVT_PWR_FAIL);
+    else
+        eventlog_write(EVT_POWER_ON);
 
     // Initialize PCA9535 and run LED test
     pca9535_init();
@@ -962,6 +971,7 @@ void main(void)
                     else
                         { bp_state[i].high.phase = BP_INACTIVE; bp_state[i].low.phase = BP_INACTIVE; alarm_active[i] = 0; }
                 }
+                eventlog_write(EVT_START);
                 uart_println("STATE: RUN (pwr fail armed, timers init)");
             }
         }
@@ -973,7 +983,7 @@ void main(void)
             if (!system_config.active_stop_code)
             {
                 ext_stop_flag = 1;
-                eventlog_write(STOP_EXT_STOP);
+                eventlog_write(EVT_EXT_STOP);
             }
             BUZZER = 1; buzzer_countdown = 10;  // 500ms non-blocking beep
             // Start non-blocking power detect delay before clearing flag
@@ -1120,7 +1130,7 @@ void main(void)
                         // Runtime expired — alarm first, then relay
                         system_config.active_stop_code = 1;  // Triggers "End RunTime" flash
                         save_power_flags();
-                        eventlog_write(STOP_END_RUNTIME);
+                        eventlog_write(EVT_END_RUNTIME);
                         start_alarm_buzzer();
 
                         // Relay action after alarm starts
@@ -1169,6 +1179,7 @@ void main(void)
                     system_config.power_failure_flag = 0;
                     boot_pwr_fail = 0;
                     save_power_flags();
+                    eventlog_write(EVT_PWR_RESTORED);
                     uart_println("Power fail flag cleared (normal stop)");
                 }
             }
@@ -1216,7 +1227,9 @@ void main(void)
                         trigger_relay_pulse(rly == 0 ? 1 : 0);
                         system_config.active_stop_code = (uint8_t)(2 + i * 2);  // 2,4,6
                         save_power_flags();
-                        eventlog_write(system_config.active_stop_code);
+                        // Log specific bypass event: input base (10/20/30) + pri=0/sec=1
+                        uint8_t evt_hi = (uint8_t)((i + 1) * 10 + (hi_result == 1 ? 0 : 1));
+                        eventlog_write(evt_hi);
                         // Store bypass abbreviation for display
                         const char *lbl = (hi_result == 1) ? bp_lbl_phi[st] : bp_lbl_shi[st];
                         strncpy(alarm_code_text, lbl, 6);
@@ -1245,7 +1258,9 @@ void main(void)
                             trigger_relay_pulse(rly == 0 ? 1 : 0);
                             system_config.active_stop_code = (uint8_t)(3 + i * 2);  // 3,5,7
                             save_power_flags();
-                            eventlog_write(system_config.active_stop_code);
+                            // Log specific bypass event: input base (10/20/30) + pri_lo=2/sec_lo=3
+                            uint8_t evt_lo = (uint8_t)((i + 1) * 10 + (lo_result == 1 ? 2 : 3));
+                            eventlog_write(evt_lo);
                             // Store bypass abbreviation for display
                             const char *lbl = (lo_result == 1) ? bp_lbl_plo[st] : bp_lbl_slo[st];
                             strncpy(alarm_code_text, lbl, 6);

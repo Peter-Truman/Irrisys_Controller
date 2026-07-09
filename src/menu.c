@@ -1060,30 +1060,27 @@ void menu_draw_log_view(void)
 
     if (count == 0)
     {
-        lcd_print_at(0, 0, "====== LOG =========");
-        lcd_print_at(1, 0, "                    ");
-        lcd_print_at(2, 0, "    (no entries)    ");
+        lcd_print_at(0, 0, "                    ");
+        lcd_print_at(1, 0, "    (no entries)    ");
+        lcd_print_at(2, 0, "                    ");
         lcd_print_at(3, 0, "                    ");
         return;
     }
 
-    sprintf(line_buf, "== LOG %3u entries =", count);
-    lcd_print_at(0, 0, line_buf);
-
-    for (uint8_t row = 0; row < 3; row++)
+    for (uint8_t row = 0; row < 4; row++)
     {
         uint16_t idx = log_view_top + row;
         if (idx < count)
         {
             uint8_t code = eventlog_read(idx);
             const char *reason = eventlog_reason_str(code);
-            sprintf(line_buf, "%3u: %-16s", idx + 1, reason);
+            sprintf(line_buf, "%02u %-17s", (uint8_t)(idx + 1), reason);
         }
         else
         {
             sprintf(line_buf, "                    ");
         }
-        lcd_print_at(row + 1, 0, line_buf);
+        lcd_print_at(row, 0, line_buf);
     }
 }
 
@@ -1100,8 +1097,8 @@ void menu_handle_encoder(int16_t delta)
 
         int32_t new_top = (int32_t)log_view_top + delta;
         if (new_top < 0) new_top = 0;
-        // Allow scrolling until last entry visible on bottom row
-        uint16_t max_top = (count > 3) ? count - 3 : 0;
+        // Allow scrolling until last entry visible on bottom row (4 rows)
+        uint16_t max_top = (count > 4) ? count - 4 : 0;
         if ((uint16_t)new_top > max_top) new_top = max_top;
         log_view_top = (uint16_t)new_top;
         return;

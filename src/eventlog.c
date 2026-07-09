@@ -15,6 +15,7 @@
 #include "../include/eeprom.h"
 #include "../include/i2c.h"
 #include <xc.h>
+#include <string.h>
 
 // M24M01 I2C address (A1=A2=0, lower 64KB block)
 #define M24M01_ADDR_W   0xA0
@@ -35,22 +36,67 @@ static void m24m01_write_byte(uint16_t addr, uint8_t data);
 static uint16_t m24m01_read_word(uint16_t addr);
 static void m24m01_write_word(uint16_t addr, uint16_t data);
 
-// Stop reason strings (indexed by stop code)
-static const char *stop_reasons[] = {
-    "Unknown",       // 0
-    "End RunTime",   // 1
-    "In1 Hi BP",     // 2
-    "In1 Lo BP",     // 3
-    "In2 Hi BP",     // 4
-    "In2 Lo BP",     // 5
-    "In3 Hi BP",     // 6
-    "In3 Lo BP",     // 7
-    "Pwr Fail",      // 8
-    "Ext Stop",      // 9
-    "DIG2 Fault",    // 10
-    "DIG3 Fault",    // 11
-    "DIG4 Fault"     // 12
-};
+// Bypass abbreviation lookup [sensor_type 0-5] per direction
+// Same codes as bp_lbl_* in main.c — used for log display
+static const char *log_bp_phi[6] = {"PHPBP","PHTBP","PHFBP","PFBP", "PHVBP","PABP"};
+static const char *log_bp_shi[6] = {"SHPBP","SHTBP","SHFBP","SFBP", "SHVBP","SABP"};
+static const char *log_bp_plo[6] = {"PLPBP","PLTBP","PLFBP","PNFBP","PLVBP","PNABP"};
+static const char *log_bp_slo[6] = {"SLPBP","SLTBP","SLFBP","SNFBP","SLVBP","SNABP"};
+
+// Static buffer for building dynamic reason strings
+static char reason_buf[18];  // Max 17 chars + null
+
+// Event reason string lookup — uses bypass codes for alarm events
+const char *eventlog_reason_str(uint8_t event_code)
+{
+    extern input_config_t input_config[3];
+
+    switch (event_code)
+    {
+        case EVT_START:        return "Start";
+        case EVT_END_RUNTIME:  return "End RunTime";
+        case EVT_EXT_STOP:     return "Ext Stop";
+        case EVT_PWR_FAIL:     return "Pwr Fail";
+        case EVT_PWR_RESTORED: return "Pwr Restored";
+        case EVT_POWER_ON:     return "Power Up";
+
+        case EVT_DIG2_FAULT:   return "DIG2 Fault";
+        case EVT_DIG3_FAULT:   return "DIG3 Fault";
+        case EVT_DIG4_FAULT:   return "DIG4 Fault";
+
+        default:
+            break;
+    }
+
+    // Check for bypass events: 10-13 (input 1), 20-23 (input 2), 30-33 (input 3)
+    uint8_t input_idx = event_code / 10;  // 1, 2, or 3
+    uint8_t dir_idx = event_code % 10;    // 0=pri_hi, 1=sec_hi, 2=pri_lo, 3=sec_lo
+
+    if (input_idx >= 1 && input_idx <= 3 && dir_idx <= 3)
+    {
+        uint8_t st = input_config[input_idx - 1].sensor_type;
+        if (st > 5) st = 0;
+
+        const char *code;
+        switch (dir_idx)
+        {
+            case 0: code = log_bp_phi[st]; break;
+            case 1: code = log_bp_shi[st]; break;
+            case 2: code = log_bp_plo[st]; break;
+            case 3: code = log_bp_slo[st]; break;
+            default: code = "??"; break;
+        }
+
+        // Build "CODE Stop" (e.g. "PHPBP Stop")
+        uint8_t clen = (uint8_t)strlen(code);
+        memcpy(reason_buf, code, clen);
+        memcpy(reason_buf + clen, " Stop", 5);
+        reason_buf[clen + 5] = '\0';
+        return reason_buf;
+    }
+
+    return "Unknown";
+}
 
 // =============================================================================
 // M24M01 LOW-LEVEL I2C ACCESS
@@ -115,7 +161,7 @@ void eventlog_init(void)
     // Sanity check — if EEPROM is blank (0xFFFF) or corrupt, reset
     extern system_config_t system_config;
     uint16_t max = system_config.log_entries;
-    if (max == 0) max = 100;
+    if (max == 0) max = 20;
 
     if (write_index >= max || entry_count > max)
     {
@@ -173,9 +219,3 @@ void eventlog_clear(void)
     m24m01_write_word(LOG_ADDR_ENTRY_CNT, 0);
 }
 
-const char *eventlog_reason_str(uint8_t stop_code)
-{
-    if (stop_code > STOP_CODE_MAX)
-        return stop_reasons[0];
-    return stop_reasons[stop_code];
-}

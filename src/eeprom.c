@@ -61,7 +61,7 @@ const system_config_t system_defaults = {
     0, 0, 0,  // DIG4: disabled, fault_low, latch
     {0, 0, 0, 0, 0, 0, 0},
     // Logging
-    100, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    20, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
     // Padding
     {0}
 };
