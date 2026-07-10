@@ -1,9 +1,9 @@
 /**
- * I2C Driver Implementation for DS3231M RTC
- * PIC18F2525 @ 32MHz (Fcy = 8MHz)
- * I2C Clock: 100kHz
+ * I2C Driver Implementation for DS3231M RTC + M24M01 EEPROM
+ * PIC18F26K22 @ 32MHz (Fcy = 8MHz)
+ * I2C Clock: ~10kHz (SSPADD=199) — deliberately slow
  *
- * Conservative blocking implementation with timeout protection
+ * Blocking implementation with timeout protection on every wait.
  */
 
 #include "../include/config.h"
@@ -127,9 +127,17 @@ uint8_t i2c_write(uint8_t data)
     PIR1bits.SSPIF = 0;  // Clear flag BEFORE writing
     SSPBUF = data;
 
-    // Wait for transmission to complete
+    // Wait for transmission to complete — timeout-guarded so a stuck or absent
+    // slave cannot hang the CPU forever. [C4] This was the only unguarded
+    // busy-wait in the driver; same I2C_TIMEOUT the (working) read path uses
+    // for an equal-length byte wait. On timeout, return error (callers treat
+    // it as NAK).
+    uint16_t timeout = I2C_TIMEOUT;
     while (!PIR1bits.SSPIF)
-        ;
+    {
+        if (--timeout == 0)
+            return 1; // Timeout - treat as error/NAK
+    }
     PIR1bits.SSPIF = 0;
 
     // Check ACK status: 0=ACK received, 1=NAK received

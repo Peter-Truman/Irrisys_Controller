@@ -1,7 +1,7 @@
 /**
- * I2C Driver for DS3231M RTC
- * PIC18F2525 @ 32MHz
- * I2C Clock: 100kHz
+ * I2C Driver for DS3231M RTC + M24M01 EEPROM
+ * PIC18F26K22 @ 32MHz
+ * I2C Clock: ~10kHz (SSPADD=199)
  */
 
 #ifndef I2C_H
@@ -11,8 +11,8 @@
 #include <stdint.h>
 
 // I2C Configuration
-#define I2C_CLOCK_FREQ 100000UL // 100kHz I2C bus speed
-#define I2C_TIMEOUT 1000        // Timeout counter limit
+#define I2C_CLOCK_FREQ 10000UL // ~10kHz actual bus speed (SSPADD=199); unused
+#define I2C_TIMEOUT 1000       // Timeout counter limit (~1ms at Fcy=8MHz)
 
 // Function prototypes
 void i2c_init(void);
