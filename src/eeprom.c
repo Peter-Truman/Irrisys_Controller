@@ -7,6 +7,15 @@
 input_config_t input_config[3];
 system_config_t system_config;
 
+// [map §6] Compile-time guard: both config structs MUST be exactly 128 bytes.
+// The EEPROM layout addresses inputs by (i * sizeof) and the system config /
+// checksum live at fixed literal addresses (0x180 / 0x200). Any accidental
+// layout drift (added field, alignment change) silently mis-maps every saved
+// config. These typedefs fail to compile (negative array size) if the size is
+// ever wrong.
+typedef char assert_input_config_is_128[(sizeof(input_config_t) == 128) ? 1 : -1];
+typedef char assert_system_config_is_128[(sizeof(system_config_t) == 128) ? 1 : -1];
+
 // Menu timeout in seconds (will be loaded from EEPROM)
 uint16_t menu_timeout_seconds = 30; // Default value if EEPROM invalid
 
@@ -66,29 +75,27 @@ const system_config_t system_defaults = {
     {0}
 };
 
-// Calculate checksum for data integrity
+// Forward declaration: primitive is defined below, used by the checksum.
+uint8_t eeprom_read_byte(uint16_t address);
+
+// Calculate checksum for data integrity.
+// [C3] Sums the persisted config image directly from EEPROM (addresses
+// 0x000..CHECKSUM_ADDR-1), NOT the RAM globals. The RAM copy may hold menu
+// edits whose deferred EEPROM write has not yet run; checksumming RAM would
+// store a value that disagrees with the actual EEPROM body, and if power is
+// lost before the deferred flush, the next boot sees a mismatch and wipes ALL
+// config to factory defaults. Checksumming EEPROM keeps the stored checksum
+// always consistent with what is actually persisted (an unflushed edit is
+// simply not yet reflected — correct — rather than corrupting everything).
+// Additive sum over the same bytes is identical to the old RAM-based value
+// when RAM==EEPROM, so existing units still validate (no forced reset).
 uint16_t calculate_config_checksum(void)
 {
     uint16_t checksum = 0;
-    uint8_t *data;
-
-    // Checksum all input configs
-    for (uint8_t i = 0; i < 3; i++)
+    for (uint16_t addr = 0; addr < EEPROM_CHECKSUM_ADDR; addr++)
     {
-        data = (uint8_t *)&input_config[i];
-        for (uint16_t j = 0; j < sizeof(input_config_t); j++)
-        {
-            checksum += data[j];
-        }
+        checksum += eeprom_read_byte(addr);
     }
-
-    // Checksum system config
-    data = (uint8_t *)&system_config;
-    for (uint16_t j = 0; j < sizeof(system_config_t); j++)
-    {
-        checksum += data[j];
-    }
-
     return checksum;
 }
 
@@ -112,10 +119,22 @@ void eeprom_write_byte(uint16_t address, uint8_t data)
     EECON1bits.CFGS = 0;  // Access EEPROM
     EECON1bits.WREN = 1;  // Enable writes
 
+    // [C5] The 0x55/0xAA unlock -> WR=1 sequence must be atomic. An interrupt
+    // (1ms Timer0 or 1Hz INT0) landing between the unlock and WR=1 aborts the
+    // write, so config/power-flag saves can silently fail. Guard with GIE,
+    // restoring its prior state (this may be called before GIE is enabled).
+    // NOTE (Step 4/IPEN): when interrupt priorities are enabled, clearing GIE
+    // (GIEH) still blocks high-priority interrupts; revisit if GIEL work is
+    // added on the write path.
+    uint8_t gie_save = INTCONbits.GIE;
+    INTCONbits.GIE = 0;
+
     // Required write sequence
     EECON2 = 0x55;
     EECON2 = 0xAA;
     EECON1bits.WR = 1; // Start write
+
+    INTCONbits.GIE = gie_save; // Restore interrupt enable
 
     while (EECON1bits.WR)
         ;                // Wait for write to complete
