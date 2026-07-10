@@ -1318,12 +1318,20 @@ void main(void)
         // =============================================================
         // Handle encoder rotation
         // =============================================================
-        if (encoder_count != last_encoder)
+        // [C6] Read the 16-bit encoder_count ONCE, atomically. On this 8-bit
+        // core a 16-bit read is two instructions; an ISR update landing between
+        // them tears the value and injects a spurious large delta (menu jumps).
+        // Snapshot under GIE so all uses below see one consistent value.
+        int16_t enc_now;
+        INTCONbits.GIE = 0;
+        enc_now = encoder_count;
+        INTCONbits.GIE = 1;
+        if (enc_now != last_encoder)
         {
-            int16_t delta = encoder_count - last_encoder;
+            int16_t delta = enc_now - last_encoder;
             if (current_menu != 255)
                 beep(1);  // Tick sound (only in menus, not on main screen)
-            last_encoder = encoder_count;
+            last_encoder = enc_now;
             encoder_activity_timer = 10;
 
             if (menu.in_edit_mode)
@@ -1498,7 +1506,9 @@ void main(void)
             render_counter = 5;  // Force immediate render
 
             menu_timeout_flag = 1;
+            INTCONbits.GIE = 0;      // [C6] atomic 16-bit write vs Timer0 ISR
             menu_timeout_timer = 0;
+            INTCONbits.GIE = 1;
         }
 
         // LED flash toggle (2Hz = 250ms half-period = 5 × 50ms ticks)
