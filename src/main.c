@@ -264,6 +264,7 @@ static uint16_t pwr_detect_countdown = 0;  // Non-blocking power detect delay (s
 static uint8_t boot_pwr_fail = 0;             // Set once at boot if power_failure_flag was set in EEPROM
 static uint8_t buzzer_countdown = 0;          // Non-blocking beep: counts down 50ms ticks
 static uint8_t ext_stop_flag = 0;             // 1=stopped by external run input going low
+static uint8_t wdt_reset_flag = 0;            // [4e-2] 1=booted from a watchdog reset (safe-latch until acknowledged)
 static uint8_t led_flash_counter = 0;         // 50ms tick counter for 2Hz LED flash
 static uint8_t led_flash_state = 0;           // Toggles at 2Hz for LED flashing
 
@@ -355,7 +356,9 @@ void render_main_screen(uint16_t ch1, uint16_t ch2, uint16_t ch3)
         const char *state = "Standby";
         const char *msg = "";
 
-        if (boot_pwr_fail)
+        if (wdt_reset_flag)
+            msg = "WatchDog";                 // [4e-2] distinct watchdog-reset indication
+        else if (boot_pwr_fail)
             msg = "Pwr Fail";
         else if (system_config.active_stop_code)
         {
@@ -687,6 +690,11 @@ static void start_alarm_buzzer(void)
 
 void main(void)
 {
+    // [4e-2] Capture reset cause BEFORE the first CLRWDT (which sets /TO).
+    // RCON /TO == 0 here means the watchdog timed out and reset the MCU
+    // (only a WDT time-out clears /TO; power-on/BOR/MCLR leave it set).
+    wdt_reset_flag = (RCONbits.NOT_TO == 0) ? 1 : 0;
+
     CLRWDT();  // [R5] Fresh watchdog window for the whole boot sequence
     system_init();
     uart_init();
@@ -785,15 +793,22 @@ void main(void)
 
     // Initialize system state from DIG_IN1
     sys_state = DIG_IN1_PORT ? SYS_RUN : SYS_STOP;
+    // [4e-2] After a watchdog reset, never silently resume RUN — force STOP so
+    // the state is coherent with the latched-open relay below; operator must
+    // acknowledge (button) to clear the WatchDog latch.
+    if (wdt_reset_flag)
+        sys_state = SYS_STOP;
     run_timer_secs = 0;
 
-    // After boot sequence: check for latched fault
-    if (system_config.active_stop_code)
+    // After boot sequence: check for latched fault, or a watchdog reset
+    // ([4e-2] latch the relay open so an unexpected WDT reset can't auto-run).
+    if (system_config.active_stop_code || wdt_reset_flag)
     {
         relay_state = 1;
         relay_latch_mode = 1;  // Treat as latched until button pressed
         RELAY1_PIN = 0;        // Stay de-energized = pump stopped
-        uart_println("Boot: active stop code, relay latched open");
+        uart_println(wdt_reset_flag ? "Boot: WATCHDOG reset, relay latched open"
+                                    : "Boot: active stop code, relay latched open");
     }
     else
     {
@@ -1371,12 +1386,13 @@ void main(void)
                     extern system_config_t system_config;
                     extern void save_power_flags(void);
 
-                    if (boot_pwr_fail || system_config.active_stop_code || ext_stop_flag)
+                    if (boot_pwr_fail || system_config.active_stop_code || ext_stop_flag || wdt_reset_flag)
                     {
                         // First press: clear fault, close relay if latched, don't enter menu
                         boot_pwr_fail = 0;
                         system_config.power_failure_flag = 0;
                         system_config.active_stop_code = 0;
+                        wdt_reset_flag = 0;  // [4e-2] acknowledge watchdog-reset latch
                         if (relay_state == 1)
                             relay_close();
                         clear_bp_timers();  // Clear all bypass alarms
