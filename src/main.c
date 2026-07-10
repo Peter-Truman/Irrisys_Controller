@@ -687,6 +687,7 @@ static void start_alarm_buzzer(void)
 
 void main(void)
 {
+    CLRWDT();  // [R5] Fresh watchdog window for the whole boot sequence
     system_init();
     uart_init();
     eeprom_init();
@@ -768,18 +769,14 @@ void main(void)
         __delay_ms(100);
     }
 
-    // Hold splash for 5 seconds so display board is fully ready
+    // Hold splash for 5 seconds so display board is fully ready.
+    // [R5] Feed the watchdog during the splash so it can't expire mid-boot.
     uart_println("Splash hold 5s...");
-    __delay_ms(500);
-    __delay_ms(500);
-    __delay_ms(500);
-    __delay_ms(500);
-    __delay_ms(500);
-    __delay_ms(500);
-    __delay_ms(500);
-    __delay_ms(500);
-    __delay_ms(500);
-    __delay_ms(500);
+    for (uint8_t s = 0; s < 10; s++)
+    {
+        CLRWDT();
+        __delay_ms(500);
+    }
     beep(200);
 
     // Go to main screen
@@ -868,6 +865,8 @@ void main(void)
 
     while (1)
     {
+        CLRWDT();  // [R5] Feed the watchdog once per loop pass
+
         // =============================================================
         // Handle beep requests from ISR
         // =============================================================

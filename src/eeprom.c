@@ -160,6 +160,8 @@ void eeprom_write_block(void *data, uint16_t address, uint16_t length)
     uint8_t *ptr = (uint8_t *)data;
     for (uint16_t i = 0; i < length; i++)
     {
+        CLRWDT();  // [R5] each byte write blocks ~4ms; feed WDT so a long block
+                   // save (~512ms) can't trip it (esp. once timeout is tightened)
         eeprom_write_byte(address + i, ptr[i]);
     }
 }
