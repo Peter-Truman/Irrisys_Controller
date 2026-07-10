@@ -69,8 +69,23 @@ static const int8_t enc_table[16] = {
     -1, 0, 0, 1,
     0, 1, -1, 0};
 
-// Timer0 ISR - runs every 1ms
-void __interrupt() isr(void)
+// [R4] High-priority ISR — RTC 1Hz tick (INT0). Kept minimal so the
+// safety-critical 1Hz tick is serviced immediately and can preempt the longer
+// Timer0 (low-priority) ISR. This is the tick that drives bypass countdowns.
+void __interrupt(high_priority) isr_high(void)
+{
+    if (INTCONbits.INT0IF)
+    {
+        INTCONbits.INT0IF = 0;
+        // [C1] Count ticks (saturating); the main loop drains them so no
+        // elapsed second is ever lost.
+        if (rtc_tick_count < 255) rtc_tick_count++;
+    }
+}
+
+// Low-priority ISR — Timer0 1ms: encoder decode, button FSM, 50ms subtick,
+// menu-timeout countdown.
+void __interrupt(low_priority) isr_low(void)
 {
     if (INTCONbits.TMR0IF)
     {
@@ -270,15 +285,6 @@ void __interrupt() isr(void)
             subtick_flag = 1;
         }
     }
-
-    // RTC 1Hz interrupt on INT0 (RB0 falling edge)
-    if (INTCONbits.INT0IF)
-    {
-        INTCONbits.INT0IF = 0;
-        // [C1] Count ticks (saturating) instead of a boolean flag, so the main
-        // loop can drain every elapsed second even if a pass ran long.
-        if (rtc_tick_count < 255) rtc_tick_count++;
-    }
 }
 
 void encoder_init(void)
@@ -294,6 +300,12 @@ void encoder_init(void)
     button_event = 0;
     relay_ms_counter = 0; // ADD THIS LINE
 
+    // [R4] Enable interrupt priority levels. INT0 (RTC 1Hz) is always HIGH
+    // priority on PIC18; make Timer0 LOW so the safety tick preempts the longer
+    // Timer0 ISR and is never delayed.
+    RCONbits.IPEN = 1;
+    INTCON2bits.TMR0IP = 0;   // Timer0 = low priority
+
     // Enable Timer0 interrupt
     INTCONbits.TMR0IF = 0;
     INTCONbits.TMR0IE = 1;
@@ -303,7 +315,11 @@ void encoder_init(void)
     INTCONbits.INT0IF = 0;
     INTCONbits.INT0IE = 1;
 
-    INTCONbits.GIE = 1;
+    // Master enables with IPEN=1: GIEH (high) + GIEL (low). Clearing GIEH
+    // elsewhere (EEPROM unlock C5, tick snapshot C1) still disables ALL
+    // interrupts, so those atomic guards remain valid.
+    INTCONbits.GIEH = 1;
+    INTCONbits.GIEL = 1;
 
     // Initialize encoder state
     enc_state = ((ENC_A << 1) | ENC_B) & 0x03;
