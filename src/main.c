@@ -258,7 +258,7 @@ typedef struct {
 static uint8_t sys_state = SYS_STOP;
 static uint32_t run_timer_secs = 0;
 static uint8_t flash_toggle = 0;
-// tick_counter removed — 1-second tick now driven by RTC 1Hz interrupt (rtc_tick_flag)
+// tick_counter removed — 1-second tick now driven by RTC 1Hz interrupt (rtc_tick_count)
 static uint8_t render_counter = 0;     // Display update throttle
 static uint16_t pwr_detect_countdown = 0;  // Non-blocking power detect delay (seconds)
 static uint8_t boot_pwr_fail = 0;             // Set once at boot if power_failure_flag was set in EEPROM
@@ -1111,10 +1111,19 @@ void main(void)
 
         // =============================================================
         // 1-second tick (RTC 1Hz interrupt on INT0/RB0)
+        // [C1] Drain ALL pending 1Hz ticks so a slow loop pass never loses a
+        // second — bypass countdowns, runtime clock and relay pulse stay
+        // accurate even if a beep/LCD/EEPROM op delayed this pass past 1s.
+        // Snapshot+clear the ISR counter atomically, then run one full
+        // 1-second cycle per pending tick.
         // =============================================================
-        if (rtc_tick_flag)
+        uint8_t rtc_ticks_pending;
+        INTCONbits.GIE = 0;
+        rtc_ticks_pending = rtc_tick_count;
+        rtc_tick_count = 0;
+        INTCONbits.GIE = 1;
+        while (rtc_ticks_pending-- > 0)
         {
-            rtc_tick_flag = 0;
             flash_toggle = !flash_toggle;
 
             if (sys_state == SYS_RUN)

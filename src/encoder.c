@@ -57,8 +57,8 @@ static uint8_t last_btn = 1;
 
 extern volatile uint8_t relay_latch_mode;
 
-// RTC 1Hz tick and 50ms sub-tick flags (set in ISR, cleared in main loop)
-volatile uint8_t rtc_tick_flag = 0;
+// RTC 1Hz tick COUNT and 50ms sub-tick flag (set in ISR, consumed in main loop)
+volatile uint8_t rtc_tick_count = 0;
 volatile uint8_t subtick_flag = 0;
 static uint8_t subtick_counter = 0;
 
@@ -275,7 +275,9 @@ void __interrupt() isr(void)
     if (INTCONbits.INT0IF)
     {
         INTCONbits.INT0IF = 0;
-        rtc_tick_flag = 1;
+        // [C1] Count ticks (saturating) instead of a boolean flag, so the main
+        // loop can drain every elapsed second even if a pass ran long.
+        if (rtc_tick_count < 255) rtc_tick_count++;
     }
 }
 
