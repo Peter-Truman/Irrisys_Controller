@@ -12,6 +12,12 @@
 
 ---
 
+## Deferred items raised during testing
+
+- **Splash screen F/W version** — user wants F/W version info clearly shown on the splash. Note: line 4 already prints `Ver_B_Rev_0`; confirm whether it renders (the splash hold is now 1.5 s, which may be too brief to read). Revisit after the test pass.
+
+---
+
 ## 0. Equipment
 
 | Item | Purpose |
@@ -169,20 +175,20 @@ Setup: Input 1 = Pressure, 4mA=0, 20mA=360. Use non-zero setpoints (see C7 note)
 
 ## Result Summary
 
-| Section | Pass | Fail | Notes |
-|---|---|---|---|
-| 1. Boot & Watchdog | | | |
-| 2. Display | | | |
-| 3. Encoder & Button | | | |
-| 4. Menus | | | |
-| 5. Config Persistence | | | |
-| 6. Timing | | | |
-| **7. SAFETY — Bypass/Relay** | | | **must be 100%** |
-| 8. Relay Modes | | | |
-| **9. Simultaneous Faults** | | | **must be 100%** |
-| 10. Digital Inputs | | | |
-| 11. Stop Conditions | | | |
-| 12. Watchdog Reset | | | |
+| Section | Result | Notes |
+|---|---|---|
+| 1. Boot & Watchdog | ✅ **PASS** | Boot was slow; trimmed 8.3s → 3.3s (`e0ea6ee`). No reset loop with WDT @ 2.05s. |
+| 2. Display | ✅ **PASS** | Found a REAL bug: one-way link + change-detection cache meant a single missed frame was suppressed forever (main screen never appeared after boot). Fixed with periodic full-screen re-assert (`f692b60`). Scaling at 20mA reads 358/148/99 — ~1% low, consistent across all 3 channels = normal gain tolerance, not a fault. |
+| 3. Encoder & Button | ✅ **PASS** | Slow = 1 step, fast ≈ 25 (acceleration OK). **No random jumps** → confirms 4d atomic-read fix. Beeps clean → confirms 5a ISR buzzer. Responsive. |
+| 4. Menus | ⬜ | |
+| 5. Config Persistence | ⬜ | |
+| 6. Timing | ⬜ | |
+| **7. SAFETY — Bypass/Relay** | ⬜ | **must be 100%** |
+| 8. Relay Modes | ⬜ | |
+| **9. Simultaneous Faults** | ⬜ | **must be 100%** |
+| 10. Digital Inputs | ⬜ | |
+| 11. Stop Conditions | ⬜ | |
+| 12. Watchdog Reset | ⬜ | |
 
 **Sections 7 and 9 are the product.** Everything else is supporting. If any test in 7 or 9 fails, stop and report — do not proceed to Step 6.
 

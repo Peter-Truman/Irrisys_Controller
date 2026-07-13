@@ -1,119 +1,108 @@
-# Irrisys Pumpguard Ver B — Firmware Development Path to Next Prototype (Rev 2)
+# Irrisys Pumpguard Ver B — Firmware Development Path
 
-**Sources:** Notion "Pumpguard Ver B" (Rev 2 Design Review, 2026-07-02) + "Irrisys_PG_MainBrd_Ver_B_Rev_2 — Production Files" (BOM, 2026-04-20), cross-checked against the firmware on `refactor/control-core`.
-
-**Bottom line:** the current firmware **will not run correctly on Rev 2 hardware**. Three hardware changes break it, and one of them (the digital-input IC) may be a substantial driver rewrite. Those must be resolved before any Rev 2 firmware work is meaningful.
+**Sources:** Notion "Pumpguard Ver B" (Rev 2 Design Review, 2026-07-02) + Rev 2 mainboard BOM, cross-checked against the firmware on `refactor/control-core`.
 
 ---
 
-## 0. Where the firmware actually is today
+## 0. Which board are we on? (read this first)
 
-Verified on hardware (test plan §1-§2 passed):
-- Hardening complete: watchdog on (2.05 s), interrupt priorities (RTC 1 Hz = high), no dropped ticks, no blocking >10 ms in the loop, config-wipe bug fixed, display self-heal.
-- **Not done:** control-core extraction (`control.c`), C7 (zero-setpoint disables monitoring), menu.c cleanup, DIG2-4 standalone channels.
-- **Untested:** the entire safety path (test plan §7 bypass/relay, §9 simultaneous faults).
+**We develop and validate on Ver_B_Rev_1 hardware. Ver_B_Rev_2 is still in design — not ordered.**
 
----
-
-## 1. 🛑 BLOCKERS — answer these before writing Rev 2 firmware
-
-### B1. ADC reference / 220R burden — **decision still pending**
-Rev 2 changes the burden 100R → 220R. At 20 mA that is **4.40 V**, which **exceeds the 2.048 V FVR** the firmware currently uses as the ADC reference. The ADC saturates at ~9.3 mA — **the top half of every sensor range silently reads full-scale.** Safety-critical.
-
-- The 4.096 V FVR is **also insufficient** (clips at ~18.6 mA).
-- Only practical option: **VDD (~5.0 V)** as reference (`ADCON1` PVCFG=00), which then ties accuracy to the 5 V rail.
-- **Needed:** confirm the VREF source. Then rescale `ADC_4MA`/`ADC_20MA` and any raw-count fault thresholds.
-
-*(Also note: Rev 2 puts a **MAX14626** current-loop protector in each channel. Confirm whether it introduces a voltage drop or offset that affects scaling, and whether its fault output is wired to the PIC — it may give us free open-loop/overcurrent detection.)*
-
-### B2. 🔴 MAX22193 (U5) digital-input IC — **biggest unknown**
-Rev 2 routes all 4 digital inputs (Din_1_Run, PNP_1/2/3) through **U5 = MAX22193ATP+**. The current firmware reads them as **direct GPIO on RA4-RA7**.
-
-- **If U5 presents parallel logic outputs to the PIC** → small change (possibly none, if it lands on the same pins).
-- **If U5 is SPI/serial** (the MAX221xx family generally is) → **new driver + rework of every digital-input read**, including `read_digital_input()`, the run/stop signal, and the DIG2-4 work.
-- **Needed:** the Rev 2 schematic — how is U5 connected to the PIC? This single answer decides whether digital inputs are a 1-hour job or a 1-week job.
-
-### B3. RTC part — DS3231 vs RV-8803
-- The **BOM (April)** lists `DS3231MZ+` — matches the current driver (I²C 0x68, 1 Hz SQW → INT0). ✅
-- The **Design Review (July)** flags an open item: *"Confirm fitted RTC part vs firmware driver (RV-8803 @ 0x32 / CLKOUT vs DS3231 @ 0x68 / SQW)."* 🟡
-- **Needed:** confirm which part is fitted. If RV-8803, the RTC driver **and the 1 Hz tick source** change — and that tick is the heartbeat of every bypass timer.
-
----
-
-## 2. ⚠️ Conflicts / stale docs found
-
-| Item | Conflict | Action |
+| | **Rev 1 — ACTIVE TARGET** | **Rev 2 — future, in design** |
 |---|---|---|
-| **U7 (M24M01 EEPROM)** | BOM (Apr) **lists it**; Design Review (Jul) says **removed** ("log dropped so redundant, parameters in PIC NVS, RC2 freed") | BOM is **stale**. Update it before quoting. *Firmware is already aligned — we removed the event log.* ✅ |
-| **RC2 (EEPROM_WP)** | Freed by U7 removal | `config.h` still defines `EEPROM_WP` — harmless, but tidy up |
-| **Stop timer** | I removed `stop_timer_secs` as dead code — but Notion **specifies** it ("count up from 00:00:00 when stopped") | It was dead *code*, but it's a **live requirement**. Must be implemented (see §4). |
+| 4-20 mA chain | loop → MAX14626 → **100 R burden** → 1 k series → PIC ADC | loop → TVS → MAX14626 → **220 R burden** → 1 µF → 1 k → PIC ADC |
+| 20 mA gives | **2.00 V** | **4.40 V** |
+| ADC reference | **2.048 V FVR** ✅ fits | 2.048 V FVR ❌ **saturates at ~9.3 mA** |
+| Firmware scaling | **`ADC_4MA=205`, `ADC_20MA=1000` — CORRECT** | must be rescaled + new VREF |
+| Digital inputs | direct GPIO RA4-RA7 (working) | routed via **MAX22193 (U5)** — interface TBC |
+| External EEPROM | M24M01 (log removed, unused) | **U7 removed**, RC2 freed |
+
+> ✅ **The firmware as it stands today is correct for Rev 1.** No ADC work is needed to keep developing.
+> ⚠️ The 1 k series resistor does **not** affect scaling (no DC current into a high-Z ADC pin, so no voltage division) — only the **burden** and **VREF** set the scale.
 
 ---
 
-## 3. Phase A — Rev 2 hardware compatibility *(blocking for the prototype)*
+## 1. Work to do NOW — on Rev 1 (no hardware dependency)
 
-Cannot start until B1-B3 are answered.
+### 1a. Finish validation *(highest priority — the safety path is still unverified)*
+Complete **[TEST_PLAN.md](TEST_PLAN.md)**. §1 and §2 pass. Still outstanding:
+- §3 Encoder & Button, §4 Menus, §5 Config persistence, §6 Timing
+- **§7 Bypass timers → relay trip** ← *this is the product*
+- **§9 Simultaneous faults / shortest-timer-wins (R1)** ← *this is the product*
+- §8 Relay modes, §10 Digital inputs, §11 Stop conditions, §12 Watchdog reset
 
-1. **ADC reference + rescale** (B1) — change VREF, rescale `ADC_4MA`/`ADC_20MA`, rescale fault thresholds, re-verify against a loop calibrator at 4/8/12/16/20 mA.
-2. **Digital inputs via MAX22193** (B2) — new driver if SPI; rewire `read_digital_input()` and the run/stop path.
-3. **RTC confirm/port** (B3) — keep DS3231 driver, or port to RV-8803 (register map + CLKOUT config + INT0 edge).
-4. **Drop external EEPROM remnants** — remove `EEPROM_WP`/RC2, confirm I²C is now RTC-only.
-5. **HW/FW compatibility guard** — Rev 0/1 firmware on Rev 2 hardware mis-scales every analog reading with no warning. Consider bumping `HW_VERSION` so the two can't be confused.
+### 1b. Control-core extraction (Step 6)
+- Extract **`control.c` / `control.h`** — bypass state machine, fault evaluation, unified trip pipeline.
+- **Fix C7** — a setpoint of exactly **0** currently disables monitoring for that direction (magic-zero guard). Replace with an explicit per-direction "monitored" flag. **Live safety bug.**
+- **Implement R1 explicitly** — all bypass timers run concurrently; **first to reach zero trips** and cancels the rest. *(Closes the Notion open item "define which bypass timers can run concurrently vs exclusively".)*
+
+### 1c. Menu / cleanup (Step 7)
+- **Fix C8** — UTILITY menu edit-display off-by-one (`menu_update_edit_value` / `menu_update_time_value`).
+- Remove the dead View Log / Clear Log / Log Entries items and the unreachable DIGITAL menu (menu 6).
+
+### 1d. Re-do the LCD de-block (R3)
+Reverted earlier (it broke the display). Redo the interrupt-driven TX properly — the periodic self-heal refresh is now in place, which makes this safer to retry.
 
 ---
 
-## 4. Phase B — Finish the control core *(can proceed NOW, in parallel with B1-B3)*
+## 2. 📌 Rev 2 MIGRATION CHECKLIST — track, do NOT implement yet
 
-This is hardware-independent and is the work already scoped.
+Apply only when Rev 2 hardware exists. Nothing here blocks Rev 1 work.
 
-1. **Extract `control.c`/`control.h`** — bypass state machine, fault evaluation, trip pipeline.
-2. **Fix C7** — a setpoint of exactly 0 currently disables monitoring for that direction (magic-zero). Replace with an explicit "monitored" flag.
-3. **R1** — all bypass timers run concurrently; **first to reach zero trips** and cancels the rest. *(This also closes the Notion open item "Define which bypass timers can run concurrently vs exclusively.")*
-4. **Wire DIG2-4** standalone fault channels (config exists, no runtime logic) — **depends on B2**.
-5. **Fix C8** — UTILITY menu edit-display off-by-one, then remove the dead log menu items and the unreachable DIGITAL menu (menu 6).
-
----
-
-## 5. Phase C — Close the spec gaps (Notion spec vs firmware)
-
-These are **specified in Notion but not implemented**. Each needs a decision: build it, or update the spec.
-
-| # | Notion spec | Firmware today | Gap |
+| # | Change | Firmware impact | Status |
 |---|---|---|---|
-| C1 | Relay mode = **Latch / Pulse / Not Used** | Latch / Pulse only | Add "Not Used" |
-| C2 | `relay_high_mode`, `relay_low_mode` (2 per input) | 4 modes (pri/sec × hi/lo) | Firmware is *finer-grained* than spec — confirm which is wanted |
-| C3 | Menu item **Display (Show/Hide)**; Display=OFF forces Enable=OFF | Not present | Add, or drop from spec |
-| C4 | Pulse mode: on digital input LOW, show **`WAIT`** flashing 1 Hz for **5 s**, then close | Closes after configurable `relay_pulse_time`, no WAIT display | Reconcile (fixed 5 s vs configurable) |
-| C5 | Line 1: **stop code flashing** when stopped; **stop timer counts up** when stopped with no code | Status message only; stop timer removed | Implement |
-| C6 | Input line cols 15-19: **bypass countdown mm:ss, flashing** | Shows alarm abbreviation, no countdown | Implement — this is genuinely useful (operator sees time-to-trip) |
-| C7 | Stop-code re-arm rules: primary = *"once from startup only"*; secondary = *"multiple times, NOT sequentially — must recover above threshold between events"* | Primary = startup grace; secondary re-arms | Verify exact semantics match |
+| **M1** | **Burden 100 R → 220 R** | 20 mA = 4.40 V **exceeds the 2.048 V FVR** → ADC saturates at ~9.3 mA, top half of every range reads full-scale. **Safety-critical.** Must move VREF to **VDD (~5 V)** (`ADCON1` PVCFG=00) — the 4.096 V FVR is *also* insufficient (clips at ~18.6 mA). Then rescale `ADC_4MA`/`ADC_20MA` + any raw-count fault thresholds. Accuracy then tracks the 5 V rail. | 🔴 **Decide VREF source** |
+| **M2** | **Digital inputs via MAX22193 (U5)** | Firmware reads RA4-RA7 as direct GPIO. If U5 presents parallel logic outputs → trivial. **If SPI → new driver + rewrite of every digital-input read** (run/stop signal, `read_digital_input()`, DIG2-4). | 🔴 **Need Rev 2 schematic — biggest unknown** |
+| **M3** | **RTC part** | BOM says `DS3231MZ+` (matches our driver: I²C 0x68, 1 Hz SQW → INT0) ✅. But the July design review flags an open question: **RV-8803 @ 0x32 / CLKOUT**. This tick is the heartbeat of every bypass timer. | 🟡 **Confirm fitted part** |
+| **M4** | **U7 (M24M01) removed, RC2 freed** | Already aligned — we removed the event log. Just tidy the now-unused `EEPROM_WP`/RC2 defines in `config.h`. | 🟢 Easy |
+| **M5** | **MAX14626 fault output** | Check whether its overcurrent/reverse/open-loop flag is wired to the PIC — if so we get **free loop-fault detection** (broken sensor wire). Worth having. | 🟢 Opportunity |
+| **M6** | **HW/FW compatibility guard** | Rev 1 firmware on Rev 2 hardware (or vice-versa) **mis-scales every analog reading with no warning**. Consider bumping `HW_VERSION` so the two can't be confused in the field. | 🟡 Recommend |
 
 ---
 
-## 6. Phase D — Validation
+## 3. ⚠️ Doc conflicts found (worth fixing at source)
 
-1. Complete the existing **[TEST_PLAN.md](TEST_PLAN.md)** on Rev 1 hardware — especially **§7 (bypass/relay trip)** and **§9 (simultaneous faults)**, which are still entirely unverified. *This gives a trusted baseline before Rev 2 changes anything.*
-2. Re-run the full plan on **Rev 2** hardware, plus new ADC calibration tests at 4/8/12/16/20 mA.
-3. Add Rev 2-specific tests: MAX22193 digital inputs, MAX14626 loop-fault detection (if wired), RTC tick accuracy.
+| Item | Issue |
+|---|---|
+| **Rev 2 BOM is stale** | Still lists **U7 (M24M01 EEPROM)**, which the July design review says was **removed**. It also still lists the **100 R** burden. Fix before sending to PCBCart. *(The U7 removal independently confirms our event-log removal was right.)* |
+| **`stop_timer_secs`** | I deleted it as dead code — but Notion **specifies** it ("stop timer: count up from 00:00:00 when stopped"). Dead *code*, but a **live requirement**. Now tracked as spec gap S5 below. |
 
 ---
 
-## 7. Recommended sequence
+## 4. Spec gaps — Notion spec vs firmware (decisions needed)
+
+Each needs a call: **build it**, or **update the spec**. Mostly hardware-independent, so they can be done on Rev 1.
+
+| # | Notion spec | Firmware today | Decision |
+|---|---|---|---|
+| S1 | Relay mode = **Latch / Pulse / Not Used** | Latch / Pulse only | Add "Not Used"? |
+| S2 | `relay_high_mode` / `relay_low_mode` (2 per input) | 4 modes (pri/sec × hi/lo) | Firmware is *finer-grained* than spec — which is wanted? |
+| S3 | Menu item **Display (Show/Hide)**; Display=OFF forces Enable=OFF | Not present | Build or drop? |
+| S4 | Pulse mode: on digital input LOW → show **`WAIT`** flashing 1 Hz for **5 s** → close | Closes after configurable `relay_pulse_time`; no WAIT display | Fixed 5 s or configurable? |
+| S5 | Line 1: **stop code flashing** when stopped; **stop timer counts up** when stopped with no code | Status message only; stop timer removed | Implement |
+| S6 | Input line cols 15-19: **bypass countdown mm:ss, flashing** | Shows alarm abbreviation, no countdown | **Recommend building** — operator sees time-to-trip |
+| S7 | Stop-code re-arm: primary = *"once from startup only"*; secondary = *"multiple times, NOT sequentially — must recover above threshold between events"* | Primary = startup grace; secondary re-arms | Verify semantics match exactly |
+| S8 | Splash screen should show F/W version | Line 4 prints `Ver_B_Rev_0` — confirm it renders (splash hold now 1.5 s) | Check |
+
+---
+
+## 5. Recommended sequence
 
 ```
-NOW ─────────────────────────────────────────────────────────┐
- 1. Finish TEST_PLAN §3-§12 on Rev 1  (trusted baseline)     │  no HW dependency
- 2. Phase B: control.c extraction + C7 + R1                  │
-                                                              │
-IN PARALLEL — get answers ───────────────────────────────────┤
- B1  VREF source for 220R                                    │  ← you / hardware
- B2  MAX22193 interface (schematic)   ← BIGGEST RISK          │
- B3  RTC part actually fitted                                 │
-                                                              │
-THEN ────────────────────────────────────────────────────────┤
- 3. Phase A: Rev 2 HW compatibility (ADC, digital, RTC)      │
- 4. Phase C: spec-gap decisions                               │
- 5. Phase D: full revalidation on Rev 2                       │
+NOW — all on Rev 1 hardware, no blockers
+  1. Finish TEST_PLAN §3-§12          ← safety path still unverified
+  2. control.c extraction + C7 + R1   ← Step 6, the original goal
+  3. menu.c cleanup (C8) + LCD de-block retry
+  4. Work through spec gaps S1-S8 with Peter
+
+IN PARALLEL — resolve before Rev 2 is ordered
+  M2  MAX22193 interface (schematic)  ← biggest effort risk
+  M1  VREF source for the 220R burden ← safety-critical
+  M3  RTC part actually fitted
+
+WHEN REV 2 BOARDS ARRIVE
+  5. Apply migration checklist M1-M6
+  6. Re-run full TEST_PLAN on Rev 2 + ADC calibration at 4/8/12/16/20 mA
 ```
 
-**The critical path runs through B2 (MAX22193).** Everything else is bounded work; that one could be a driver rewrite. Get the Rev 2 schematic answer first.
+**Nothing blocks progress today.** The Rev 2 items are tracked, not urgent — but **M2 (MAX22193)** should be answered before the Rev 2 design is frozen, because it could turn a trivial change into a driver rewrite.
