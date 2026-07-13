@@ -1566,11 +1566,17 @@ void menu_update_time_value(void)
     }
     else if (current_menu == 4) // UTILITY
     {
+        // [C8] Indices MUST match utility_menu_template:
+        //   0 View Log | 1 Clear Log | 2 Log Entries | 3 Menu T/O |
+        //   4 Pwr Detect | 5 Brightness | 6 Rly Pulse | 7 Back | 8 EXIT
+        // These were 4/5/7 (each +1), so the live value never updated while
+        // editing, and editing Pwr Detect wrote into the Menu T/O buffer —
+        // visibly corrupting the row above it.
         switch (menu.current_line)
         {
-        case 4: strcpy(value_menu_timeout, buf); break;
-        case 5: strcpy(value_pwr_fail, buf); break;
-        case 7: strcpy(value_relay_pulse, buf); break;
+        case 3: strcpy(value_menu_timeout, buf); break;  // Menu T/O
+        case 4: strcpy(value_pwr_fail, buf); break;      // Pwr Detect
+        case 6: strcpy(value_relay_pulse, buf); break;   // Rly Pulse
         }
     }
     else if (current_menu == 5) // MAIN
@@ -1674,10 +1680,13 @@ void menu_update_edit_value(void)
 
         if (current_menu == 4) // UTILITY
         {
+            // [C8] Indices MUST match utility_menu_template (see above).
+            // These were 3/6 (each +1), so neither case ever matched and the
+            // digits stayed frozen on screen while the encoder was turned.
             switch (menu.current_line)
             {
-            case 3: strcpy(value_log_entries, buf); break;
-            case 6: strcpy(value_brightness, buf); break;
+            case 2: strcpy(value_log_entries, buf); break;  // Log Entries
+            case 5: strcpy(value_brightness, buf); break;   // Brightness
             }
         }
     }
