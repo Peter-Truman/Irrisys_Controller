@@ -190,6 +190,26 @@ void lcd_flush(void)
     }
 }
 
+// Invalidate the change-detection cache so the NEXT lcd_flush() re-sends every
+// line unconditionally.
+//
+// Why this exists: lcd_flush() only sends a line if it differs from
+// lcd_prev_buffer. If the display board ever MISSES a frame (e.g. its UART RX
+// interrupt is disabled during its blocking backlight-EEPROM write), the main
+// board still marks the line as "sent". Every later render then compares equal
+// and is skipped, so the screen stays permanently stale/blank until the content
+// happens to change. Calling this after boot gives the display a guaranteed
+// second full refresh once it is definitely idle.
+void lcd_invalidate(void)
+{
+    for (uint8_t row = 0; row < LCD_ROWS; row++)
+    {
+        memset(lcd_prev_buffer[row], '\0', LCD_COLS);
+        lcd_prev_buffer[row][LCD_COLS] = '\0';
+        lcd_dirty[row] = 1;
+    }
+}
+
 // Force-flush all 4 lines unconditionally (no change detection)
 void lcd_force_flush(void)
 {

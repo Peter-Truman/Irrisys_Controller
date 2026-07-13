@@ -300,6 +300,7 @@ static uint32_t run_timer_secs = 0;
 static uint8_t flash_toggle = 0;
 // tick_counter removed — 1-second tick now driven by RTC 1Hz interrupt (rtc_tick_count)
 static uint8_t render_counter = 0;     // Display update throttle
+static uint8_t refresh_counter = 0;    // Periodic full-screen re-assert (display self-heal)
 static uint16_t pwr_detect_countdown = 0;  // Non-blocking power detect delay (seconds)
 static uint8_t boot_pwr_fail = 0;             // Set once at boot if power_failure_flag was set in EEPROM
 static uint8_t ext_stop_flag = 0;             // 1=stopped by external run input going low
@@ -877,8 +878,14 @@ void main(void)
     // Reset LCD buffers for clean render
     lcd_init();
 
-    // Apply saved brightness setting
+    // Apply saved brightness setting.
+    // NOTE: on the display board, led_set_backlight() performs a BLOCKING
+    // internal-EEPROM write (~8ms) with interrupts DISABLED, so it is deaf to
+    // incoming UART bytes while it runs. Sending line frames immediately after
+    // this lands them in that deaf window and they are silently dropped. Give
+    // the display time to finish before transmitting anything else.
     disp_set_brightness(system_config.brightness * 10 + 10); // Map 0-9 to 10-100%
+    delay_ms_wdt(50);  // let the display board finish its backlight EEPROM write
 
     // Build first main screen manually with debug output
     uart_println("Building first main screen:");
@@ -905,6 +912,14 @@ void main(void)
     }
     uart_println("render_main_screen done, now force_flush:");
     lcd_force_flush();
+
+    // Safety net: drop the change-detection cache so the main loop's first
+    // render re-sends every line. If the display missed any of the frames above
+    // (its RX is deaf during the backlight EEPROM write), lcd_flush() would
+    // otherwise compare equal forever and the screen would stay blank until the
+    // content happened to change — which is exactly why the main screen only
+    // appeared after entering and exiting a menu.
+    lcd_invalidate();
     uart_println("force_flush done.");
     render_counter = 0;  // Reset so main loop doesn't re-render immediately
 
@@ -1170,6 +1185,26 @@ void main(void)
         while (rtc_ticks_pending-- > 0)
         {
             flash_toggle = !flash_toggle;
+
+            // Periodic full-screen refresh — display self-heal.
+            //
+            // The display link is ONE-WAY (no ACK). lcd_flush() only sends a
+            // line when it differs from lcd_prev_buffer, so if the display ever
+            // misses a frame — its UART RX is deaf during its blocking backlight
+            // EEPROM write, and the relay energising can glitch its supply — the
+            // main board still marks that line "sent" and NEVER re-sends it. The
+            // screen then stays stale/blank indefinitely, which is exactly the
+            // boot failure seen here (splash frozen, main screen never appears
+            // until a menu changed the content).
+            //
+            // Re-asserting the whole screen every few seconds makes the display
+            // recover from any lost frame within a bounded time. Cost is trivial
+            // (~104 bytes every 5s on a 19200 link).
+            if (++refresh_counter >= 5)
+            {
+                refresh_counter = 0;
+                lcd_invalidate();  // next flush re-sends every line
+            }
 
             if (sys_state == SYS_RUN)
             {
