@@ -47,7 +47,16 @@ Communication: Main -> Display via serial (19200 baud, 8N1)
 
 ## Pending Hardware Change — Ver_B_Rev_2 (2026-07-02, NOT yet in firmware)
 
-**Hardware:**
+> **⚠️ SCOPE: This applies to Rev 2 ONLY. Rev 2 is still in design and has NOT been ordered.**
+>
+> **We develop and validate on Ver_B_Rev_1 hardware, which uses a 100 R burden.**
+> On Rev 1: 20 mA → 100 R → **2.00 V**, which fits under the 2.048 V FVR.
+> **The current firmware scaling (`ADC_4MA=205`, `ADC_20MA=1000`) is CORRECT for Rev 1.**
+> Nothing below needs doing until Rev 2 hardware physically exists.
+>
+> Full migration checklist: [docs/DEVELOPMENT_PATH.md](docs/DEVELOPMENT_PATH.md) §2.
+
+**Hardware (Rev 2):**
 - 4-20mA burden resistors R8/R4/R5 changed **100R -> 220R** on all 3 channels.
   Reason: widen ADC span + preserve NAMUR over/under-range fault headroom.
 - Added bidirectional TVS (SMAJ24CA) at each loop terminal J2/J3/J4.
