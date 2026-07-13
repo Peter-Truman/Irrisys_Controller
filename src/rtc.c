@@ -42,11 +42,11 @@ uint8_t rtc_read_register(uint8_t reg, uint8_t *value)
 // Initialize RTC for 1Hz square wave output
 uint8_t rtc_init(void)
 {
-    // RTC oscillator stabilization after power-up
-    // DS3231M datasheet specifies 250-300ms minimum, we use 1000ms for margin.
-    // [R5] Feed the watchdog every 1ms — this was a 1s contiguous un-fed stall
-    // at boot, which would trip a tight WDT timeout.
-    for (uint16_t i = 0; i < 1000; i++)
+    // RTC oscillator stabilization after power-up.
+    // DS3231M datasheet specifies 250-300ms minimum; 500ms gives ~2x margin
+    // (was 1000ms, which just slowed boot with no benefit).
+    // [R5] Feed the watchdog every 1ms so this can't trip a tight WDT timeout.
+    for (uint16_t i = 0; i < 500; i++)
     {
         CLRWDT();
         __delay_ms(1);

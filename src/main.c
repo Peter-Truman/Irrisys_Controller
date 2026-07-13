@@ -816,14 +816,11 @@ void main(void)
         __delay_ms(100);
     }
 
-    // Hold splash for 5 seconds so display board is fully ready.
-    // [R5] Feed the watchdog during the splash so it can't expire mid-boot.
-    uart_println("Splash hold 5s...");
-    for (uint8_t s = 0; s < 10; s++)
-    {
-        CLRWDT();
-        __delay_ms(500);
-    }
+    // Hold splash briefly. The display board is already ready by this point (it
+    // boots in ~1s and we waited 500ms above), so this is purely how long the
+    // logo is shown — trimmed from 5s to 1.5s to get to the main screen sooner.
+    uart_println("Splash hold 1.5s...");
+    delay_ms_wdt(1500);  // [R5] WDT-fed
     beep(200);
 
     // Go to main screen
@@ -873,8 +870,9 @@ void main(void)
     // Clear display board, wait 1 second, then render first main screen with debug
     uart_println("Sending CLS to display...");
     disp_clear();
-    uart_println("CLS sent. Waiting 1s...");
-    delay_ms_wdt(1000);  // [R5] WDT-fed (was 2x 500ms un-fed = 1s contiguous)
+    uart_println("CLS sent. Waiting 300ms...");
+    delay_ms_wdt(300);   // [R5] WDT-fed. Was 1s — the display processes a CLEAR
+                         // in ~2ms, so this was pure padding before first render.
 
     // Reset LCD buffers for clean render
     lcd_init();
