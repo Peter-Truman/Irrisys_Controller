@@ -55,11 +55,13 @@ void uart_println(const char *str);
 #pragma config BORV = 190      // Brown-out voltage = 1.9V
 #pragma config WDTEN = ON      // [R5] Watchdog ALWAYS on (not SWON, so no code
                                //      path can leave it disabled)
-#pragma config WDTPS = 4096    // [R5] ~16.4s coarse timeout (4ms x 4096); covers
-                               //      the ~5s boot splash + ~2s full EEPROM save.
-                               //      Tighten to ~256ms-1s in Step 5 after
-                               //      de-blocking. Fed by CLRWDT() in the main
-                               //      loop, boot splash, and eeprom_write_block.
+#pragma config WDTPS = 512     // [R5] ~2.05s timeout (4ms x 512). Tightened from
+                               //      the initial ~16.4s now that Step 5 removed
+                               //      all >10ms blocking from the main loop and
+                               //      every long boot delay is CLRWDT-fed
+                               //      (delay_ms_wdt, rtc_init, splash loop,
+                               //      eeprom_write_block, lcd_force_flush).
+                               //      Can go to 256 (~1.02s) once bench-confirmed.
 #pragma config PBADEN = OFF    // PORTB<5:0> pins are digital I/O
 #pragma config HFOFST = ON     // HFINTOSC fast start-up
 #pragma config MCLRE = EXTMCLR // MCLR pin enabled

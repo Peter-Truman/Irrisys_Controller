@@ -234,6 +234,18 @@ void beep(uint16_t duration_ms)
     INTCONbits.GIE = 1;
 }
 
+// [R5] Watchdog-fed blocking delay — BOOT-TIME ONLY, never used in the main
+// loop. Feeds CLRWDT every 1ms so long boot waits can't trip the watchdog,
+// which is what lets us run a much tighter WDT timeout.
+static void delay_ms_wdt(uint16_t ms)
+{
+    while (ms--)
+    {
+        CLRWDT();
+        __delay_ms(1);
+    }
+}
+
 // [R3] Two beeps separated by a gap, fully non-blocking. Replaces the
 // beep(); __delay_ms(gap); beep(); pattern used for fault-ack and menu timeout.
 void beep_double(uint16_t on_ms, uint16_t gap_ms)
@@ -779,7 +791,7 @@ void main(void)
     uart_println("RELAY: Closed (energized)");
 
     // Wait for display board
-    __delay_ms(500);
+    delay_ms_wdt(500);  // [R5] WDT-fed
 
     // Set power LED
     disp_set_leds(0x01);
@@ -862,8 +874,7 @@ void main(void)
     uart_println("Sending CLS to display...");
     disp_clear();
     uart_println("CLS sent. Waiting 1s...");
-    __delay_ms(500);
-    __delay_ms(500);
+    delay_ms_wdt(1000);  // [R5] WDT-fed (was 2x 500ms un-fed = 1s contiguous)
 
     // Reset LCD buffers for clean render
     lcd_init();
