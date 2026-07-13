@@ -12,6 +12,7 @@
 
 #include "../include/config.h"
 #include "../include/encoder.h"
+#include "../include/lcd.h"   // lcd_tx_isr() — display TX ring drain
 
 // Global variables for encoder
 volatile int16_t encoder_count = 0;
@@ -92,10 +93,13 @@ void __interrupt(high_priority) isr_high(void)
     }
 }
 
-// Low-priority ISR — Timer0 1ms: encoder decode, button FSM, 50ms subtick,
-// menu-timeout countdown.
+// Low-priority ISR — Timer0 1ms (encoder decode, button FSM, 50ms subtick,
+// menu-timeout countdown, buzzer sequencer) + EUSART1 TX drain to the display.
 void __interrupt(low_priority) isr_low(void)
 {
+    // [R3] Drain the display TX ring buffer (replaces the old per-byte busy-wait)
+    lcd_tx_isr();
+
     if (INTCONbits.TMR0IF)
     {
         // Reload timer for 1ms @ 32MHz
