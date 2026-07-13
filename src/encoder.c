@@ -62,6 +62,15 @@ volatile uint8_t rtc_tick_count = 0;
 volatile uint8_t subtick_flag = 0;
 static uint8_t subtick_counter = 0;
 
+// [R3] Non-blocking buzzer sequencer state (1ms resolution, driven by Timer0
+// ISR). beep()/beep_double() in main.c load these and return immediately.
+volatile uint16_t buzzer_ms = 0;       // remaining ms in the current phase
+volatile uint16_t buzzer_on_ms = 0;    // ON duration (reused for the repeat)
+volatile uint16_t buzzer_off_ms = 0;   // gap duration between beeps
+volatile uint8_t buzzer_repeats = 0;   // additional beeps still queued
+volatile uint8_t buzzer_phase = 0;     // 0=idle, 1=ON, 2=gap
+extern volatile uint8_t alarm_buzz_phase;  // alarm pattern OWNS BUZZER when > 0
+
 // Quadrature state machine lookup table
 static const int8_t enc_table[16] = {
     0, -1, 1, 0,
@@ -103,6 +112,37 @@ void __interrupt(low_priority) isr_low(void)
 
         // Free-running ms counter for encoder acceleration
         if (encoder_ms_timer < 65535) encoder_ms_timer++;
+
+        // [R3] Non-blocking buzzer sequencer (1ms resolution). While an alarm
+        // pattern is running (alarm_buzz_phase > 0) it owns the BUZZER pin, so
+        // never drive the pin here — just run the timing down.
+        if (buzzer_phase && buzzer_ms > 0)
+        {
+            buzzer_ms--;
+            if (buzzer_ms == 0)
+            {
+                if (buzzer_phase == 1)              // end of an ON phase
+                {
+                    if (alarm_buzz_phase == 0) BUZZER = 0;
+                    if (buzzer_repeats > 0)
+                    {
+                        buzzer_phase = 2;           // -> gap
+                        buzzer_ms = buzzer_off_ms;
+                    }
+                    else
+                    {
+                        buzzer_phase = 0;           // done
+                    }
+                }
+                else                                // end of gap -> next beep
+                {
+                    buzzer_repeats--;
+                    if (alarm_buzz_phase == 0) BUZZER = 1;
+                    buzzer_phase = 1;
+                    buzzer_ms = buzzer_on_ms;
+                }
+            }
+        }
 
         // Menu timeout countdown (every 2ms)
         ms_counter++;

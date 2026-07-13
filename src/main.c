@@ -54,6 +54,7 @@ void uart_print(const char *str);
 void uart_println(const char *str);
 void system_init(void);
 void beep(uint16_t duration_ms);
+void beep_double(uint16_t on_ms, uint16_t gap_ms);
 
 // =============================================================================
 // UART Functions (EUSART2 on RB6/RB7 @ 9600 baud for debug)
@@ -211,14 +212,41 @@ void relay_close(void)
     }
 }
 
+// Alarm buzzer pattern state. Defined here (before beep()) because both beep()
+// and the Timer0 ISR must see it: while an alarm pattern is running it OWNS the
+// BUZZER pin, and the beep sequencer must not drive the pin out from under it.
+volatile uint8_t alarm_buzz_phase = 0;  // 0=idle, 1-12=on/off cycles (odd=on, even=off)
+
+// [R3] Non-blocking beep. Sets up the buzzer and returns IMMEDIATELY; the 1ms
+// Timer0 ISR sequences the pin and turns it off when the time expires.
+// Previously this busy-waited with __delay_ms, stalling the whole main loop —
+// including the 1Hz safety tick that follows it — for up to 300ms on a long
+// press, and 1ms on every single encoder detent.
 void beep(uint16_t duration_ms)
 {
-    BUZZER = 1;
-    for (uint16_t i = 0; i < duration_ms; i++)
-    {
-        __delay_ms(1);
-    }
-    BUZZER = 0;
+    INTCONbits.GIE = 0;          // atomic update of the buzzer state group
+    buzzer_on_ms   = duration_ms;
+    buzzer_off_ms  = 0;
+    buzzer_repeats = 0;
+    buzzer_phase   = 1;          // 1 = ON phase
+    buzzer_ms      = duration_ms;
+    if (alarm_buzz_phase == 0) BUZZER = 1;
+    INTCONbits.GIE = 1;
+}
+
+// [R3] Two beeps separated by a gap, fully non-blocking. Replaces the
+// beep(); __delay_ms(gap); beep(); pattern used for fault-ack and menu timeout.
+void beep_double(uint16_t on_ms, uint16_t gap_ms)
+{
+    if (gap_ms == 0) gap_ms = 1;  // a zero gap would stall the sequencer
+    INTCONbits.GIE = 0;
+    buzzer_on_ms   = on_ms;
+    buzzer_off_ms  = gap_ms;
+    buzzer_repeats = 1;           // one additional beep after the gap
+    buzzer_phase   = 1;
+    buzzer_ms      = on_ms;
+    if (alarm_buzz_phase == 0) BUZZER = 1;
+    INTCONbits.GIE = 1;
 }
 
 // =============================================================================
@@ -262,7 +290,6 @@ static uint8_t flash_toggle = 0;
 static uint8_t render_counter = 0;     // Display update throttle
 static uint16_t pwr_detect_countdown = 0;  // Non-blocking power detect delay (seconds)
 static uint8_t boot_pwr_fail = 0;             // Set once at boot if power_failure_flag was set in EEPROM
-static uint8_t buzzer_countdown = 0;          // Non-blocking beep: counts down 50ms ticks
 static uint8_t ext_stop_flag = 0;             // 1=stopped by external run input going low
 static uint8_t wdt_reset_flag = 0;            // [4e-2] 1=booted from a watchdog reset (safe-latch until acknowledged)
 static uint8_t led_flash_counter = 0;         // 50ms tick counter for 2Hz LED flash
@@ -275,7 +302,7 @@ static uint8_t alarm_flash = 0;               // Toggles at ~4Hz for alarm line 
 static uint8_t alarm_flash_counter = 0;
 
 // Alarm buzzer state (6 cycles of 500ms on / 250ms off)
-static uint8_t alarm_buzz_phase = 0;  // 0=idle, 1-12=on/off cycles (odd=on, even=off)
+// alarm_buzz_phase is defined above beep() (shared with the Timer0 ISR)
 static uint8_t alarm_buzz_tick = 0;   // Counts 50ms ticks within current phase
 
 // Alarm display: which bypass abbreviation to show on the fault line
@@ -955,7 +982,7 @@ void main(void)
                 boot_pwr_fail = 0;
                 ext_stop_flag = 0;
                 pwr_detect_countdown = 0;  // Cancel any pending countdown
-                BUZZER = 1; buzzer_countdown = 10;  // 500ms non-blocking beep
+                beep(500);  // [R3] non-blocking (ISR-sequenced)
 
                 // Immediate screen update BEFORE slow EEPROM saves
                 if (current_menu == 255)
@@ -996,7 +1023,7 @@ void main(void)
                 ext_stop_flag = 1;
                 // eventlog_write(EVT_EXT_STOP);  // LOG DISABLED
             }
-            BUZZER = 1; buzzer_countdown = 10;  // 500ms non-blocking beep
+            beep(500);  // [R3] non-blocking (ISR-sequenced)
             // Start non-blocking power detect delay before clearing flag
             pwr_detect_countdown = system_config.power_fail_delay;
             if (pwr_detect_countdown == 0) pwr_detect_countdown = 1;  // Min 1 second
@@ -1079,13 +1106,8 @@ void main(void)
         if (!subtick_flag) continue;
         subtick_flag = 0;
 
-        // Non-blocking buzzer countdown (50ms per tick)
-        if (buzzer_countdown > 0)
-        {
-            buzzer_countdown--;
-            if (buzzer_countdown == 0)
-                BUZZER = 0;
-        }
+        // [R3] Buzzer timing now lives in the 1ms Timer0 ISR (beep/beep_double),
+        // so the old coarse 50ms buzzer_countdown here is gone.
 
         // Alarm buzzer: 6 cycles of 500ms on / 250ms off (non-blocking)
         if (alarm_buzz_phase > 0)
@@ -1400,9 +1422,7 @@ void main(void)
                         save_power_flags();
                         uart_println("Faults cleared (button)");
                         // Distinctive double-beep for fault acknowledgment
-                        beep(50);
-                        __delay_ms(80);
-                        beep(50);
+                        beep_double(50, 80);  // [R3] non-blocking (was ~180ms stall)
                         // Immediate screen update to clear fault message
                         render_main_screen(adc_ch1, adc_ch2, adc_ch3);
                         render_counter = 0;
@@ -1510,9 +1530,7 @@ void main(void)
 
         if (current_menu <= 6 && menu_timeout_flag == 0)
         {
-            beep(100);
-            __delay_ms(50);
-            beep(100);
+            beep_double(100, 50);  // [R3] non-blocking (was ~250ms stall)
 
             current_menu = 255;
             menu.in_edit_mode = 0;
