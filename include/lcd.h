@@ -17,9 +17,6 @@ void lcd_print(const char *str);
 void lcd_flush(void);
 void lcd_force_flush(void);  // Send all 4 lines unconditionally (ignores change detection)
 
-// [R3] EUSART1 TX ring-buffer drain — call from the low-priority ISR.
-void lcd_tx_isr(void);
-
 // Display Board Control Functions
 void disp_clear(void);
 void disp_set_brightness(uint8_t percent);
