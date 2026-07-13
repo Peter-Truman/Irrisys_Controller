@@ -21,7 +21,6 @@ echo.
     src\i2c.c ^
     src\rtc.c ^
     src\pca9535.c ^
-    src\eventlog.c ^
     -o src\main.hex ^
     -I include
 
