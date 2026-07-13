@@ -728,6 +728,88 @@ static void start_alarm_buzzer(void)
 // Main Function
 // =============================================================================
 
+// ============================================================================
+// EEPROM config dump (debug UART, 9600 on RB6)
+//
+// Prints every persisted field at boot so a power-cycle can be verified field
+// by field, not just by eyeballing one value on the LCD. Also verifies the
+// stored checksum against a freshly computed one — a MISMATCH means the config
+// was found corrupt and factory defaults were loaded.
+//
+// Costs ~1.3s of boot time at 9600 baud. Set to 0 to disable.
+// ============================================================================
+#define DEBUG_EEPROM_DUMP 1
+
+#if DEBUG_EEPROM_DUMP
+extern uint16_t calculate_config_checksum(void);
+extern uint16_t eeprom_read_word(uint16_t address);
+
+static void dump_eeprom_config(void)
+{
+    char b[64];
+
+    uart_println("");
+    uart_println("===== EEPROM CONFIG DUMP =====");
+
+    uart_println("[SYSTEM]");
+    sprintf(b, "  clock_en=%u  menu_timeout=%u  end_rt_mode=%u",
+            system_config.clock_enabled, system_config.menu_timeout,
+            system_config.end_runtime_mode);
+    uart_println(b); CLRWDT();
+    sprintf(b, "  runtime=%u:%02u  relay_pulse=%us",
+            system_config.runtime_hours, system_config.runtime_minutes,
+            system_config.relay_pulse_time);
+    uart_println(b); CLRWDT();
+    sprintf(b, "  contrast=%u  brightness=%u  pwr_fail_delay=%us",
+            system_config.contrast, system_config.brightness,
+            system_config.power_fail_delay);
+    uart_println(b); CLRWDT();
+    sprintf(b, "  pwr_fail_flag=%u  active_stop_code=%u",
+            system_config.power_failure_flag, system_config.active_stop_code);
+    uart_println(b); CLRWDT();
+    sprintf(b, "  DIG2 en/pol/rly=%u/%u/%u  DIG3=%u/%u/%u  DIG4=%u/%u/%u",
+            system_config.dig2_enable, system_config.dig2_fault_polarity, system_config.dig2_relay_mode,
+            system_config.dig3_enable, system_config.dig3_fault_polarity, system_config.dig3_relay_mode,
+            system_config.dig4_enable, system_config.dig4_fault_polarity, system_config.dig4_relay_mode);
+    uart_println(b); CLRWDT();
+
+    for (uint8_t i = 0; i < 3; i++)
+    {
+        sprintf(b, "[INPUT %u] name='%s' units='%s'",
+                i + 1, input_config[i].name, input_config[i].units);
+        uart_println(b); CLRWDT();
+        sprintf(b, "  enable=%u  sensor=%u  fault_pol=%u",
+                input_config[i].enable, input_config[i].sensor_type,
+                input_config[i].fault_polarity);
+        uart_println(b); CLRWDT();
+        sprintf(b, "  scale 4mA=%d  20mA=%d",
+                input_config[i].scale_4ma, input_config[i].scale_20ma);
+        uart_println(b); CLRWDT();
+        sprintf(b, "  setpoint HI=%d  LO=%d",
+                input_config[i].high_setpoint, input_config[i].low_setpoint);
+        uart_println(b); CLRWDT();
+        sprintf(b, "  bypass PriHi=%u SecHi=%u PriLo=%u SecLo=%u",
+                input_config[i].primary_high_bypass, input_config[i].secondary_high_bypass,
+                input_config[i].primary_low_bypass, input_config[i].secondary_low_bypass);
+        uart_println(b); CLRWDT();
+        sprintf(b, "  relay PriHi=%u SecHi=%u PriLo=%u SecLo=%u  (0=Latch 1=Pulse)",
+                input_config[i].relay_pri_high_mode, input_config[i].relay_sec_high_mode,
+                input_config[i].relay_pri_low_mode, input_config[i].relay_sec_low_mode);
+        uart_println(b); CLRWDT();
+    }
+
+    // Checksum health: stored (in EEPROM) vs freshly computed over the EEPROM
+    // image. MISMATCH => config was corrupt at boot and factory defaults loaded.
+    uint16_t stored = eeprom_read_word(EEPROM_CHECKSUM_ADDR);
+    uint16_t calc   = calculate_config_checksum();
+    sprintf(b, "  checksum stored=0x%04X calc=0x%04X  %s",
+            stored, calc, (stored == calc) ? "MATCH" : "*** MISMATCH ***");
+    uart_println(b); CLRWDT();
+    uart_println("==============================");
+    uart_println("");
+}
+#endif
+
 void main(void)
 {
     // [4e-2] Capture reset cause BEFORE the first CLRWDT (which sets /TO).
@@ -787,6 +869,10 @@ void main(void)
     lcd_init();
 
     uart_println("Peripherals initialized");
+
+#if DEBUG_EEPROM_DUMP
+    dump_eeprom_config();  // full persisted-config dump for power-cycle verification
+#endif
 
     // Confirm relay initial state (energized = closed)
     uart_println("RELAY: Closed (energized)");
