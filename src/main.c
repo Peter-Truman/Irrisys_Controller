@@ -2,9 +2,9 @@
  * IRRISYS - Full System with Buffered LCD
  * PIC18F26K22 @ 32MHz
  *
- * Version: Ver_B_Rev_0
- *   - Ver_B = Hardware version (alphabetic, increments on pin/peripheral changes)
- *   - Rev_0 = Firmware revision for this hardware version
+ * Version: Ver 3 Rev 3
+ *   - Ver 3 = Product/firmware version
+ *   - Rev 3 = Incremented on every change; reset to 0 prior to release
  *
  * Button behavior:
  *   - Press -> immediate short beep (50ms)
@@ -12,8 +12,8 @@
  *   - Hold >= 1000ms -> long beep (300ms), long press event, non-blocking
  */
 
-#define HW_VERSION  'B'   // Hardware version (A, B, C, ...)
-#define FW_REVISION 0     // Firmware revision for this hardware
+#define FW_VERSION  3     // Product/firmware version
+#define FW_REVISION 3     // Incremented every change; reset to 0 before release
 
 #include "../include/config.h"
 #include "../include/encoder.h"
@@ -820,6 +820,13 @@ void main(void)
     CLRWDT();  // [R5] Fresh watchdog window for the whole boot sequence
     system_init();
     uart_init();
+
+    // Clear the display as early as possible. EUSART1 is already configured by
+    // system_init(), so the clear goes out ahead of EEPROM/I2C/RTC init rather
+    // than leaving power-up garbage on the LCD for the whole boot sequence.
+    lcd_init();
+    disp_clear();
+
     eeprom_init();
 
     // Capture boot-time power fail state (only show on first screen after power-up)
@@ -834,7 +841,7 @@ void main(void)
     uart_println("================================");
     uart_println("IRRISYS Pump Protection");
     char buf[60];
-    sprintf(buf, "Ver_%c_Rev_%d", HW_VERSION, FW_REVISION);
+    sprintf(buf, "Ver %d  Rev %d", FW_VERSION, FW_REVISION);
     uart_println(buf);
     uart_println("================================");
 
@@ -866,7 +873,7 @@ void main(void)
     // Initialize encoder and menu
     encoder_init();
     menu_init();
-    lcd_init();
+    // lcd_init() already done at the top of main() for the early display clear
 
     uart_println("Peripherals initialized");
 
@@ -883,16 +890,12 @@ void main(void)
     // Set power LED
     disp_set_leds(0x01);
 
-    // Splash screen
+    // Splash screen - product name on line 2, version on line 3
     lcd_clear();
-    lcd_set_cursor(0, 0);
-    lcd_print("       IRRISYS      ");
     lcd_set_cursor(1, 0);
-    lcd_print("  Pump Protection   ");
+    lcd_print(" Irrisys PumpGuard  ");
     lcd_set_cursor(2, 0);
-    lcd_print("                    ");
-    lcd_set_cursor(3, 0);
-    sprintf(buf, "    Ver_%c_Rev_%d    ", HW_VERSION, FW_REVISION);
+    sprintf(buf, "    Ver %d  Rev %d", FW_VERSION, FW_REVISION);
     lcd_print(buf);
     lcd_flush();
 
@@ -903,11 +906,11 @@ void main(void)
         __delay_ms(100);
     }
 
-    // Hold splash briefly. The display board is already ready by this point (it
-    // boots in ~1s and we waited 500ms above), so this is purely how long the
-    // logo is shown — trimmed from 5s to 1.5s to get to the main screen sooner.
-    uart_println("Splash hold 1.5s...");
-    delay_ms_wdt(1500);  // [R5] WDT-fed
+    // Hold the splash for 5s. The display board is already ready by this
+    // point (it boots in ~1s and we waited 500ms above), so this is purely
+    // how long the logo is shown.
+    uart_println("Splash hold 5s...");
+    delay_ms_wdt(5000);  // [R5] WDT-fed
     beep(200);
 
     // Go to main screen

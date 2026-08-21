@@ -182,11 +182,20 @@ static char value_back[5] = "Back";
 static char value_custom_name[12] = "";      // For "Other" sensor types
 static char value_custom_units[5] = "";      // For "Other 4-20" type
 
-// Saved state for name editor cancel/restore
-static char saved_name[16] = "";             // Original name before name editor
-static char saved_units[8] = "";             // Original units before name editor
-static uint8_t saved_sensor_type = 0;        // Original sensor type (for auto-open cancel)
+// Saved state for name editor cancel/restore.
+// A sensor-type change now resets every sensor-dependent field, so cancelling
+// has to restore the whole config - saving name/units/type alone would leave
+// the input carrying the new type's scales, setpoints and bypass timers.
+static input_config_t saved_input_cfg;       // Full config before sensor change
 static uint8_t name_editor_auto_opened = 0;  // Flag: 1 if auto-opened after sensor change
+
+// Undo an auto-opened sensor change by restoring the pre-change config.
+static void restore_saved_input_cfg(void)
+{
+    memcpy(&input_config[current_input], &saved_input_cfg, sizeof(input_config_t));
+    input_config_dirty[current_input] = 1;  // Defer EEPROM write
+    name_editor_auto_opened = 0;
+}
 
 // Dynamic bypass labels for custom names (types 4 and 5)
 static char custom_bp_phi[8] = "";   // Primary high bypass label
@@ -572,37 +581,15 @@ void rebuild_input_menu(void)
     }
 
     n = add_menu_item(n, "Enable", value_enable, 1, FT_ENABLE);
-    n = add_menu_item(n, "Sensor", value_sensor, 1, FT_SENSOR);
 
     // Generate custom bypass labels from name
     generate_custom_bp_labels(input_config[idx].name);
 
     if (is_analog_type(st))
     {
-        // --- ANALOG menu - Units are customizable via name editor
-        strncpy(value_custom_units, input_config[idx].units, 3);
-        value_custom_units[3] = '\0';
-        n = add_menu_item(n, "Units", value_custom_units, 1, FT_CUSTOM_UNITS);
-
-        // Scale 4mA
-        {
-            int16_t v = input_config[idx].scale_4ma;
-            if (v < 0) sprintf(value_scale4, "-%03d", -v);
-            else sprintf(value_scale4, "+%03d", v);
-        }
-        n = add_menu_item(n, "Scale 4mA", value_scale4, 1, FT_SCALE_4MA);
-
-        // Scale 20mA
-        {
-            int16_t v = input_config[idx].scale_20ma;
-            if (v < 0) sprintf(value_scale20, "-%03d", -v);
-            else sprintf(value_scale20, "+%03d", v);
-        }
-        n = add_menu_item(n, "Scale 20mA", value_scale20, 1, FT_SCALE_20MA);
-
-        // High setpoint
-        sprintf(value_high_sp, "%03d", input_config[idx].high_setpoint);
-        n = add_menu_item(n, lbl_high[st], value_high_sp, 1, FT_HI_LIMIT);
+        // --- ANALOG menu ---
+        // Order: Enable, high setpoint + its bypasses, low setpoint + its bypasses,
+        //        Sensor, Units, Scale 4mA, Scale 20mA, relay modes, Back, EXIT
 
         // Use custom labels for type 4 (Other 4-20), or default labels for others
         const char *bp_phi = (st == 4) ? custom_bp_phi : lbl_phi_bp[st];
@@ -613,6 +600,10 @@ void rebuild_input_menu(void)
         const char *rly_shi = (st == 4) ? custom_rly_shi : lbl_rly_shi[st];
         const char *rly_plo = (st == 4) ? custom_rly_plo : lbl_rly_plo[st];
         const char *rly_slo = (st == 4) ? custom_rly_slo : lbl_rly_slo[st];
+
+        // High setpoint
+        sprintf(value_high_sp, "%03d", input_config[idx].high_setpoint);
+        n = add_menu_item(n, lbl_high[st], value_high_sp, 1, FT_HI_LIMIT);
 
         // Primary high bypass
         sprintf(value_pri_high_bp, "%02u:%02u",
@@ -642,6 +633,30 @@ void rebuild_input_menu(void)
                 input_config[idx].secondary_low_bypass % 60);
         n = add_menu_item(n, bp_slo, value_sec_low_bp, 1, FT_SEC_LO_BP);
 
+        // Sensor type
+        n = add_menu_item(n, "Sensor", value_sensor, 1, FT_SENSOR);
+
+        // Units are customizable via name editor
+        strncpy(value_custom_units, input_config[idx].units, 3);
+        value_custom_units[3] = '\0';
+        n = add_menu_item(n, "Units", value_custom_units, 1, FT_CUSTOM_UNITS);
+
+        // Scale 4mA
+        {
+            int16_t v = input_config[idx].scale_4ma;
+            if (v < 0) sprintf(value_scale4, "-%03d", -v);
+            else sprintf(value_scale4, "+%03d", v);
+        }
+        n = add_menu_item(n, "Scale 4mA", value_scale4, 1, FT_SCALE_4MA);
+
+        // Scale 20mA
+        {
+            int16_t v = input_config[idx].scale_20ma;
+            if (v < 0) sprintf(value_scale20, "-%03d", -v);
+            else sprintf(value_scale20, "+%03d", v);
+        }
+        n = add_menu_item(n, "Scale 20mA", value_scale20, 1, FT_SCALE_20MA);
+
         // Relay modes (4 relays for analog)
         relay_high_edit_flag = input_config[idx].relay_pri_high_mode;
         relay_sec_high_edit_flag = input_config[idx].relay_sec_high_mode;
@@ -660,7 +675,10 @@ void rebuild_input_menu(void)
     }
     else
     {
-        // --- DIGITAL/SWITCH menu (12 items) ---
+        // --- DIGITAL/SWITCH menu ---
+        // Same basic order as analog: Enable, fault polarity + bypasses, Sensor,
+        // relay modes, Back, EXIT (no Units / Scale items for switch types)
+
         // Use custom labels for type 5 (Other Switch), or default labels for Flow Switch
         const char *bp_phi = (st == 5) ? custom_bp_phi : lbl_phi_bp[st];
         const char *bp_shi = (st == 5) ? custom_bp_shi : lbl_shi_bp[st];
@@ -697,6 +715,9 @@ void rebuild_input_menu(void)
                 input_config[idx].secondary_low_bypass % 60);
         n = add_menu_item(n, bp_slo, value_sec_low_bp, 1, FT_SEC_LO_BP);
 
+        // Sensor type
+        n = add_menu_item(n, "Sensor", value_sensor, 1, FT_SENSOR);
+
         // 4 relay modes
         relay_high_edit_flag = input_config[idx].relay_pri_high_mode;
         relay_sec_high_edit_flag = input_config[idx].relay_sec_high_mode;
@@ -721,6 +742,25 @@ void rebuild_input_menu(void)
     menu.total_items = n;
     menu.current_line = 0;
     menu.top_line = 0;
+}
+
+// Rebuild the input menu but leave the cursor on the field carrying `tag`
+// rather than jumping back to the top. Matched by tag, not line number, so the
+// cursor follows the field even when the analog/digital layout changes.
+// If the tag is absent from the new layout the cursor stays at the top.
+static void rebuild_input_menu_keep_field(uint8_t tag)
+{
+    rebuild_input_menu();
+
+    for (uint8_t i = 0; i < menu.total_items; i++)
+    {
+        if (input_field_tags[i] == tag)
+        {
+            menu.current_line = i;
+            menu.top_line = (i > 2) ? (uint8_t)(i - 2) : 0;
+            return;
+        }
+    }
 }
 
 void rebuild_clock_menu(void)
@@ -1708,38 +1748,20 @@ static void save_input_field(uint8_t line, uint8_t idx)
     case FT_SENSOR:
     {
         // Save original state before changing (for cancel/restore)
-        saved_sensor_type = input_config[idx].sensor_type;
-        strncpy(saved_name, input_config[idx].name, 15);
-        saved_name[15] = '\0';
-        strncpy(saved_units, input_config[idx].units, 7);
-        saved_units[7] = '\0';
+        memcpy(&saved_input_cfg, &input_config[idx], sizeof(input_config_t));
 
-        input_config[idx].sensor_type = sensor_edit_flag;
-        // Update name and units to defaults for this sensor type
-        static const char *default_names[] = {
-            "Pressure", "Temperature", "Flow Meter",
-            "Flow Switch", "Other 4-20", "Other Sw"
-        };
-        static const char *default_units[] = {
-            "psi", "\xDF""C", "%", "", "", ""  // Empty for digital types
-        };
-        if (sensor_edit_flag <= 5)
-        {
-            strncpy(input_config[idx].name, default_names[sensor_edit_flag], 15);
-            input_config[idx].name[15] = '\0';
-            strncpy(input_config[idx].units, default_units[sensor_edit_flag], 7);
-            input_config[idx].units[7] = '\0';
-        }
+        // Reset every sensor-dependent field - scales, setpoints, bypass
+        // timers, relay modes, fault polarity, name and units - to the new
+        // type's defaults. Carrying the previous sensor's trip settings over
+        // would leave the input protecting the pump against the wrong thing.
+        apply_sensor_type_defaults(idx, sensor_edit_flag);
         // Rebuild menu since analog/digital layout may change
         input_config_dirty[idx] = 1;  // Defer EEPROM write to after 1-second tick
-        rebuild_input_menu();
+        rebuild_input_menu_keep_field(FT_SENSOR);
 
         // For "Other" types, automatically open name editor with empty string
         if (sensor_edit_flag == 4 || sensor_edit_flag == 5)
         {
-            // Position cursor on the Name field (line 2)
-            menu.current_line = 2;
-            menu.top_line = 0;
             // Mark as auto-opened so cancel can restore previous state
             name_editor_auto_opened = 1;
             // Open name editor with empty string
@@ -1941,13 +1963,7 @@ void menu_handle_button(uint8_t press_type)
         // If in name editor that was auto-opened, restore previous state
         if (menu.name_edit_mode > 0 && name_editor_auto_opened)
         {
-            input_config[current_input].sensor_type = saved_sensor_type;
-            strncpy(input_config[current_input].name, saved_name, 15);
-            input_config[current_input].name[15] = '\0';
-            strncpy(input_config[current_input].units, saved_units, 7);
-            input_config[current_input].units[7] = '\0';
-            input_config_dirty[current_input] = 1;  // Defer EEPROM write
-            name_editor_auto_opened = 0;
+            restore_saved_input_cfg();
         }
         menu.name_edit_mode = 0;
         menu.in_edit_mode = 0;
@@ -1978,6 +1994,9 @@ void menu_handle_button(uint8_t press_type)
             // Save to config
             if (current_menu == 1)
             {
+                // Field the editor was opened from - restored after the rebuild
+                uint8_t edited_tag = input_field_tags[menu.current_line];
+
                 if (was_name_edit)
                 {
                     // Save name directly from buffer
@@ -1991,7 +2010,7 @@ void menu_handle_button(uint8_t press_type)
                     input_config[current_input].units[7] = '\0';
                 }
                 input_config_dirty[current_input] = 1;  // Defer EEPROM write
-                rebuild_input_menu();  // Refresh menu with new name
+                rebuild_input_menu_keep_field(edited_tag);  // Refresh, keep cursor
             }
 
             // Advance cursor to next item
@@ -2004,24 +2023,21 @@ void menu_handle_button(uint8_t press_type)
         }
         else if (result == 2)  // Cancelled (Back at pos 0)
         {
+            // Field the editor was opened from - restored after the rebuild
+            uint8_t edited_tag = input_field_tags[menu.current_line];
+
             menu.name_edit_mode = 0;
             menu.in_edit_mode = 0;
 
             // If name editor was auto-opened after sensor change, restore previous state
             if (name_editor_auto_opened && current_menu == 1)
             {
-                input_config[current_input].sensor_type = saved_sensor_type;
-                strncpy(input_config[current_input].name, saved_name, 15);
-                input_config[current_input].name[15] = '\0';
-                strncpy(input_config[current_input].units, saved_units, 7);
-                input_config[current_input].units[7] = '\0';
-                input_config_dirty[current_input] = 1;  // Defer EEPROM write
-                name_editor_auto_opened = 0;
+                restore_saved_input_cfg();
             }
 
             // Rebuild menu with restored values
             if (current_menu == 1)
-                rebuild_input_menu();
+                rebuild_input_menu_keep_field(edited_tag);
         }
         // result == 0: still editing, do nothing
         return;

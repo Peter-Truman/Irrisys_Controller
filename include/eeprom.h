@@ -101,6 +101,35 @@ void save_system_config(void);
 void save_power_flags(void);
 void factory_reset(void);
 void load_factory_defaults(void);
+
+// Per-sensor-type defaults. Indexed by sensor_type (0-5). Holds only the
+// fields that are meaningful to a sensor type — the values that would be
+// nonsense if carried over from a different sensor (a pressure span on a
+// temperature input, a low-pressure trip timer on a flow switch, etc).
+typedef struct
+{
+    int16_t scale_4ma;
+    int16_t scale_20ma;
+    int16_t high_setpoint;
+    int16_t low_setpoint;
+    uint16_t primary_high_bypass;
+    uint16_t secondary_high_bypass;
+    uint16_t primary_low_bypass;
+    uint16_t secondary_low_bypass;
+    uint8_t relay_pri_high_mode;
+    uint8_t relay_sec_high_mode;
+    uint8_t relay_pri_low_mode;
+    uint8_t relay_sec_low_mode;
+    uint8_t fault_polarity;
+    const char *name;
+    const char *units;
+} sensor_defaults_t;
+
+extern const sensor_defaults_t sensor_type_defaults[6];
+
+// Reset every sensor-dependent field of input `idx` to the defaults for
+// sensor type `st`. `enable` is deliberately left untouched.
+void apply_sensor_type_defaults(uint8_t idx, uint8_t st);
 void sync_menu_variables(void);
 
 uint8_t get_menu_timeout_seconds(void);

@@ -3,7 +3,7 @@
 ## Project Overview
 
 **Product:** IRRISYS Irrigation Pump Protection System
-**Current Firmware:** Ver_B_Rev_0
+**Current Firmware:** Ver 3 Rev 2
 
 **Hardware:**
 - Display board: IrrisysPG_Ver_B_Display_Rev_2
@@ -42,6 +42,8 @@ Communication: Main -> Display via serial (19200 baud, 8N1)
 | 2026-02-08 | Main    | 75          | Fix bypass monitoring when both primary/secondary timers are 0, clean alarm display                                                     |
 | 2026-02-09 | Main    | Ver_B_Rev_0 | Deferred EEPROM saves (dirty flags), new versioning scheme (Ver_B_Rev_0)                                                               |
 | 2026-07-02 | HW      | Ver_B_Rev_2 | **Hardware:** 4-20mA burden R8/R4/R5 100R->220R (all 3 ch), TVS SMAJ24CA added at J2/J3/J4. **Firmware TODO before this HW ships** — see "Pending Hardware Change" below. |
+| 2026-08-21 | Main    | Ver 3 Rev 1 | Reorder INPUT menu (Enable, setpoints+bypasses, Sensor, Units, Scales, relay modes, Back, EXIT); cursor stays on the edited field across menu rebuilds; sensor-type change now resets all sensor-dependent fields to per-type defaults |
+| 2026-08-21 | Main    | Ver 3 Rev 2 | Versioning scheme -> `Ver N Rev N`; LCD cleared at top of `main()`; splash is "Irrisys PumpGuard" / version on lines 2-3; Pressure defaults corrected (20mA=362, SHPBP=1s, Rly SLPBP=Pulse); factory defaults now derived from `sensor_type_defaults[]` |
 
 ---
 
@@ -95,33 +97,34 @@ Provisional constant from HW note (assumes VDD=5.0V ref): `ADC_MA_PER_COUNT = 0.
 ### Firmware Version Format
 
 ```c
-#define HW_VERSION  'B'   // Hardware version (A, B, C, ...)
-#define FW_REVISION 0     // Firmware revision for this hardware
+#define FW_VERSION  3     // Product/firmware version
+#define FW_REVISION 2     // Incremented every change; reset to 0 before release
 ```
 
-Displayed as: `Ver_B_Rev_0`
+Displayed as: `Ver 3  Rev 2` (splash screen line 3, and the debug UART banner).
 
-- **HW_VERSION** (alphabetic): Increments when hardware changes require firmware changes (different pins, peripherals, etc.). Ver_B firmware must NOT run on Ver_A hardware.
-- **FW_REVISION** (numeric): Increments for firmware changes within the same hardware version. Resets to 0 when HW_VERSION increments.
+- **FW_VERSION** (numeric): The product/firmware version. Currently 3.
+- **FW_REVISION** (numeric): Incremented on **every** change during development,
+  so a flashed board can always be matched to a specific build. **Reset to 0
+  immediately prior to a release.**
+
+> Note: this replaces the earlier `Ver_B_Rev_0` scheme, where the leading field
+> was an alphabetic *hardware* version. Hardware revision is no longer encoded
+> in the firmware version string - see Hardware Revision Policy below.
 
 ### Increment Policy
 
-**MUST increment FW_REVISION for:**
+**Increment FW_REVISION for every change**, including:
 - New features or functionality
 - Bug fixes that change behavior
 - Peripheral driver changes
 - Protocol changes (affects both boards)
 - Menu structure changes
+- Default value changes
 
-**MUST increment HW_VERSION for:**
-- Pin assignment changes
-- Peripheral additions/removals
-- Any change requiring different hardware to run
+**Reset FW_REVISION to 0** immediately prior to a release build.
 
-**Do NOT increment for:**
-- Code comments or documentation
-- Formatting/whitespace only
-- Debug code added temporarily
+**FW_VERSION** changes only on a deliberate product version step.
 
 ---
 
@@ -131,7 +134,7 @@ Displayed as: `Ver_B_Rev_0`
 
 | Asset Type                               | Storage  | Versioning                     |
 | ---------------------------------------- | -------- | ------------------------------ |
-| Firmware (C source, headers)             | GitHub   | Git commits + HW_VERSION/FW_REVISION |
+| Firmware (C source, headers)             | GitHub   | Git commits + FW_VERSION/FW_REVISION |
 | Hardware (schematics, PCB, gerbers, BOM) | OneDrive | Folder structure (Ver_X/Rev_Y) |
 | Datasheets, reference docs               | Either   | N/A                            |
 
@@ -162,7 +165,7 @@ Displayed as: `Ver_B_Rev_0`
 ```
 Irrisys_Controller/
 ├── src/                        # Main board source (PIC18F26K22)
-│   ├── main.c                 # Entry point, HW_VERSION/FW_REVISION, main loop
+│   ├── main.c                 # Entry point, FW_VERSION/FW_REVISION, main loop
 │   ├── menu.c                 # Menu system logic, field editing, deferred saves
 │   ├── eeprom.c               # Internal EEPROM configuration storage
 │   ├── eventlog.c             # Event log (DISABLED — log concept abandoned, dropped from build)
@@ -329,6 +332,26 @@ PORTC:
 
 ## Main Loop Architecture
 
+### Startup Sequence
+
+1. `system_init()` - oscillator, ports, both EUSARTs
+2. `uart_init()` - debug serial
+3. **`lcd_init()` + `disp_clear()`** - the display is cleared here, before any
+   EEPROM/I2C/RTC work, so power-up garbage is not left on the LCD for the whole
+   boot sequence
+4. `eeprom_init()`, `i2c_init()`, `pca9535_init()`, `rtc_init()`, `encoder_init()`,
+   `menu_init()`
+5. 500ms wait for the display board to finish booting, then the splash:
+
+```
+Line 1:
+Line 2:  Irrisys PumpGuard
+Line 3:     Ver 3  Rev 2
+Line 4:
+```
+
+6. Three startup beeps, 1.5s splash hold, then the main screen
+
 ### Timing System
 
 The main loop is non-blocking and driven by two interrupt-sourced flags:
@@ -393,7 +416,7 @@ if (system_config_dirty) { save_system_config(); system_config_dirty = 0; }
 | State        | Value | Description                                         |
 | ------------ | ----- | --------------------------------------------------- |
 | BP_INACTIVE  | 0     | Direction not monitored (timer = 0)                 |
-| BP_PRIMARY   | 1     | Startup grace period (counts down regardless)       |
+| BP_PRIMARY   | 1     | Startup grace period (runs only while faulted)      |
 | BP_NORMAL    | 2     | Normal monitoring (no timer running)                |
 | BP_SECONDARY | 3     | Fault detected, secondary countdown                 |
 | BP_ALARM     | 4     | Timer expired while fault active -> relay trip      |
@@ -411,7 +434,7 @@ Each input has independent high and low direction bypass timers. When an alarm t
 ### Bypass Monitoring Rules
 
 - If both primary and secondary bypass timers are 0 for a direction, that direction is NOT monitored (BP_INACTIVE).
-- If primary > 0, starts in BP_PRIMARY on RUN. After primary expires, enters BP_NORMAL.
+- If primary > 0, starts in BP_PRIMARY on RUN. The primary window is **abandoned the moment the threshold is reached** (value goes good) -> BP_NORMAL, and any further excursion is handled by the secondary timer. If the value is still in fault when the primary countdown reaches 0 -> BP_ALARM (relay trip attributed to the primary timer). Primary and secondary are never summed.
 - If primary = 0 but secondary > 0, starts directly in BP_NORMAL on RUN.
 - Fault during BP_NORMAL starts BP_SECONDARY countdown. If fault persists through secondary, triggers BP_ALARM.
 - Fault clearing during BP_SECONDARY returns to BP_NORMAL.
@@ -470,9 +493,9 @@ Each input has independent high and low direction bypass timers. When an alarm t
 | 4     | Other 4-20   | Analog         | High Value / Low Value | PHV, SHV, PLV, SLV |
 | 5     | Other Switch | Digital        | Aux (high only)        | PA, SA, PNA, SNA   |
 
-Analog types (0,1,2,4) have 17 menu items: Enable, Sensor, Units, Scale 4mA, Scale 20mA, High Setpoint, 4 bypass timers, Low Setpoint, 4 bypass timers, Back, EXIT.
+Analog types (0,1,2,4) have 17 menu items: Enable, High Setpoint, 2 high bypass timers, Low Setpoint, 2 low bypass timers, Sensor, Units, Scale 4mA, Scale 20mA, 4 relay modes, Back, EXIT.
 
-Digital types (3,5) have 13 menu items: Enable, Sensor, Fault Polarity, High Setpoint, 4 bypass timers, 4 relay modes, Back, EXIT.
+Digital types (3,5) have 13 menu items: Enable, Fault Polarity, 4 bypass timers, Sensor, 4 relay modes, Back, EXIT.
 
 ### Sensor-Specific Units
 
@@ -556,6 +579,20 @@ Stored on external M24M01 I2C EEPROM. Each entry is a stop code (uint8_t). Newes
 
 ### Factory Defaults
 
+Factory (startup) defaults are **derived from `sensor_type_defaults[]`** - the
+same table used when the operator changes an input's sensor type. There is one
+source of truth; the two cannot drift apart. `load_factory_defaults()` assigns a
+sensor type per input slot and applies that type's defaults:
+
+| Input | Sensor type at factory reset |
+| ----- | ---------------------------- |
+| Input 1 | 0 - Pressure |
+| Input 2 | 1 - Temperature |
+| Input 3 | 2 - Flow Meter |
+
+`enable` is set to 1 for all three inputs. All field values are in the
+Sensor Type Change Defaults table below.
+
 **Input 1 - Pressure:**
 
 | Parameter | Default |
@@ -564,12 +601,15 @@ Stored on external M24M01 I2C EEPROM. Each entry is a stop code (uint8_t). Newes
 | Sensor Type | Pressure |
 | Units | psi |
 | 4mA Scale | 0 |
-| 20mA Scale | 360 |
+| 20mA Scale | 362 |
 | High Setpoint | 200 |
 | Low Setpoint | 30 |
+| Pri High BP | 0s |
+| Sec High BP | 1s |
 | Pri Low BP | 300s (5:00) |
 | Sec Low BP | 30s (0:30) |
-| All Relay Modes | Latch |
+| Rly Pri High / Sec High / Pri Low | Latch |
+| Rly Sec Low | **Pulse** |
 
 **Input 2 - Temperature:**
 
@@ -596,6 +636,47 @@ Stored on external M24M01 I2C EEPROM. Each entry is a stop code (uint8_t). Newes
 | 20mA Scale | 100 |
 | Sec Low BP | 30s (0:30) |
 | All Relay Modes | Latch |
+
+### Sensor Type Change Defaults
+
+Changing an input's **Sensor** type resets every sensor-dependent field to that
+type's defaults. Without this, a re-typed input keeps the previous sensor's trip
+settings -- e.g. Pressure -> Temperature would leave a 0-360 span with setpoints
+of 200/30 on a temperature input, which is meaningless and unsafe.
+
+Defaults live in `sensor_type_defaults[6]` ([eeprom.c](src/eeprom.c)) and are
+applied by `apply_sensor_type_defaults(idx, sensor_type)`, called from the
+`FT_SENSOR` case of `save_input_field()` ([menu.c](src/menu.c)).
+
+**Fields reset:** scale 4mA, scale 20mA, high setpoint, low setpoint, all 4
+bypass timers, all 4 relay modes, fault polarity, name, units.
+**Field preserved:** `enable` -- the operator has just chosen to configure this
+input, so its enabled state is left alone.
+
+Bypass timers in seconds. Relay columns are Pri Hi / Sec Hi / Pri Lo / Sec Lo,
+L = Latch, P = Pulse.
+
+| Type | Name | Units | 4mA | 20mA | High SP | Low SP | Pri Hi BP | Sec Hi BP | Pri Lo BP | Sec Lo BP | Relays |
+| ---- | ---- | ----- | --- | ---- | ------- | ------ | --------- | --------- | --------- | --------- | ------ |
+| 0 Pressure | Pressure | psi | 0 | 362 | 200 | 30 | 0 | 1 | 300 | 30 | L/L/L/**P** |
+| 1 Temperature | Temperature | C | -50 | 150 | 85 | -10 | 60 | 0 | 0 | 0 | L/L/L/L |
+| 2 Flow Meter | Flow Meter | % | 0 | 100 | 0 | 0 | 0 | 0 | 0 | 30 | L/L/L/L |
+| 3 Flow Switch | Flow Switch | (none) | - | - | 0 | - | 0 | 0 | 0 | 0 | L/L/L/L |
+| 4 Other 4-20 | Other 4-20 | (user) | 0 | 100 | 0 | 0 | 0 | 0 | 0 | 0 | L/L/L/L |
+| 5 Other Switch | Other Sw | (none) | - | - | 0 | - | 0 | 0 | 0 | 0 | L/L/L/L |
+
+> **TODO - values not yet confirmed.** Types 2-5 (Flow Meter, Flow Switch,
+> Other 4-20, Other Switch) are placeholders awaiting operator-supplied values.
+> Types 3-5 currently have **all bypass timers 0**, which means "direction not
+> monitored" (see Bypass Monitoring Rules) - such an input cannot trip the pump
+> at all until timers are deliberately set. Confirm before release.
+
+Types 0-1 are confirmed. These same values are the factory/startup defaults.
+
+**Cancel/restore:** the full pre-change `input_config_t` is snapshotted before
+the reset. Cancelling the auto-opened name editor for "Other" types (Back at
+position 0, or long press) restores the entire previous config, not just the
+sensor type and name.
 
 ---
 
@@ -634,19 +715,19 @@ SETUP (current_menu = 2, from OPTIONS > Setup Menu)
 INPUT (current_menu = 1, unified, dynamic based on sensor type)
   Analog (17 items):        Digital (13 items):
   |- Enable                 |- Enable
-  |- Sensor                 |- Sensor
-  |- Units                  |- Fault Pol
-  |- Scale 4mA              |- High Setpoint
-  |- Scale 20mA             |- Pri High BP
-  |- High Setpoint          |- Sec High BP
-  |- Pri High BP            |- Pri Low BP
-  |- Sec High BP            |- Sec Low BP
-  |- Low Setpoint           |- Rly Pri High
-  |- Pri Low BP             |- Rly Sec High
-  |- Sec Low BP             |- Rly Pri Low
-  |- Rly Pri High           |- Rly Sec Low
-  |- Rly Sec High           |- Back -> SETUP
-  |- Rly Pri Low            +- EXIT -> Main screen
+  |- High Setpoint          |- Fault Pol
+  |- Pri High BP            |- Pri High BP
+  |- Sec High BP            |- Sec High BP
+  |- Low Setpoint           |- Pri Low BP
+  |- Pri Low BP             |- Sec Low BP
+  |- Sec Low BP             |- Sensor
+  |- Sensor                 |- Rly Pri High
+  |- Units                  |- Rly Sec High
+  |- Scale 4mA              |- Rly Pri Low
+  |- Scale 20mA             |- Rly Sec Low
+  |- Rly Pri High           |- Back -> SETUP
+  |- Rly Sec High           +- EXIT -> Main screen
+  |- Rly Pri Low
   |- Rly Sec Low
   |- Back     -> SETUP
   +- EXIT     -> Main screen
@@ -675,6 +756,8 @@ LOG VIEW (current_menu = 7, from UTILITY > View Log)
 - **Menu titles:** Consistent `======` style format, 20 chars wide (e.g. `====== CLOCK =======`).
 - **Tag-based field system:** Each menu line has a field tag (FT_ENABLE, FT_SENSOR, etc.) stored in `input_field_tags[]`. All field detection, save, and edit logic uses tags rather than hardcoded line numbers.
 - **Dynamic rebuild:** `rebuild_input_menu()` reconstructs the input menu when sensor type changes, switching between analog (17 items) and digital (13 items) layouts with sensor-specific labels.
+- **Cursor preservation:** `rebuild_input_menu_keep_field(tag)` rebuilds then restores the cursor to the field carrying that tag. Matched by tag rather than line number, so the cursor follows the field across an analog/digital layout change. Used after name/units edits (confirm and cancel) and after a sensor type change, which previously dumped the cursor back to the top of the menu.
+- **Sensor type change:** resets all sensor-dependent fields to that type's defaults (see Sensor Type Change Defaults). `enable` is preserved.
 - **Deferred saves:** Each field sets a dirty flag when confirmed. Main loop writes to EEPROM after safety processing completes. This prevents ~512ms EEPROM writes from blocking bypass timer countdown.
 - **4Hz flash:** All field types (numeric, time, option) flash at ~4Hz when being edited via `blink_state` toggling in `draw_menu_line()`.
 - **Encoder acceleration:** Steps by 20 when encoder pulses are <112ms apart, otherwise steps by 1.
@@ -703,13 +786,13 @@ State word ("RUN"/"STOP") left-justified, status message right-justified:
 ### Starting a Session
 
 1. Pull latest from remote: `git pull`
-2. Note current HW_VERSION and FW_REVISION
+2. Note current FW_VERSION and FW_REVISION
 3. Review recent commits for context
 
 ### Ending a Session
 
 1. Verify main board compiles
-2. Increment FW_REVISION if changes were significant
+2. Increment FW_REVISION (every change)
 3. Update changelog in this file
 4. Commit with descriptive message (indicate which board)
 5. Push to remote: `git push`
@@ -736,10 +819,10 @@ src\main.c src\encoder.c src\menu.c src\eeprom.c src\lcd.c
 src\i2c.c src\rtc.c src\pca9535.c
 ```
 
-### Last Known Build Size (Ver_B_Rev_0)
+### Last Known Build Size (Ver 3 Rev 2)
 
-- Program: 78.2%
-- Data: 63.1%
+- Program: 78.9%
+- Data: 64.8%
 
 ---
 

@@ -19,44 +19,79 @@ typedef char assert_system_config_is_128[(sizeof(system_config_t) == 128) ? 1 : 
 // Menu timeout in seconds (will be loaded from EEPROM)
 uint16_t menu_timeout_seconds = 30; // Default value if EEPROM invalid
 
-// Factory defaults constant
-const input_config_t factory_defaults[3] = {
-    // Input 1 - Default to Pressure (analog)
-    {
-        1, 0, 0, 0, {0, 0, 0, 0},           // enable, pressure, fault_pol=0, flags, reserved
-        0, 360, 200, 30, {0, 0, 0, 0},      // scale_4ma=0, scale_20ma=360, high=200, low=30
-        0, 0, 300, 30, {0,0,0,0,0,0,0,0,0,0,0,0}, // pri_hi=0, sec_hi=0, pri_lo=300, sec_lo=30
-        0, 0, 0, 0, {0, 0, 0, 0},           // relay: pri_hi, sec_hi, pri_lo, sec_lo = all latch
-        {0, 0, 0, 0},                        // reserved uint32
-        "Pressure",                           // name
-        "psi",                                // units
-        {0}                                   // padding
-    },
-
-    // Input 2 - Default to Temperature (analog)
-    {
-        1, 1, 0, 0, {0, 0, 0, 0},           // enable, temp, fault_pol=0, flags, reserved
-        -50, 150, 85, -10, {0, 0, 0, 0},    // scale_4ma=-50, scale_20ma=150, high=85, low=-10
-        60, 0, 0, 0, {0,0,0,0,0,0,0,0,0,0,0,0}, // pri_hi=60s, others=0
-        0, 0, 0, 0, {0, 0, 0, 0},           // relay modes all latch
-        {0, 0, 0, 0},                        // reserved uint32
-        "Temperature",                        // name
-        "\xDF""C",                            // units (degree symbol + C)
-        {0}                                   // padding
-    },
-
-    // Input 3 - Default to Flow Meter (analog)
-    {
-        1, 2, 0, 0, {0, 0, 0, 0},           // enable, flow_meter, fault_pol=0, flags, reserved
-        0, 100, 0, 0, {0, 0, 0, 0},         // scale_4ma=0, scale_20ma=100, high=0, low=0
-        0, 0, 0, 30, {0,0,0,0,0,0,0,0,0,0,0,0}, // sec_lo=30s
-        0, 0, 0, 0, {0, 0, 0, 0},           // relay modes all latch
-        {0, 0, 0, 0},                        // reserved uint32
-        "Flow Meter",                         // name
-        "%",                                  // units
-        {0}                                   // padding
-    }
+// Sensor type assigned to each input slot on a factory reset. The actual
+// field values come from sensor_type_defaults[] below, so the startup defaults
+// and the defaults applied on a sensor-type change are the same single table -
+// they cannot drift apart.
+static const uint8_t factory_sensor_type[3] = {
+    0,  // Input 1 - Pressure
+    1,  // Input 2 - Temperature
+    2   // Input 3 - Flow Meter
 };
+
+// Per-sensor-type defaults, indexed by sensor_type. Applied whenever the
+// operator changes an input's sensor type, so a re-typed input can never keep
+// trip settings that belonged to the previous sensor.
+//
+// Types 3/4/5 (Flow Switch, Other 4-20, Other Switch) default to all bypass
+// timers 0, which means "direction not monitored" — a freshly re-typed input
+// cannot trip the pump until the operator deliberately sets its timers.
+const sensor_defaults_t sensor_type_defaults[6] = {
+    // scale_4ma, scale_20ma, high_sp, low_sp,
+    // pri_hi_bp, sec_hi_bp, pri_lo_bp, sec_lo_bp,
+    // rly pri_hi, sec_hi, pri_lo, sec_lo, fault_pol, name, units
+
+    // 0 - Pressure: 0-362 psi, high trip 200 (0s pri / 1s sec),
+    //     low trip 30 with 5:00 start grace + 0:30 delay, sec low relay pulses
+    {0, 362, 200, 30,  0, 1, 300, 30,  0, 0, 0, 1, 0, "Pressure",    "psi"},
+
+    // 1 - Temperature: -50 to 150 C, trip high at 85 after 1:00 grace
+    {-50, 150, 85, -10,  60, 0, 0, 0,  0, 0, 0, 0, 0, "Temperature", "\xDF""C"},
+
+    // 2 - Flow Meter: 0-100%, secondary low delay 0:30
+    {0, 100, 0, 0,  0, 0, 0, 30,  0, 0, 0, 0, 0, "Flow Meter",  "%"},
+
+    // 3 - Flow Switch (digital): unmonitored until timers are configured
+    {0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0, 0, "Flow Switch", ""},
+
+    // 4 - Other 4-20 (analog): neutral 0-100 span, unmonitored, user names it
+    {0, 100, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0, 0, "Other 4-20",  ""},
+
+    // 5 - Other Switch (digital): unmonitored until timers are configured
+    {0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0, 0, "Other Sw",    ""}
+};
+
+void apply_sensor_type_defaults(uint8_t idx, uint8_t st)
+{
+    if (idx >= 3 || st > 5)
+        return;
+
+    const sensor_defaults_t *d = &sensor_type_defaults[st];
+    input_config_t *c = &input_config[idx];
+
+    c->sensor_type = st;
+    c->fault_polarity = d->fault_polarity;
+
+    c->scale_4ma = d->scale_4ma;
+    c->scale_20ma = d->scale_20ma;
+    c->high_setpoint = d->high_setpoint;
+    c->low_setpoint = d->low_setpoint;
+
+    c->primary_high_bypass = d->primary_high_bypass;
+    c->secondary_high_bypass = d->secondary_high_bypass;
+    c->primary_low_bypass = d->primary_low_bypass;
+    c->secondary_low_bypass = d->secondary_low_bypass;
+
+    c->relay_pri_high_mode = d->relay_pri_high_mode;
+    c->relay_sec_high_mode = d->relay_sec_high_mode;
+    c->relay_pri_low_mode = d->relay_pri_low_mode;
+    c->relay_sec_low_mode = d->relay_sec_low_mode;
+
+    strncpy(c->name, d->name, 15);
+    c->name[15] = '\0';
+    strncpy(c->units, d->units, 7);
+    c->units[7] = '\0';
+}
 
 // System defaults
 const system_config_t system_defaults = {
@@ -272,7 +307,14 @@ void factory_reset(void)
 
 void load_factory_defaults(void)
 {
-    memcpy(input_config, factory_defaults, sizeof(input_config));
+    memset(input_config, 0, sizeof(input_config));
+
+    for (uint8_t i = 0; i < 3; i++)
+    {
+        input_config[i].enable = 1;
+        apply_sensor_type_defaults(i, factory_sensor_type[i]);
+    }
+
     memcpy(&system_config, &system_defaults, sizeof(system_config));
 }
 
