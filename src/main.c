@@ -2,9 +2,9 @@
  * IRRISYS - Full System with Buffered LCD
  * PIC18F26K22 @ 32MHz
  *
- * Version: Ver 3 Rev 3
+ * Version: Ver 3 Rev 11
  *   - Ver 3 = Product/firmware version
- *   - Rev 3 = Incremented on every change; reset to 0 prior to release
+ *   - Rev 11 = Incremented on every change; reset to 0 prior to release
  *
  * Button behavior:
  *   - Press -> immediate short beep (50ms)
@@ -13,7 +13,7 @@
  */
 
 #define FW_VERSION  3     // Product/firmware version
-#define FW_REVISION 3     // Incremented every change; reset to 0 before release
+#define FW_REVISION 11     // Incremented every change; reset to 0 before release
 
 #include "../include/config.h"
 #include "../include/encoder.h"
@@ -166,10 +166,25 @@ void system_init(void)
     TRISCbits.TRISC5 = 0;
     LATCbits.LATC5 = 0;
 
-    // Enable FVR at 2.048V for ADC reference
+    // FVR at 4.096V - the ADC reference.
+    //
+    // With the 180R burden (Ver B Rev 2) a 20mA loop develops 3.60V, which
+    // clears the 4.096V FVR with room to spare - full scale is 22.8mA, so
+    // NAMUR over-range detection stays possible. 180R is chosen for exactly
+    // this: the largest burden that keeps 20mA under the FVR is ~204R, so
+    // 180R clears it with margin while a 220R burden (4.40V) would not.
+    //
+    // A fixed reference also decouples every reading from the 5V rail, so
+    // relay pull-in, buzzer and backlight load steps cannot shift readings -
+    // which averaging would NOT have caught, since a rail shift biases every
+    // sample the same way.
+    //
+    // Needs VDD comfortably above 4.096V for the reference to hold; the
+    // bench rail measures 5.041V.
+    //
     // VREFCON0: bit7=FVREN, bit6=FVRST(RO), bit5:4=FVRS<1:0>, bits3:0=unused
     // FVRS: 00=reserved, 01=1.024V, 10=2.048V, 11=4.096V
-    VREFCON0 = 0b10100000;  // FVREN=1, FVRS=10 (2.048V)
+    VREFCON0 = 0b10110000;  // FVREN=1, FVRS=11 (4.096V)
     while (!VREFCON0bits.FVRST)
         ;  // Wait for FVR to stabilize
 }
@@ -325,9 +340,49 @@ static uint8_t alarm_input_idx = 0;   // Which input (0-2) triggered the alarm
 // =============================================================================
 // ADC to engineering units conversion
 // =============================================================================
-// 4mA = 205 counts, 20mA = 1000 counts (100 ohm sense, 2.048V ref, 10-bit)
-#define ADC_4MA   205
-#define ADC_20MA  1000
+// Loop-current endpoints in ADC counts, derived from the hardware rather
+// than hard-coded, so a burden or reference change is a one-line edit.
+//
+//   counts = 1023 * (mA * BURDEN_OHMS) / ADC_VREF_MV
+//
+// Ver B Rev 2: 180R burden, internal 4.096V FVR reference.
+//   4mA  -> 0.72V -> 179 counts
+//   20mA -> 3.60V -> 894 counts   (44.7 counts/mA)
+//   full scale -> 22.8mA, leaving NAMUR over-range headroom
+//
+// CALIBRATED 2026-08-22 against a precision loop tester: at 20.00mA the
+// display read 359 psi of an expected 362, which puts the true count at
+// 894-895 rather than the nominal 899. That makes the effective reference
+// ~4119mV, +0.6% on the 4096mV nominal - inside FVR part tolerance, so it
+// is calibration rather than a fault. ADC_VREF_MV carries the correction.
+//
+// The FVR is a specified reference and, unlike VDD, does not move with
+// relay/buzzer/backlight load steps on the 5V rail. Averaging would not
+// have saved us from that: a rail shift biases every sample the same way,
+// so it passes straight through the rolling average.
+//
+// ADC_VREF_MV remains the single calibration point for all three channels.
+// The FVR has its own part-to-part tolerance, so if a loop calibrator shows
+// a consistent scale error at 20mA, trim this rather than the endpoints.
+//
+// WARNING: these constants are specific to the 180R burden. On a 100R
+// board (Ver B Rev 0/1) or a 220R board every analog reading is wrong.
+#define ADC_VREF_MV   4119   // FVR effective mV - CALIBRATED, not nominal 4096
+#define BURDEN_OHMS   180    // 4-20mA sense resistor (R8/R4/R5)
+// Rounded, not truncated: plain integer division loses up to a full count
+// at the 20mA endpoint, which is ~0.5 psi on a 362 psi range.
+#define ADC_COUNTS_AT_MA(ma)                                     \
+    ((uint16_t)((((uint32_t)1023 * (ma) * BURDEN_OHMS)           \
+                 + (ADC_VREF_MV / 2)) / ADC_VREF_MV))
+#define ADC_4MA   ADC_COUNTS_AT_MA(4)
+#define ADC_20MA  ADC_COUNTS_AT_MA(20)
+
+// [guard] The 20mA endpoint must land inside the 10-bit ADC range. If the
+// reference is ever set too low for the burden, the top of every sensor
+// range would silently clip to full-scale - a safety-critical failure that
+// reads as a perfectly healthy signal. Fail the build instead.
+typedef char assert_20ma_within_adc_range[(ADC_20MA <= 1023) ? 1 : -1];
+typedef char assert_4ma_below_20ma[(ADC_4MA < ADC_20MA) ? 1 : -1];
 
 int16_t adc_to_eng(uint16_t counts, int16_t scale_4ma, int16_t scale_20ma)
 {
@@ -448,12 +503,43 @@ void render_main_screen(uint16_t ch1, uint16_t ch2, uint16_t ch3)
 
         if (!input_config[i].enable)
         {
-            lcd_print("                    ");
+            // Say so explicitly - a blank line reads as a dead display.
+            // Left-justified, where an in-use line carries the sensor name.
+            memcpy(line, "Not Used            ", 20);
+            line[20] = '\0';
+            lcd_print(line);
             continue;
         }
 
-        // Alarm flash: blank the line during flash-off phase
-        if (alarm_active[i] && !alarm_flash)
+        uint8_t st = input_config[i].sensor_type;
+        uint8_t is_digital = (st == 3 || st == 5);
+
+        // Find most urgent active timer and its label
+        uint16_t display_timer = 0;
+        const char *bp_label = "";
+        if (bp_state[i].high.countdown > 0)
+        {
+            display_timer = bp_state[i].high.countdown;
+            if (bp_state[i].high.phase == BP_PRIMARY)
+                bp_label = bp_lbl_phi[st];
+            else
+                bp_label = bp_lbl_shi[st];
+        }
+        if (bp_state[i].low.countdown > 0 &&
+            (display_timer == 0 || bp_state[i].low.countdown < display_timer))
+        {
+            display_timer = bp_state[i].low.countdown;
+            if (bp_state[i].low.phase == BP_PRIMARY)
+                bp_label = bp_lbl_plo[st];
+            else
+                bp_label = bp_lbl_slo[st];
+        }
+
+        // Flash the line during an alarm, and while a bypass timer is
+        // counting. A countdown only runs while the value is in fault - it is
+        // abandoned the moment the value comes good - so the flash stops on
+        // its own once the reading is OK.
+        if ((alarm_active[i] || display_timer > 0) && !alarm_flash)
         {
             lcd_print("                    ");
             continue;
@@ -462,8 +548,6 @@ void render_main_screen(uint16_t ch1, uint16_t ch2, uint16_t ch3)
         // Build value and units separately
         char vbuf[8];   // Value string (max 5 chars: sign + 4 digits)
         char ubuf[4];   // Units string (max 3 chars)
-        uint8_t st = input_config[i].sensor_type;
-        uint8_t is_digital = (st == 3 || st == 5);
 
         ubuf[0] = '\0';
 
@@ -488,27 +572,6 @@ void render_main_screen(uint16_t ch1, uint16_t ch2, uint16_t ch3)
             // Copy units (max 3 chars)
             strncpy(ubuf, input_config[i].units, 3);
             ubuf[3] = '\0';
-        }
-
-        // Find most urgent active timer and its label
-        uint16_t display_timer = 0;
-        const char *bp_label = "";
-        if (bp_state[i].high.countdown > 0)
-        {
-            display_timer = bp_state[i].high.countdown;
-            if (bp_state[i].high.phase == BP_PRIMARY)
-                bp_label = bp_lbl_phi[st];
-            else
-                bp_label = bp_lbl_shi[st];
-        }
-        if (bp_state[i].low.countdown > 0 &&
-            (display_timer == 0 || bp_state[i].low.countdown < display_timer))
-        {
-            display_timer = bp_state[i].low.countdown;
-            if (bp_state[i].low.phase == BP_PRIMARY)
-                bp_label = bp_lbl_plo[st];
-            else
-                bp_label = bp_lbl_slo[st];
         }
 
         // Build the line based on whether bypass is active
@@ -577,7 +640,7 @@ uint16_t adc_read(uint8_t channel)
     // Select channel (AN0-AN2)
     ADCON0 = (uint8_t)((channel << 2) | 0x01);  // Channel select + ADC ON
 
-    // Configure ADC: right justified, Fosc/32, Vref+=FVR (2.048V), Vref-=VSS
+    // Configure ADC: right justified, Fosc/32, Vref+=FVR (4.096V), Vref-=VSS
     ADCON1 = 0b00001000;  // PVCFG<3:2>=10 (FVR), NVCFG<1:0>=00 (VSS)
     ADCON2 = 0b10100010;  // Right justified, 8 TAD acq time, Fosc/32
 
@@ -716,6 +779,30 @@ static void clear_bp_timers(void)
     alarm_input_idx = 0;
 }
 
+// Resume bypass monitoring after a fault is cleared mid-run.
+//
+// clear_bp_timers() parks every direction in BP_INACTIVE, which
+// process_bp() never leaves - so without this, acknowledging a trip while
+// DIG_IN1 is still high (sys_state stays SYS_RUN, so no STOP->RUN edge ever
+// re-runs init_bp_timers) killed all bypass protection for the rest of the run.
+//
+// The primary windows are a start-up grace that runs once per pump start, so
+// they are deliberately NOT restarted here. Every monitored direction resumes
+// at BP_NORMAL, where a fault arms its secondary timer - and re-arms it on
+// every subsequent excursion.
+static void resume_bp_timers(void)
+{
+    for (uint8_t i = 0; i < 3; i++)
+    {
+        uint8_t phase = input_config[i].enable ? BP_NORMAL : BP_INACTIVE;
+        bp_state[i].high.phase = phase;
+        bp_state[i].high.countdown = 0;
+        bp_state[i].low.phase = phase;
+        bp_state[i].low.countdown = 0;
+        alarm_active[i] = 0;
+    }
+}
+
 // Start the alarm buzzer (5 cycles of 250ms on/off)
 static void start_alarm_buzzer(void)
 {
@@ -843,6 +930,8 @@ void main(void)
     char buf[60];
     sprintf(buf, "Ver %d  Rev %d", FW_VERSION, FW_REVISION);
     uart_println(buf);
+    sprintf(buf, "Built %s %s", __DATE__, __TIME__);
+    uart_println(buf);
     uart_println("================================");
 
     // Initialize I2C bus
@@ -890,12 +979,20 @@ void main(void)
     // Set power LED
     disp_set_leds(0x01);
 
-    // Splash screen - product name on line 2, version on line 3
+    // Splash screen - name on line 2, version on line 3, build stamp on 4.
+    //
+    // The build stamp is the definitive answer to "did that flash actually
+    // take?" - the programmer reports nothing back, so the display is the
+    // only confirmation available. __DATE__ is always 11 chars and __TIME__
+    // 8, so the two plus a space fill the 20-column line exactly.
     lcd_clear();
     lcd_set_cursor(1, 0);
     lcd_print(" Irrisys PumpGuard  ");
     lcd_set_cursor(2, 0);
     sprintf(buf, "    Ver %d  Rev %d", FW_VERSION, FW_REVISION);
+    lcd_print(buf);
+    lcd_set_cursor(3, 0);
+    sprintf(buf, "%s %s", __DATE__, __TIME__);
     lcd_print(buf);
     lcd_flush();
 
@@ -1179,7 +1276,7 @@ void main(void)
         }
 
         // =============================================================
-        // ADC read every loop (~20Hz) with 8-sample rolling average
+        // ADC read every loop (~20Hz) with 4-sample rolling average
         // =============================================================
         adc_buf[0][adc_buf_idx] = adc_read(0);
         adc_buf[1][adc_buf_idx] = adc_read(1);
@@ -1252,10 +1349,23 @@ void main(void)
             alarm_flash_counter = 0;
             uint8_t any_alarm = alarm_active[0] || alarm_active[1] || alarm_active[2]
                                || system_config.active_stop_code;
-            if (any_alarm)
+
+            // A running bypass countdown flashes its line too, so the toggle
+            // has to keep running while any timer is counting.
+            uint8_t any_bypass = 0;
+            for (uint8_t i = 0; i < 3; i++)
+            {
+                if (bp_state[i].high.countdown > 0 || bp_state[i].low.countdown > 0)
+                {
+                    any_bypass = 1;
+                    break;
+                }
+            }
+
+            if (any_alarm || any_bypass)
                 alarm_flash = !alarm_flash;
             else
-                alarm_flash = 1;  // Always visible when no alarm
+                alarm_flash = 1;  // Always visible when nothing is flashing
         }
 
         // =============================================================
@@ -1551,6 +1661,10 @@ void main(void)
                         if (relay_state == 1)
                             relay_close();
                         clear_bp_timers();  // Clear all bypass alarms
+                        // Still running? Resume monitoring - otherwise every
+                        // direction stays BP_INACTIVE for the rest of the run.
+                        if (sys_state == SYS_RUN)
+                            resume_bp_timers();
                         ext_stop_flag = 0;
                         save_power_flags();
                         uart_println("Faults cleared (button)");

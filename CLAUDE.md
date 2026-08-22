@@ -3,7 +3,7 @@
 ## Project Overview
 
 **Product:** IRRISYS Irrigation Pump Protection System
-**Current Firmware:** Ver 3 Rev 2
+**Current Firmware:** Ver 3 Rev 11
 
 **Hardware:**
 - Display board: IrrisysPG_Ver_B_Display_Rev_2
@@ -41,54 +41,120 @@ Communication: Main -> Display via serial (19200 baud, 8N1)
 | 2026-02-06 | Main    | 74          | Name generator for custom sensor names, 11-char limit                                                                                   |
 | 2026-02-08 | Main    | 75          | Fix bypass monitoring when both primary/secondary timers are 0, clean alarm display                                                     |
 | 2026-02-09 | Main    | Ver_B_Rev_0 | Deferred EEPROM saves (dirty flags), new versioning scheme (Ver_B_Rev_0)                                                               |
-| 2026-07-02 | HW      | Ver_B_Rev_2 | **Hardware:** 4-20mA burden R8/R4/R5 100R->220R (all 3 ch), TVS SMAJ24CA added at J2/J3/J4. **Firmware TODO before this HW ships** — see "Pending Hardware Change" below. |
+| 2026-07-02 | HW      | Ver_B_Rev_2 | **Hardware:** 4-20mA burden R8/R4/R5 100R->**180R** (all 3 ch; briefly 220R, changed 2026-08-22), TVS SMAJ24CA added at J2/J3/J4. Firmware support landed 2026-08-22 (Ver 3 Rev 9). |
 | 2026-08-21 | Main    | Ver 3 Rev 1 | Reorder INPUT menu (Enable, setpoints+bypasses, Sensor, Units, Scales, relay modes, Back, EXIT); cursor stays on the edited field across menu rebuilds; sensor-type change now resets all sensor-dependent fields to per-type defaults |
 | 2026-08-21 | Main    | Ver 3 Rev 2 | Versioning scheme -> `Ver N Rev N`; LCD cleared at top of `main()`; splash is "Irrisys PumpGuard" / version on lines 2-3; Pressure defaults corrected (20mA=362, SHPBP=1s, Rly SLPBP=Pulse); factory defaults now derived from `sensor_type_defaults[]` |
+| 2026-08-21 | Main    | Ver 3 Rev 4 | Main screen: input line flashes while a bypass timer counts, stopping when the value is OK |
+| 2026-08-21 | Main    | Ver 3 Rev 5 | Main screen: disabled inputs show "Not Used" |
+| 2026-08-22 | Main    | Ver 3 Rev 11 | Calibrate `ADC_VREF_MV` 4096 -> 4119 against a precision loop tester (20mA read 359 of 362); endpoints 179/894 |
+| 2026-08-22 | Main    | Ver 3 Rev 10 | Splash line 4 shows build date/time (`__DATE__`/`__TIME__`); same stamp on the debug UART banner |
+| 2026-08-22 | Main    | Ver 3 Rev 9 | **Burden 220R -> 180R:** ADC reference back to the internal FVR at **4.096V** (VDD dependence removed), endpoints 180/899. Supersedes Rev 7/8. |
+| 2026-08-22 | Main    | Ver 3 Rev 8 | Trim `ADC_VREF_MV` to measured 5.041V rail (endpoints 179/893); round rather than truncate the endpoint calculation |
+| 2026-08-22 | Main    | Ver 3 Rev 7 | **220R burden support:** ADC reference FVR 2.048V -> VDD, endpoints 205/1000 -> 180/900, now derived from `ADC_VREF_MV`/`BURDEN_OHMS` with a compile-time range guard. **Incompatible with 100R boards.** |
+| 2026-08-21 | Main    | Ver 3 Rev 6 | Fix: clearing a fault mid-run left every bypass direction BP_INACTIVE, disabling all protection for the rest of the run. Monitoring now resumes at BP_NORMAL (primary windows not restarted) |
 
 ---
 
-## Pending Hardware Change — Ver_B_Rev_2 (2026-07-02, NOT yet in firmware)
+## 4-20mA Front End — Ver_B_Rev_2 (180R burden)
 
-> **⚠️ SCOPE: This applies to Rev 2 ONLY. Rev 2 is still in design and has NOT been ordered.**
->
-> **We develop and validate on Ver_B_Rev_1 hardware, which uses a 100 R burden.**
-> On Rev 1: 20 mA → 100 R → **2.00 V**, which fits under the 2.048 V FVR.
-> **The current firmware scaling (`ADC_4MA=205`, `ADC_20MA=1000`) is CORRECT for Rev 1.**
-> Nothing below needs doing until Rev 2 hardware physically exists.
->
-> Full migration checklist: [docs/DEVELOPMENT_PATH.md](docs/DEVELOPMENT_PATH.md) §2.
+> **Implemented in firmware 2026-08-22 (Ver 3 Rev 9).** This firmware is for
+> **180R** boards only.
 
-**Hardware (Rev 2):**
-- 4-20mA burden resistors R8/R4/R5 changed **100R -> 220R** on all 3 channels.
-  Reason: widen ADC span + preserve NAMUR over/under-range fault headroom.
-- Added bidirectional TVS (SMAJ24CA) at each loop terminal J2/J3/J4.
+**Hardware:**
+- 4-20mA burden resistors R8/R4/R5 are **180R** on all 3 channels
+  (100R on Ver B Rev 0/1; briefly 220R during Rev 2 development).
+- Bidirectional TVS (SMAJ24CA) at each loop terminal J2/J3/J4.
 
-**⚠️ FIRMWARE MUST CHANGE TO MATCH — current firmware is INCOMPATIBLE with 220R hardware.**
-The firmware currently uses the internal **2.048V FVR** as the ADC reference
-([main.c:171](src/main.c#L171) `VREFCON0`, [main.c:539](src/main.c#L539) `ADCON1` PVCFG=FVR).
-With 220R, 20mA = 4.40V, which **exceeds 2.048V** — the ADC saturates at 1023 counts at
-only **~9.3mA**, so the entire 9.3-20mA range reads full-scale. This silently disables the
-upper half of every analog sensor range (safety-critical for pump protection).
+**Why 180R.** The burden has to satisfy two competing limits:
 
-**Required firmware work (do before Rev 2 hardware is used):**
-1. Change ADC reference from 2.048V FVR to a >4.4V source. The 4.096V FVR is NOT enough
-   (clips at ~18.6mA). Practical option: **VDD (~5.0V)** via `ADCON1` PVCFG=00, disable FVR
-   for ADC. Note: reading then tracks VDD tolerance — verify 5V rail accuracy.
-2. Rescale `ADC_4MA` / `ADC_20MA` in [main.c:289-290](src/main.c#L289) to match new burden+ref.
-3. Rescale any raw-count fault thresholds (under/over-range) to match.
-4. Consider a HW/FW compatibility guard: Rev 0/1 firmware on Rev 2 hardware (or vice-versa)
-   will mis-scale all analog readings. Versioning currently ties FW compatibility to
-   HW_VERSION letter only, not Rev — this change may warrant bumping HW_VERSION.
+| Burden | 20mA develops | Usable reference | Full scale | Over-range headroom |
+| ------ | ------------- | ---------------- | ---------- | ------------------- |
+| 100R (Rev 0/1) | 2.00V | 2.048V FVR | 20.5mA | none — cannot see 21mA |
+| **180R** | **3.60V** | **4.096V FVR** | **22.8mA** | **NAMUR 21mA OK** |
+| 204R | 4.08V | 4.096V FVR (at the limit) | 20.1mA | none |
+| 220R | 4.40V | **VDD only** — clears both FVRs | 22.7mA | NAMUR 21mA OK |
+| 250R (industry std) | 5.00V | VDD, at the rail | 20.0mA | none |
 
-**Scaling constants — decision PENDING (VREF source not yet chosen), DO NOT use until confirmed:**
+The largest burden that keeps 20mA under the 4.096V FVR is ~204R. **180R clears
+it with margin while preserving over-range headroom** — the only value that gets
+both a fixed reference and NAMUR fault detection.
 
-| VREF assumption | counts/mA | 4mA | 20mA | mA/count |
-| --------------- | --------- | --- | ---- | -------- |
-| VDD 5.0V (per HW note) | 45.01 | ~180 (0.88V) | ~900 (4.40V) | 0.022216 |
-| 2.048V FVR (CURRENT — clips >9.3mA, unusable) | — | 440 | 1023 (clip) | 0.009103 |
-| OLD 100R + 2.048V FVR (in-use Rev 0/1) | — | 205 | 1000 | — |
+220R also works electrically but forces VDD as the reference, because every
+reference low enough to sit safely below VDD clips before 20mA. That was the
+configuration in Rev 7/8; 180R supersedes it.
 
-Provisional constant from HW note (assumes VDD=5.0V ref): `ADC_MA_PER_COUNT = 0.022216f`.
+**Firmware configuration:**
+
+| Item | Setting | Location |
+| ---- | ------- | -------- |
+| FVR | **4.096V** (`VREFCON0 = 0b10110000`, FVRS=11) | [main.c](src/main.c) `system_init()` |
+| ADC +ref | **FVR** (`ADCON1` PVCFG=10) | [main.c](src/main.c) `adc_read()` |
+| Endpoints | `ADC_4MA` 179, `ADC_20MA` 894 (44.7 counts/mA) | [main.c](src/main.c) |
+
+Endpoints are **derived, not hard-coded**:
+
+```c
+#define ADC_VREF_MV   4119   // FVR effective mV - CALIBRATED, not nominal 4096
+#define BURDEN_OHMS   180    // 4-20mA sense resistor (R8/R4/R5)
+#define ADC_COUNTS_AT_MA(ma)                                     \
+    ((uint16_t)((((uint32_t)1023 * (ma) * BURDEN_OHMS)           \
+                 + (ADC_VREF_MV / 2)) / ADC_VREF_MV))
+```
+
+Rounded rather than truncated — plain integer division loses nearly a full count
+at the 20mA endpoint. Two compile-time guards (`ADC_20MA <= 1023`,
+`ADC_4MA < ADC_20MA`) fail the build if a future burden/reference combination
+would clip, so the silent top-of-range saturation failure cannot recur unnoticed.
+
+**FVR requires VDD comfortably above 4.096V.** Bench rail measures 5.041V. If
+VDD ever sags near the FVR output the reference stops regulating, so a brown-out
+would degrade readings rather than fail cleanly — worth confirming BOR threshold
+against the FVR dropout before release.
+
+**Calibration.** `ADC_VREF_MV` is the single calibration point for all three
+channels — trim it, never the endpoints.
+
+Calibrated 2026-08-22 against a precision loop tester: at 20.00mA the display
+read **359 psi of an expected 362**, placing the true count at 894–895 rather
+than the nominal 899. Effective reference is therefore **~4119mV**, +0.6% on the
+4096mV nominal, which is inside FVR part tolerance — calibration, not a fault.
+`ADC_VREF_MV` is set to **4119** accordingly.
+
+**VERIFIED 2026-08-22** against a precision loop tester, Input 1 (0–362 psi):
+
+| Loop current | Reads | Ideal | Note |
+| ------------ | ----- | ----- | ---- |
+| 4.00 mA | 0 psi | 0.00 | at the clamp |
+| 4.10 mA | 2 psi | 2.26 | just off the clamp — low end confirmed live |
+| 12.00 mA | 181 psi | 181.00 | exact |
+| 20.00 mA | 362 psi | 362.00 | exact |
+
+The 4.10 mA point matters: `adc_to_eng()` clamps (`counts <= ADC_4MA` returns
+`scale_4ma`), so 4.00 mA reads a perfect 0 whether the low end is right or not.
+Stepping just above the clamp proves the bottom of the range genuinely tracks.
+
+Cross-checking the pre-trim readings (12 mA → 179 psi, 20 mA → 359 psi) gave
+44.67–44.75 and 44.70–44.75 counts/mA respectively. The overlap proves the error
+was **purely multiplicative with no offset**, which is why a single
+`ADC_VREF_MV` trim corrects the whole range.
+
+Resolution floor is **0.51 psi/count** (715 counts over 362 psi), so ±1 psi at
+midscale is quantisation, not error — no constant can improve on it.
+
+> ⚠️ Per-part FVR tolerance means **4119 is board-specific.** A production build
+> needs a per-unit trim or an acceptance test tight enough to make one value fit.
+
+> Unlike the Rev 7/8 VDD arrangement, readings no longer track the 5V rail, so
+> relay pull-in, buzzer and backlight load steps cannot shift them. Note that
+> averaging never mitigated that — a rail shift biases every sample in the same
+> direction and passes through the rolling average intact.
+
+**⚠️ Hardware/firmware compatibility.** The burden cannot be detected in
+firmware and the version string carries no hardware letter. Ver 3 Rev 9 on a
+100R or 220R board mis-scales every analog reading, with no warning. **Match
+firmware to board by hand.**
+
+Migration checklist: [docs/DEVELOPMENT_PATH.md](docs/DEVELOPMENT_PATH.md) §2.
 
 ---
 
@@ -271,7 +337,7 @@ See `display/CLAUDE.md` for full protocol specification.
 | MCU           | PIC18F26K22     | -                | 32MHz (8MHz + 4x PLL)                                                                                                                 |
 | Encoder       | Rotary + switch | GPIO + interrupt | Short/long press                                                                                                                      |
 | RTC           | DS3231          | I2C (0x68)       | 1Hz square wave on RB0/INT0                                                                                                           |
-| ADC           | Internal FVR    | RA0-RA2          | 3 channels, 2.048V FVR reference, 4-sample rolling average                                                                            |
+| ADC           | Internal 10-bit | RA0-RA2          | 3 channels, **4.096V FVR reference**, 180R burden, 4-sample rolling average                                                            |
 | Digital Input | Direct GPIO     | RA4-RA7          | 4 channels (DIG_IN1=Run/Stop, DIG_IN2-4=PNP)                                                                                          |
 | EEPROM (cfg)  | Internal        | -                | 128B x 3 inputs + 128B system + checksum                                                                                               |
 | EEPROM (log)  | M24M01          | I2C              | Event log storage                                                                                                                       |
@@ -437,7 +503,9 @@ Each input has independent high and low direction bypass timers. When an alarm t
 - If primary > 0, starts in BP_PRIMARY on RUN. The primary window is **abandoned the moment the threshold is reached** (value goes good) -> BP_NORMAL, and any further excursion is handled by the secondary timer. If the value is still in fault when the primary countdown reaches 0 -> BP_ALARM (relay trip attributed to the primary timer). Primary and secondary are never summed.
 - If primary = 0 but secondary > 0, starts directly in BP_NORMAL on RUN.
 - Fault during BP_NORMAL starts BP_SECONDARY countdown. If fault persists through secondary, triggers BP_ALARM.
-- Fault clearing during BP_SECONDARY returns to BP_NORMAL.
+- Fault clearing during BP_SECONDARY returns to BP_NORMAL. The secondary timer re-arms on **every** subsequent excursion -- it is not a one-shot.
+- **Primary vs secondary lifetime:** a primary window runs once per pump start (STOP -> RUN). Secondary timers run as many times as the value crosses the threshold, for as long as the pump runs.
+- Acknowledging a fault with the button calls `clear_bp_timers()` (all directions -> BP_INACTIVE) and then, if still in RUN, `resume_bp_timers()` to put every enabled direction back to BP_NORMAL. Without the resume, protection stayed dead for the rest of the run because `init_bp_timers()` only fires on a STOP -> RUN edge.
 
 ---
 
@@ -513,7 +581,8 @@ Digital types (3,5) have 13 menu items: Enable, Fault Polarity, 4 bypass timers,
 ### ADC to Engineering Units
 
 ```
-4mA = 205 counts, 20mA = 1000 counts (100 ohm sense, 2.048V FVR ref, 10-bit)
+4mA = 179 counts, 20mA = 894 counts (180 ohm sense, FVR calibrated 4.119V, 10-bit)
+44.7 counts/mA. Derived from ADC_VREF_MV / BURDEN_OHMS - see "4-20mA Front End" above.
 Linear interpolation: adc_to_eng(counts, scale_4ma, scale_20ma)
 ```
 
@@ -690,6 +759,9 @@ MAIN SCREEN (current_menu = 255)
   Line 2: val units    (Input 1, left-justified)
   Line 3: val units    (Input 2, left-justified)
   Line 4: val units    (Input 3, left-justified)
+    - Input disabled          -> "Not Used"
+    - Bypass timer counting   -> BP code + MM:SS + value, line flashes
+    - Alarm                   -> name + stop code, line flashes
   Short press with fault -> clear fault, close relay
   Short press no fault -> OPTIONS menu
 
@@ -773,6 +845,23 @@ State word ("RUN"/"STOP") left-justified, status message right-justified:
 - "Ext Stop" (external run input went low)
 - Runtime countdown "HH:MM:SS" right-justified when clock enabled and running
 
+### Input Line Behaviour (Lines 2-4)
+
+| Input state | Line content | Flash |
+| ----------- | ------------ | ----- |
+| Disabled | `Not Used`, left-justified | No |
+| Normal | name left, units @13, value @19 | No |
+| Bypass timer counting | BP code @0, MM:SS @7, value @19 | **Yes** |
+| Alarm | name left, stop code right | **Yes** |
+
+The bypass flash is driven by `display_timer > 0`, i.e. a countdown is actually
+running. Because a countdown only runs while the value is in fault (the primary
+window is abandoned the moment the threshold is reached), the flash stops by
+itself as soon as the reading is OK - no separate "value good" test is needed.
+
+`alarm_flash` toggles at ~3.3Hz and is held at 1 (always visible) when neither
+an alarm nor a bypass countdown is active.
+
 ### LED Behavior
 
 - **Power LED:** Solid on normally. Flashes 2Hz during power fail display.
@@ -819,9 +908,9 @@ src\main.c src\encoder.c src\menu.c src\eeprom.c src\lcd.c
 src\i2c.c src\rtc.c src\pca9535.c
 ```
 
-### Last Known Build Size (Ver 3 Rev 2)
+### Last Known Build Size (Ver 3 Rev 11)
 
-- Program: 78.9%
+- Program: 79.7%
 - Data: 64.8%
 
 ---
