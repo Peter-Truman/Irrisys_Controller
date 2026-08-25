@@ -2,9 +2,9 @@
  * IRRISYS - Full System with Buffered LCD
  * PIC18F26K22 @ 32MHz
  *
- * Version: Ver 3 Rev 11
+ * Version: Ver 3 Rev 12
  *   - Ver 3 = Product/firmware version
- *   - Rev 11 = Incremented on every change; reset to 0 prior to release
+ *   - Rev 12 = Incremented on every change; reset to 0 prior to release
  *
  * Button behavior:
  *   - Press -> immediate short beep (50ms)
@@ -13,7 +13,7 @@
  */
 
 #define FW_VERSION  3     // Product/firmware version
-#define FW_REVISION 11     // Incremented every change; reset to 0 before release
+#define FW_REVISION 12     // Incremented every change; reset to 0 before release
 
 #include "../include/config.h"
 #include "../include/encoder.h"
@@ -384,6 +384,46 @@ static uint8_t alarm_input_idx = 0;   // Which input (0-2) triggered the alarm
 typedef char assert_20ma_within_adc_range[(ADC_20MA <= 1023) ? 1 : -1];
 typedef char assert_4ma_below_20ma[(ADC_4MA < ADC_20MA) ? 1 : -1];
 
+// ---------------------------------------------------------------------------
+// Loop integrity - NAMUR NE43 out-of-range detection
+// ---------------------------------------------------------------------------
+// A healthy 4-20mA loop never sits outside 3.8-20.5mA. Outside NE43 limits
+// the reading is not a measurement at all, it is a wiring or sensor failure:
+//
+//   <= 3.6mA  open circuit  - broken wire, disconnected or dead transmitter
+//   >= 21.0mA short circuit - field wiring shorted past the transmitter, or
+//                             a transmitter failed hard over
+//
+// Preserving headroom for these is why the burden is 180R: full scale is
+// 22.8mA, so the over-range trip at 21.0mA is inside the measurable range.
+// A 100R/2.048V or 250R/VDD front end could not see 21mA at all.
+//
+// Microamp form so the NE43 fractional limits stay exact in integer math.
+// Peak intermediate is 21000 * 1023 * 180 / 1000 = 3.87e6, well inside u32.
+#define ADC_COUNTS_AT_UA(ua)                                          \
+    ((uint16_t)((((uint32_t)(ua) * 1023 / 1000 * BURDEN_OHMS)         \
+                 + (ADC_VREF_MV / 2)) / ADC_VREF_MV))
+#define ADC_UNDER_RANGE  ADC_COUNTS_AT_UA(3600)   // 3.6mA  -> open
+#define ADC_OVER_RANGE   ADC_COUNTS_AT_UA(21000)  // 21.0mA -> short
+
+// [guard] The over-range trip has to be inside what the ADC can actually
+// read, or a short simply saturates at 1023 and is never detected.
+typedef char assert_over_range_measurable[(ADC_OVER_RANGE < 1023) ? 1 : -1];
+typedef char assert_under_range_below_4ma[(ADC_UNDER_RANGE < ADC_4MA) ? 1 : -1];
+
+// Per-input loop state: 0 = OK, 1 = open (under-range), 2 = short (over-range)
+#define SENSOR_OK     0
+#define SENSOR_OPEN   1
+#define SENSOR_SHORT  2
+static uint8_t sensor_fault[3] = {0, 0, 0};
+static uint8_t sensor_alarm[3] = {0, 0, 0};  // latched: this fault stopped the pump
+
+// A 2-wire transmitter draws no loop current until it has powered up, which
+// is indistinguishable from a broken wire. Suppress detection briefly after
+// boot and after each RUN so a slow sensor cannot trip the pump at start.
+#define SENSOR_SETTLE_SECS 5
+static uint8_t sensor_settle_countdown = SENSOR_SETTLE_SECS;
+
 int16_t adc_to_eng(uint16_t counts, int16_t scale_4ma, int16_t scale_20ma)
 {
     int32_t num;
@@ -542,6 +582,22 @@ void render_main_screen(uint16_t ch1, uint16_t ch2, uint16_t ch3)
         if ((alarm_active[i] || display_timer > 0) && !alarm_flash)
         {
             lcd_print("                    ");
+            continue;
+        }
+
+        // Loop out of range: the reading is meaningless, so replace the
+        // value with the reason rather than showing a plausible number.
+        // Name stays at the left; "err open"/"err shrt" is right-justified.
+        if (sensor_fault[i] != SENSOR_OK)
+        {
+            memset(line, ' ', 20);
+            line[20] = '\0';
+            uint8_t nlen = (uint8_t)strlen(input_config[i].name);
+            if (nlen > 11) nlen = 11;
+            memcpy(line, input_config[i].name, nlen);
+            memcpy(line + 12,
+                   (sensor_fault[i] == SENSOR_OPEN) ? "err open" : "err shrt", 8);
+            lcd_print(line);
             continue;
         }
 
@@ -772,6 +828,7 @@ static void clear_bp_timers(void)
         bp_state[i].low.phase = BP_INACTIVE;
         bp_state[i].low.countdown = 0;
         alarm_active[i] = 0;
+        sensor_alarm[i] = 0;
     }
     alarm_buzz_phase = 0;
     alarm_buzz_tick = 0;
@@ -800,7 +857,12 @@ static void resume_bp_timers(void)
         bp_state[i].low.phase = phase;
         bp_state[i].low.countdown = 0;
         alarm_active[i] = 0;
+        sensor_alarm[i] = 0;
     }
+
+    // Re-arm the settling window too: acknowledging a fault should not
+    // instantly re-trip on a sensor that is still coming back up.
+    sensor_settle_countdown = SENSOR_SETTLE_SECS;
 }
 
 // Start the alarm buzzer (5 cycles of 250ms on/off)
@@ -1212,6 +1274,11 @@ void main(void)
                 system_config.power_failure_flag = 1;
                 save_power_flags();
 
+                // A transmitter switched on with the pump needs time to
+                // power up; until then it draws no loop current, which is
+                // indistinguishable from a broken wire.
+                sensor_settle_countdown = SENSOR_SETTLE_SECS;
+
                 // Initialize bypass timers for all enabled inputs
                 for (uint8_t i = 0; i < 3; i++)
                 {
@@ -1405,6 +1472,76 @@ void main(void)
                 lcd_invalidate();  // next flush re-sends every line
             }
 
+            // -------------------------------------------------------
+            // Loop integrity (analog inputs only)
+            //
+            // Evaluated in RUN *and* STOP so a broken loop is visible on
+            // the main screen before anyone tries to start the pump. The
+            // trip is RUN-only - with the pump already stopped there is
+            // nothing left to stop.
+            // -------------------------------------------------------
+            if (sensor_settle_countdown > 0)
+                sensor_settle_countdown--;
+
+            {
+                uint16_t adc_now[3] = {adc_ch1, adc_ch2, adc_ch3};
+
+                for (uint8_t i = 0; i < 3; i++)
+                {
+                    uint8_t st = input_config[i].sensor_type;
+
+                    // Switch types carry no loop current, and a disabled
+                    // input is not ours to complain about.
+                    if (!input_config[i].enable || st == 3 || st == 5 ||
+                        sensor_settle_countdown > 0)
+                    {
+                        sensor_fault[i] = SENSOR_OK;
+                        continue;
+                    }
+
+                    if (adc_now[i] <= ADC_UNDER_RANGE)
+                        sensor_fault[i] = SENSOR_OPEN;
+                    else if (adc_now[i] >= ADC_OVER_RANGE)
+                        sensor_fault[i] = SENSOR_SHORT;
+                    else
+                        sensor_fault[i] = SENSOR_OK;
+
+                    // An out-of-range loop means this channel is blind, so
+                    // it can no longer protect the pump. Immediate stop -
+                    // no bypass timer, no grace period.
+                    if (sensor_fault[i] != SENSOR_OK &&
+                        sys_state == SYS_RUN && !sensor_alarm[i])
+                    {
+                        sensor_alarm[i] = 1;
+                        alarm_active[i] = 1;
+                        alarm_input_idx = i;
+
+                        // Latch, never pulse: a pulsed stop would let the
+                        // pump restart with the sensor still broken.
+                        trigger_relay_pulse(1);
+                        system_config.active_stop_code = (uint8_t)(20 + i);
+                        save_power_flags();
+
+                        // Can only stop once - cancel every bypass countdown
+                        for (uint8_t j = 0; j < 3; j++)
+                        {
+                            bp_state[j].high.phase = BP_INACTIVE;
+                            bp_state[j].high.countdown = 0;
+                            bp_state[j].low.phase = BP_INACTIVE;
+                            bp_state[j].low.countdown = 0;
+                        }
+                        start_alarm_buzzer();
+                        {
+                            char abuf[40];
+                            sprintf(abuf, "ALARM: In%u loop %s", i + 1,
+                                    (sensor_fault[i] == SENSOR_OPEN)
+                                        ? "OPEN" : "SHORT");
+                            uart_println(abuf);
+                        }
+                    }
+                }
+            }
+
             if (sys_state == SYS_RUN)
             {
                 if (system_config.clock_enabled && run_timer_secs > 0)
@@ -1561,7 +1698,8 @@ void main(void)
 
                     // Update alarm flag for this input
                     alarm_active[i] = (bp_state[i].high.phase == BP_ALARM ||
-                                       bp_state[i].low.phase == BP_ALARM);
+                                       bp_state[i].low.phase == BP_ALARM ||
+                                       sensor_alarm[i]);
                 }
             }
         }

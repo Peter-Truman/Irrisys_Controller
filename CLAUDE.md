@@ -3,7 +3,7 @@
 ## Project Overview
 
 **Product:** IRRISYS Irrigation Pump Protection System
-**Current Firmware:** Ver 3 Rev 11
+**Current Firmware:** Ver 3 Rev 12
 
 **Hardware:**
 - Display board: IrrisysPG_Ver_B_Display_Rev_2
@@ -46,6 +46,7 @@ Communication: Main -> Display via serial (19200 baud, 8N1)
 | 2026-08-21 | Main    | Ver 3 Rev 2 | Versioning scheme -> `Ver N Rev N`; LCD cleared at top of `main()`; splash is "Irrisys PumpGuard" / version on lines 2-3; Pressure defaults corrected (20mA=362, SHPBP=1s, Rly SLPBP=Pulse); factory defaults now derived from `sensor_type_defaults[]` |
 | 2026-08-21 | Main    | Ver 3 Rev 4 | Main screen: input line flashes while a bypass timer counts, stopping when the value is OK |
 | 2026-08-21 | Main    | Ver 3 Rev 5 | Main screen: disabled inputs show "Not Used" |
+| 2026-08-22 | Main    | Ver 3 Rev 12 | **Loop integrity (NAMUR NE43):** open/short detection on enabled analog inputs. Immediate stop in RUN; line shows `err open`/`err shrt` in both RUN and STOP |
 | 2026-08-22 | Main    | Ver 3 Rev 11 | Calibrate `ADC_VREF_MV` 4096 -> 4119 against a precision loop tester (20mA read 359 of 362); endpoints 179/894 |
 | 2026-08-22 | Main    | Ver 3 Rev 10 | Splash line 4 shows build date/time (`__DATE__`/`__TIME__`); same stamp on the debug UART banner |
 | 2026-08-22 | Main    | Ver 3 Rev 9 | **Burden 220R -> 180R:** ADC reference back to the internal FVR at **4.096V** (VDD dependence removed), endpoints 180/899. Supersedes Rev 7/8. |
@@ -850,6 +851,8 @@ State word ("RUN"/"STOP") left-justified, status message right-justified:
 | Input state | Line content | Flash |
 | ----------- | ------------ | ----- |
 | Disabled | `Not Used`, left-justified | No |
+| Loop open (<=3.6mA) | name left, `err open` right-justified @12-19 | Yes, if it tripped |
+| Loop short (>=21mA) | name left, `err shrt` right-justified @12-19 | Yes, if it tripped |
 | Normal | name left, units @13, value @19 | No |
 | Bypass timer counting | BP code @0, MM:SS @7, value @19 | **Yes** |
 | Alarm | name left, stop code right | **Yes** |
@@ -861,6 +864,46 @@ itself as soon as the reading is OK - no separate "value good" test is needed.
 
 `alarm_flash` toggles at ~3.3Hz and is held at 1 (always visible) when neither
 an alarm nor a bypass countdown is active.
+
+### Loop Integrity (NAMUR NE43)
+
+Enabled **analog** inputs are checked every 1-second tick for a loop current
+outside the NE43 signal band. Switch types (3, 5) carry no loop current and are
+skipped.
+
+| Condition | Current | Counts | Meaning |
+| --------- | ------- | ------ | ------- |
+| Open | <= 3.6mA | <= 161 | broken wire, disconnected or dead transmitter |
+| Normal | 3.8-20.5mA | 170-917 | valid measurement |
+| Short | >= 21.0mA | >= 939 | field wiring shorted past the transmitter, or a transmitter failed hard over |
+
+Full scale is 22.9mA, so the over-range trip at 21.0mA sits inside the
+measurable range. **This is why the burden is 180R** — a 100R/2.048V or
+250R/VDD front end cannot see 21mA at all. Two compile-time guards enforce it
+(`ADC_OVER_RANGE < 1023`, `ADC_UNDER_RANGE < ADC_4MA`).
+
+**Behaviour:**
+
+| State | Action |
+| ----- | ------ |
+| RUN | **Immediate stop** — no bypass timer, no grace. Relay **latched** (never pulsed: a pulse would let the pump restart with the sensor still broken). All bypass countdowns cancelled ("can only stop once"). Alarm buzzer, line flashes. |
+| STOP | Detected and displayed only — the relay is already open. Lets a cut cable be found before a start is attempted. |
+
+Either way the input's line shows the reason in place of the value:
+
+```
+Pressure    err open
+Temperature err shrt
+```
+
+**Settling window.** A 2-wire transmitter draws no loop current until it powers
+up, which is indistinguishable from a broken wire. Detection is suppressed for
+`SENSOR_SETTLE_SECS` (5s) after boot, after each STOP -> RUN transition, and
+after a fault is acknowledged — so a slow sensor cannot trip the pump at start,
+and acknowledging cannot instantly re-trip.
+
+**Stop codes** `20 + input index` (20/21/22 for Inputs 1/2/3), clear of both the
+bypass codes (2-7) and the event-log range.
 
 ### LED Behavior
 
@@ -908,10 +951,10 @@ src\main.c src\encoder.c src\menu.c src\eeprom.c src\lcd.c
 src\i2c.c src\rtc.c src\pca9535.c
 ```
 
-### Last Known Build Size (Ver 3 Rev 11)
+### Last Known Build Size (Ver 3 Rev 12)
 
-- Program: 79.7%
-- Data: 64.8%
+- Program: 81.4%
+- Data: 66.5%
 
 ---
 
