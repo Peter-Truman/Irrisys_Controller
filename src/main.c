@@ -2,9 +2,9 @@
  * IRRISYS - Full System with Buffered LCD
  * PIC18F26K22 @ 32MHz
  *
- * Version: Ver 3 Rev 12
+ * Version: Ver 3 Rev 13
  *   - Ver 3 = Product/firmware version
- *   - Rev 12 = Incremented on every change; reset to 0 prior to release
+ *   - Rev 13 = Incremented on every change; reset to 0 prior to release
  *
  * Button behavior:
  *   - Press -> immediate short beep (50ms)
@@ -13,7 +13,7 @@
  */
 
 #define FW_VERSION  3     // Product/firmware version
-#define FW_REVISION 12     // Incremented every change; reset to 0 before release
+#define FW_REVISION 13     // Incremented every change; reset to 0 before release
 
 #include "../include/config.h"
 #include "../include/encoder.h"

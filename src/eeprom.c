@@ -48,8 +48,8 @@ const sensor_defaults_t sensor_type_defaults[6] = {
     // 1 - Temperature: -50 to 150 C, trip high at 85 after 1:00 grace
     {-50, 150, 85, -10,  60, 0, 0, 0,  0, 0, 0, 0, 0, "Temperature", "\xDF""C"},
 
-    // 2 - Flow Meter: 0-100%, secondary low delay 0:30
-    {0, 100, 0, 0,  0, 0, 0, 30,  0, 0, 0, 0, 0, "Flow Meter",  "%"},
+    // 2 - Flow Meter: 0-100%, low flow 0:30 startup window + 0:30 delay
+    {0, 100, 0, 0,  0, 0, 30, 30,  0, 0, 0, 0, 0, "Flow Meter",  "%"},
 
     // 3 - Flow Switch (digital): unmonitored until timers are configured
     {0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0, 0, "Flow Switch", ""},

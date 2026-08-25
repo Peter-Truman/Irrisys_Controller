@@ -3,7 +3,7 @@
 ## Project Overview
 
 **Product:** IRRISYS Irrigation Pump Protection System
-**Current Firmware:** Ver 3 Rev 12
+**Current Firmware:** Ver 3 Rev 13
 
 **Hardware:**
 - Display board: IrrisysPG_Ver_B_Display_Rev_2
@@ -46,6 +46,7 @@ Communication: Main -> Display via serial (19200 baud, 8N1)
 | 2026-08-21 | Main    | Ver 3 Rev 2 | Versioning scheme -> `Ver N Rev N`; LCD cleared at top of `main()`; splash is "Irrisys PumpGuard" / version on lines 2-3; Pressure defaults corrected (20mA=362, SHPBP=1s, Rly SLPBP=Pulse); factory defaults now derived from `sensor_type_defaults[]` |
 | 2026-08-21 | Main    | Ver 3 Rev 4 | Main screen: input line flashes while a bypass timer counts, stopping when the value is OK |
 | 2026-08-21 | Main    | Ver 3 Rev 5 | Main screen: disabled inputs show "Not Used" |
+| 2026-08-22 | Main    | Ver 3 Rev 13 | Flow Meter default PLFBP 0 -> 30s (startup low-flow window) |
 | 2026-08-22 | Main    | Ver 3 Rev 12 | **Loop integrity (NAMUR NE43):** open/short detection on enabled analog inputs. Immediate stop in RUN; line shows `err open`/`err shrt` in both RUN and STOP |
 | 2026-08-22 | Main    | Ver 3 Rev 11 | Calibrate `ADC_VREF_MV` 4096 -> 4119 against a precision loop tester (20mA read 359 of 362); endpoints 179/894 |
 | 2026-08-22 | Main    | Ver 3 Rev 10 | Splash line 4 shows build date/time (`__DATE__`/`__TIME__`); same stamp on the debug UART banner |
@@ -704,6 +705,7 @@ Sensor Type Change Defaults table below.
 | Units | L/M |
 | 4mA Scale | 0 |
 | 20mA Scale | 100 |
+| Pri Low BP | 30s (0:30) |
 | Sec Low BP | 30s (0:30) |
 | All Relay Modes | Latch |
 
@@ -730,7 +732,7 @@ L = Latch, P = Pulse.
 | ---- | ---- | ----- | --- | ---- | ------- | ------ | --------- | --------- | --------- | --------- | ------ |
 | 0 Pressure | Pressure | psi | 0 | 362 | 200 | 30 | 0 | 1 | 300 | 30 | L/L/L/**P** |
 | 1 Temperature | Temperature | C | -50 | 150 | 85 | -10 | 60 | 0 | 0 | 0 | L/L/L/L |
-| 2 Flow Meter | Flow Meter | % | 0 | 100 | 0 | 0 | 0 | 0 | 0 | 30 | L/L/L/L |
+| 2 Flow Meter | Flow Meter | % | 0 | 100 | 0 | 0 | 0 | 0 | 30 | 30 | L/L/L/L |
 | 3 Flow Switch | Flow Switch | (none) | - | - | 0 | - | 0 | 0 | 0 | 0 | L/L/L/L |
 | 4 Other 4-20 | Other 4-20 | (user) | 0 | 100 | 0 | 0 | 0 | 0 | 0 | 0 | L/L/L/L |
 | 5 Other Switch | Other Sw | (none) | - | - | 0 | - | 0 | 0 | 0 | 0 | L/L/L/L |
