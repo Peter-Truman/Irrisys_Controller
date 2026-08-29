@@ -81,7 +81,10 @@ typedef struct
     uint8_t reserved_digital[7];
 
     // Logging (16 bytes)
-    uint16_t log_entries;       // Number of log entries to store
+    // was log_entries - the log concept was dropped. The bytes are kept so
+    // system_config_t stays exactly 128: removing them shifts every field
+    // after this point and trips the size assert in eeprom.c.
+    uint16_t reserved_log_entries;
     uint8_t reserved_log[14];
 
     // Padding to 128 bytes
@@ -92,6 +95,12 @@ typedef struct
 #define EEPROM_INPUT_BASE 0x00
 #define EEPROM_SYSTEM_BASE 0x180   // After 3 × 128 = 384 bytes
 #define EEPROM_CHECKSUM_ADDR 0x200 // After system config
+
+// Raw EEPROM access - used by the event log, which owns 0x202-0x3FF
+uint8_t eeprom_read_byte(uint16_t address);
+void eeprom_write_byte(uint16_t address, uint8_t data);
+uint16_t eeprom_read_word(uint16_t address);
+void eeprom_write_word(uint16_t address, uint16_t data);
 
 // Function prototypes
 void eeprom_init(void);

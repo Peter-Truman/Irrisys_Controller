@@ -10,7 +10,6 @@
 #include "../include/eeprom.h"
 #include "../include/rtc.h"
 #include "../include/lcd.h"
-#include "../include/eventlog.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -215,7 +214,6 @@ static char value_end_runtime[10] = "Pulse";
 static char value_runtime[6] = "00:00";
 
 // Utility menu value buffers
-static char value_log_entries[6] = "10";
 static char value_menu_timeout[6] = "00:30";
 static char value_brightness[4] = "50";
 static char value_pwr_fail[6] = "00:05";
@@ -259,18 +257,17 @@ menu_item_t main_menu_items[3];
 
 // Utility menu template (10 items - no Save)
 const menu_item_t utility_menu_template[] = {
-    {"View Log", NULL, 0},     // 0 - Action
-    {"Clear Log", NULL, 0},    // 1 - Action
-    {"Log Entries", NULL, 1},  // 2 - Numeric
-    {"Menu T/O", NULL, 1},     // 3 - Time MM:SS
-    {"Pwr Detect", NULL, 1},   // 4 - Time MM:SS
-    {"Brightness", NULL, 1},   // 5 - Numeric
-    {"Rly Pulse", NULL, 1},    // 6 - Time MM:SS
-    {"Back", NULL, 0},         // 7
-    {"EXIT", NULL, 0}          // 8
+    {"Menu T/O", NULL, 1},     // 0 - Whole seconds
+    {"Pwr Detect", NULL, 1},   // 1 - Whole seconds
+    {"Brightness", NULL, 1},   // 2 - Numeric
+    {"Rly Pulse", NULL, 1},    // 3 - Time MM:SS
+    {"About", NULL, 0},        // 4 - Action: re-show the splash
+    {"Back", NULL, 0},         // 5
+    {"EXIT", NULL, 0}          // 6
 };
 
-menu_item_t utility_menu[9];
+#define UTILITY_ITEMS 7
+menu_item_t utility_menu[UTILITY_ITEMS];
 
 // Digital input menu template (5 items)
 const menu_item_t digital_menu_template[] = {
@@ -287,6 +284,7 @@ menu_item_t digital_menu[5];
 extern void lcd_set_cursor(uint8_t row, uint8_t col);
 extern void lcd_print(const char *str);
 extern void beep(uint16_t duration_ms);
+extern void beep_double(uint16_t on_ms, uint16_t gap_ms);
 extern void uart_println(const char *str);
 extern void lcd_clear(void);
 // extern int16_t convert_for_display(int16_t val, const char *units);  // SUSPENDED
@@ -318,7 +316,9 @@ uint8_t is_numeric_field(uint8_t line, uint8_t sensor_type, uint8_t flow_type)
     }
     else if (current_menu == 4) // UTILITY menu
     {
-        return (line == 2 || line == 5); // Log Entries, Brightness
+        // 0 Menu T/O and 1 Pwr Detect edit as whole seconds (see the
+        // button handler); 2 Brightness uses the digit editor.
+        return (line == 0 || line == 1 || line == 2);
     }
     return 0;
 }
@@ -334,7 +334,7 @@ uint8_t is_time_field(uint8_t line, uint8_t sensor_type, uint8_t flow_type)
     }
     else if (current_menu == 4) // UTILITY menu
     {
-        return (line == 3 || line == 4 || line == 6); // Menu T/O, Pwr Detect, Rly Pulse
+        return (line == 3); // Rly Pulse only - the others edit as whole seconds
     }
     else if (current_menu == 5) // MAIN menu
     {
@@ -479,7 +479,7 @@ void menu_init(void)
 {
     menu.current_line = 0;
     menu.top_line = 0;
-    menu.in_edit_mode = 0;
+    menu_cancel_edit();  // belt and braces: no sub-mode survives a re-entry
     current_menu = 0;
     rebuild_options_menu();
     menu.total_items = options_menu_count;
@@ -676,40 +676,35 @@ void rebuild_input_menu(void)
     else
     {
         // --- DIGITAL/SWITCH menu ---
-        // Same basic order as analog: Enable, fault polarity + bypasses, Sensor,
-        // relay modes, Back, EXIT (no Units / Scale items for switch types)
+        // A switch has exactly ONE fault condition (no flow / aux not
+        // asserted), so it gets one pair of bypass timers and one pair of
+        // relay modes - not the four of each an analog input needs.
+        //
+        // They live in the LOW direction, because "no flow" is a low
+        // condition and that is where the fault is evaluated. Before Ver 3
+        // Rev 16 the menu offered all four: the fault ran in the HIGH
+        // direction under the labels PFBP/SFBP, while the meaningfully named
+        // PNFBP/SNFBP sat on the low direction and were never read at all -
+        // settable, saved to EEPROM, and completely inert.
 
-        // Use custom labels for type 5 (Other Switch), or default labels for Flow Switch
-        const char *bp_phi = (st == 5) ? custom_bp_phi : lbl_phi_bp[st];
-        const char *bp_shi = (st == 5) ? custom_bp_shi : lbl_shi_bp[st];
+        // Use custom labels for type 5 (Other Switch), defaults for Flow Switch
         const char *bp_plo = (st == 5) ? custom_bp_plo : lbl_plo_bp[st];
         const char *bp_slo = (st == 5) ? custom_bp_slo : lbl_slo_bp[st];
-        const char *rly_phi = (st == 5) ? custom_rly_phi : lbl_rly_phi[st];
-        const char *rly_shi = (st == 5) ? custom_rly_shi : lbl_rly_shi[st];
         const char *rly_plo = (st == 5) ? custom_rly_plo : lbl_rly_plo[st];
         const char *rly_slo = (st == 5) ? custom_rly_slo : lbl_rly_slo[st];
 
-        // Polarity: Flow (High/Low) or Aux (High/Low)
+        // Polarity: the input level at which flow / aux is PRESENT
         fault_polarity_edit_flag = input_config[idx].fault_polarity;
         strcpy(value_fault_pol, fault_polarity_edit_flag ? "High" : "Low");
         n = add_menu_item(n, lbl_high[st], value_fault_pol, 1, FT_FAULT_POL);
 
-        // 4 bypass timers
-        sprintf(value_pri_high_bp, "%02u:%02u",
-                input_config[idx].primary_high_bypass / 60,
-                input_config[idx].primary_high_bypass % 60);
-        n = add_menu_item(n, bp_phi, value_pri_high_bp, 1, FT_PRI_HI_BP);
-
-        sprintf(value_sec_high_bp, "%02u:%02u",
-                input_config[idx].secondary_high_bypass / 60,
-                input_config[idx].secondary_high_bypass % 60);
-        n = add_menu_item(n, bp_shi, value_sec_high_bp, 1, FT_SEC_HI_BP);
-
+        // Primary bypass - startup window
         sprintf(value_pri_low_bp, "%02u:%02u",
                 input_config[idx].primary_low_bypass / 60,
                 input_config[idx].primary_low_bypass % 60);
         n = add_menu_item(n, bp_plo, value_pri_low_bp, 1, FT_PRI_LO_BP);
 
+        // Secondary bypass - running delay
         sprintf(value_sec_low_bp, "%02u:%02u",
                 input_config[idx].secondary_low_bypass / 60,
                 input_config[idx].secondary_low_bypass % 60);
@@ -718,19 +713,13 @@ void rebuild_input_menu(void)
         // Sensor type
         n = add_menu_item(n, "Sensor", value_sensor, 1, FT_SENSOR);
 
-        // 4 relay modes
-        relay_high_edit_flag = input_config[idx].relay_pri_high_mode;
-        relay_sec_high_edit_flag = input_config[idx].relay_sec_high_mode;
+        // Relay mode for each of the two timers
         relay_low_edit_flag = input_config[idx].relay_pri_low_mode;
         relay_sec_low_edit_flag = input_config[idx].relay_sec_low_mode;
 
-        strcpy(value_rly_pri_hi, relay_high_edit_flag ? "Pulse" : "Latch");
-        strcpy(value_rly_sec_hi, relay_sec_high_edit_flag ? "Pulse" : "Latch");
         strcpy(value_rly_pri_lo, relay_low_edit_flag ? "Pulse" : "Latch");
         strcpy(value_rly_sec_lo, relay_sec_low_edit_flag ? "Pulse" : "Latch");
 
-        n = add_menu_item(n, rly_phi, value_rly_pri_hi, 1, FT_RLY_PRI_HI);
-        n = add_menu_item(n, rly_shi, value_rly_sec_hi, 1, FT_RLY_SEC_HI);
         n = add_menu_item(n, rly_plo, value_rly_pri_lo, 1, FT_RLY_PRI_LO);
         n = add_menu_item(n, rly_slo, value_rly_sec_lo, 1, FT_RLY_SEC_LO);
     }
@@ -807,36 +796,38 @@ void rebuild_main_menu(void)
 
 void rebuild_utility_menu(void)
 {
-    for (uint8_t i = 0; i < 9; i++)
+    for (uint8_t i = 0; i < UTILITY_ITEMS; i++)
     {
         utility_menu[i].label = utility_menu_template[i].label;
         utility_menu[i].editable = utility_menu_template[i].editable;
         utility_menu[i].value = NULL;
     }
 
-    sprintf(value_log_entries, "%u", system_config.log_entries);
-    utility_menu[2].value = value_log_entries;
-
-    // Menu T/O: stored as raw value in menu_timeout field (×2 = seconds)
-    uint16_t timeout_secs = system_config.menu_timeout * 2;
+    // Menu T/O: the stored byte is SECONDS.
+    // It used to be written as secs/2 here and read back as *2, while
+    // get_menu_timeout_seconds() - the value actually used - read it raw.
+    // The menu therefore displayed double the real timeout, and anything
+    // above 120 stored was silently clamped to 30s by the getter while the
+    // menu kept showing what was set.
+    uint16_t timeout_secs = system_config.menu_timeout;
     sprintf(value_menu_timeout, "%02u:%02u", timeout_secs / 60, timeout_secs % 60);
-    utility_menu[3].value = value_menu_timeout;
+    utility_menu[0].value = value_menu_timeout;
 
     // Pwr Detect: stored as seconds
     sprintf(value_pwr_fail, "%02u:%02u",
             system_config.power_fail_delay / 60,
             system_config.power_fail_delay % 60);
-    utility_menu[4].value = value_pwr_fail;
+    utility_menu[1].value = value_pwr_fail;
 
     sprintf(value_brightness, "%u", system_config.brightness);
-    utility_menu[5].value = value_brightness;
+    utility_menu[2].value = value_brightness;
 
     sprintf(value_relay_pulse, "%02u:%02u",
             system_config.relay_pulse_time / 60,
             system_config.relay_pulse_time % 60);
-    utility_menu[6].value = value_relay_pulse;
+    utility_menu[3].value = value_relay_pulse;
 
-    menu.total_items = 9;
+    menu.total_items = UTILITY_ITEMS;
     menu.current_line = 0;
     menu.top_line = 0;
 }
@@ -1046,7 +1037,7 @@ void menu_draw_utility(void)
     for (uint8_t row = 0; row < 3; row++)
     {
         uint8_t line = menu.top_line + row;
-        draw_menu_line(row + 1, line, (line == menu.current_line), utility_menu, 9);
+        draw_menu_line(row + 1, line, (line == menu.current_line), utility_menu, UTILITY_ITEMS);
     }
 }
 
@@ -1093,37 +1084,6 @@ void menu_draw_digital(void)
     }
 }
 
-void menu_draw_log_view(void)
-{
-    uint16_t count = 0;  // LOG DISABLED (was eventlog_count())
-    char line_buf[21];
-
-    if (count == 0)
-    {
-        lcd_print_at(0, 0, "                    ");
-        lcd_print_at(1, 0, "    (no entries)    ");
-        lcd_print_at(2, 0, "                    ");
-        lcd_print_at(3, 0, "                    ");
-        return;
-    }
-
-    for (uint8_t row = 0; row < 4; row++)
-    {
-        uint16_t idx = log_view_top + row;
-        if (idx < count)
-        {
-            // LOG DISABLED (dead branch — count is always 0)
-            // uint8_t code = eventlog_read(idx);
-            // const char *reason = eventlog_reason_str(code);
-            sprintf(line_buf, "                    ");
-        }
-        else
-        {
-            sprintf(line_buf, "                    ");
-        }
-        lcd_print_at(row, 0, line_buf);
-    }
-}
 
 //=============================================================================
 // ENCODER HANDLING
@@ -1131,20 +1091,6 @@ void menu_draw_log_view(void)
 
 void menu_handle_encoder(int16_t delta)
 {
-    if (current_menu == 7) // Log viewer
-    {
-        uint16_t count = 0;  // LOG DISABLED (was eventlog_count())
-        if (count == 0) return;
-
-        int32_t new_top = (int32_t)log_view_top + delta;
-        if (new_top < 0) new_top = 0;
-        // Allow scrolling until last entry visible on bottom row (4 rows)
-        uint16_t max_top = (count > 4) ? count - 4 : 0;
-        if ((uint16_t)new_top > max_top) new_top = max_top;
-        log_view_top = (uint16_t)new_top;
-        return;
-    }
-
     // Name editor mode
     if (menu.name_edit_mode > 0)
     {
@@ -1270,8 +1216,27 @@ void menu_handle_encoder(int16_t delta)
 // TIME EDITOR
 //=============================================================================
 
+// Leave edit mode cleanly.
+//
+// Every edit sub-mode has to be cleared together, because
+// menu_handle_encoder() tests them in sequence and returns on the first
+// match - so a stale sub-mode silently swallows rotation meant for a
+// different field type. Aborting a numeric edit (long press or menu
+// timeout) used to leave edit_whole_mode set, and the next option field
+// entered would then flash but refuse to change. It looked intermittent
+// because the whole-number confirm path is the only place that cleared
+// the flag, so any later button press quietly repaired it.
+void menu_cancel_edit(void)
+{
+    menu.in_edit_mode = 0;
+    menu.edit_whole_mode = 0;
+    menu.edit_time_mode = 0;
+    menu.name_edit_mode = 0;
+}
+
 void init_time_editor(uint16_t value_seconds, uint8_t mode)
 {
+    menu.edit_whole_mode = 0;  // mutually exclusive with time editing
     menu.edit_time_mode = mode + 1; // 1=MM:SS, 2=HH:MM
     menu.time_edit_digit = 0;
 
@@ -1607,16 +1572,16 @@ void menu_update_time_value(void)
     else if (current_menu == 4) // UTILITY
     {
         // [C8] Indices MUST match utility_menu_template:
-        //   0 View Log | 1 Clear Log | 2 Log Entries | 3 Menu T/O |
-        //   4 Pwr Detect | 5 Brightness | 6 Rly Pulse | 7 Back | 8 EXIT
+        //   0 Menu T/O | 1 Pwr Detect | 2 Brightness | 3 Rly Pulse |
+        //   4 About | 5 Back | 6 EXIT
         // These were 4/5/7 (each +1), so the live value never updated while
         // editing, and editing Pwr Detect wrote into the Menu T/O buffer —
         // visibly corrupting the row above it.
         switch (menu.current_line)
         {
-        case 3: strcpy(value_menu_timeout, buf); break;  // Menu T/O
-        case 4: strcpy(value_pwr_fail, buf); break;      // Pwr Detect
-        case 6: strcpy(value_relay_pulse, buf); break;   // Rly Pulse
+        case 0: strcpy(value_menu_timeout, buf); break;  // Menu T/O
+        case 1: strcpy(value_pwr_fail, buf); break;      // Pwr Detect
+        case 3: strcpy(value_relay_pulse, buf); break;   // Rly Pulse
         }
     }
     else if (current_menu == 5) // MAIN
@@ -1706,6 +1671,16 @@ void menu_update_edit_value(void)
             case FT_LO_LIMIT:   strcpy(value_low_sp, buf); break;
             }
         }
+        else if (current_menu == 4) // UTILITY - whole seconds shown as MM:SS
+        {
+            uint16_t secs = (uint16_t)v;
+            sprintf(buf, "%02u:%02u", secs / 60, secs % 60);
+            switch (menu.current_line)
+            {
+            case 0: strcpy(value_menu_timeout, buf); break;  // Menu T/O
+            case 1: strcpy(value_pwr_fail, buf); break;      // Pwr Detect
+            }
+        }
         return;
     }
 
@@ -1725,8 +1700,7 @@ void menu_update_edit_value(void)
             // digits stayed frozen on screen while the encoder was turned.
             switch (menu.current_line)
             {
-            case 2: strcpy(value_log_entries, buf); break;  // Log Entries
-            case 5: strcpy(value_brightness, buf); break;   // Brightness
+            case 2: strcpy(value_brightness, buf); break;   // Brightness
             }
         }
     }
@@ -1846,8 +1820,14 @@ static void save_clock_field(uint8_t line)
     switch (line)
     {
     case 0:
+    {
         system_config.clock_enabled = clock_enable_edit_flag;
+        // Switching between countdown and count-up mid-run needs the
+        // timer reloaded, or it keeps the other mode's value
+        extern void reload_run_timer(void);
+        reload_run_timer();
         break;
+    }
     case 1:
         system_config.end_runtime_mode = end_runtime_edit_flag;
         break;
@@ -1859,28 +1839,21 @@ static void save_utility_field(uint8_t line)
 {
     switch (line)
     {
-    case 2: // Log Entries
-    {
-        int16_t val = menu.digit_100 * 100 + menu.digit_10 * 10 + menu.digit_1;
-        system_config.log_entries = (uint16_t)val;
+    // Both edited as whole seconds; the editor has already clamped them
+    // to whole_edit_min/max, so no second clamp is needed here.
+    case 0: // Menu T/O
+        system_config.menu_timeout = (uint8_t)menu.whole_edit_value;
         break;
-    }
-    case 3: // Menu T/O
-    {
-        uint16_t secs = menu.time_xx * 60 + menu.time_yy;
-        system_config.menu_timeout = secs / 2; // Store as 2-second increments
+    case 1: // Pwr Detect
+        system_config.power_fail_delay = (uint16_t)menu.whole_edit_value;
         break;
-    }
-    case 4: // Pwr Detect
-        system_config.power_fail_delay = menu.time_xx * 60 + menu.time_yy;
-        break;
-    case 5: // Brightness
+    case 2: // Brightness
     {
         int16_t val = menu.digit_100 * 100 + menu.digit_10 * 10 + menu.digit_1;
         system_config.brightness = (uint8_t)val;
         break;
     }
-    case 6: // Rly Pulse
+    case 3: // Rly Pulse
         system_config.relay_pulse_time = menu.time_xx * 60 + menu.time_yy;
         break;
     }
@@ -1893,6 +1866,9 @@ static void save_main_field(uint8_t line)
     {
         system_config.runtime_hours = menu.time_xx;
         system_config.runtime_minutes = menu.time_yy;
+        // Take effect immediately if the pump is already running
+        extern void reload_run_timer(void);
+        reload_run_timer();
     }
     system_config_dirty = 1;  // Defer EEPROM write
 }
@@ -1929,7 +1905,10 @@ static void save_digital_field(uint8_t line)
 // INIT NUMERIC EDITOR
 //=============================================================================
 
-static void init_numeric_editor(int16_t value, uint8_t is_unsigned)
+// start_digit selects which digit the encoder acts on first.
+// Unsigned: 0 = hundreds (100/click), 1 = tens (10/click), 2 = ones.
+static void init_numeric_editor(int16_t value, uint8_t is_unsigned,
+                                uint8_t start_digit)
 {
     menu.in_edit_mode = 1;
     menu.edit_time_mode = 0;
@@ -1948,7 +1927,7 @@ static void init_numeric_editor(int16_t value, uint8_t is_unsigned)
     menu.digit_100 = value / 100;
     menu.digit_10 = (value / 10) % 10;
     menu.digit_1 = value % 10;
-    menu.edit_digit = is_unsigned ? 0 : 0; // Start at sign for signed, hundreds for unsigned
+    menu.edit_digit = start_digit;
     menu.original_value = (int16_t)(menu.sign_negative ? -value : value);
 }
 
@@ -1965,15 +1944,14 @@ void menu_handle_button(uint8_t press_type)
         {
             restore_saved_input_cfg();
         }
-        menu.name_edit_mode = 0;
-        menu.in_edit_mode = 0;
+        menu_cancel_edit();
         current_menu = 255;
         lcd_clear();
         return;
     }
 
-    // Short press in log viewer = return to utility menu
-    if (current_menu == 7)
+    // (log viewer removed)
+    if (0)
     {
         current_menu = 4;
         rebuild_utility_menu();
@@ -2115,6 +2093,7 @@ void menu_handle_button(uint8_t press_type)
 
             // Save to config and EEPROM
             if (current_menu == 1) save_input_field(menu.current_line, current_input);
+            else if (current_menu == 4) save_utility_field(menu.current_line);
 
             // Advance cursor to next item
             if (menu.current_line + 1 < menu.total_items)
@@ -2256,8 +2235,11 @@ void menu_handle_button(uint8_t press_type)
             if (flag)
             {
                 menu.in_edit_mode = 1;
+                // Both must be cleared - a stale whole-number editor left
+                // over from an aborted numeric edit would otherwise
+                // intercept the encoder and freeze this field.
                 menu.edit_time_mode = 0;
-
+                menu.edit_whole_mode = 0;
             }
             break;
         }
@@ -2380,7 +2362,13 @@ void menu_handle_button(uint8_t press_type)
     case 4: // UTILITY menu
     {
         uint8_t line = menu.current_line;
-        if (line == 7) // Back
+        if (line == 4) // About - re-show the splash for a few seconds
+        {
+            extern void show_about_splash(void);
+            show_about_splash();
+            break;
+        }
+        if (line == 5) // Back
         {
             current_menu = 0;
             menu.current_line = 2; // Return to Utility position
@@ -2389,23 +2377,10 @@ void menu_handle_button(uint8_t press_type)
             menu.total_items = options_menu_count;
             break;
         }
-        if (line == 8) // EXIT
+        if (line == 6) // EXIT
         {
             current_menu = 255;
             lcd_clear();
-            break;
-        }
-
-        if (line == 0) // View Log
-        {
-            current_menu = 7;
-            log_view_top = 0;
-            break;
-        }
-
-        if (line == 1) // Clear Log
-        {
-            // eventlog_clear();  // LOG DISABLED
             break;
         }
 
@@ -2413,14 +2388,50 @@ void menu_handle_button(uint8_t press_type)
 
         if (is_numeric_field(line, sensor, flow))
         {
+            // Menu T/O and Pwr Detect are short durations with tight
+            // ranges. Digit editing made them awkward - the first detent
+            // moved the tens-of-minutes digit, so 02:00 jumped to 12:00.
+            // Edit them as whole seconds instead, clamped to their range.
+            if (line == 0 || line == 1)
+            {
+                menu.in_edit_mode = 1;
+                menu.edit_time_mode = 0;
+                menu.edit_whole_mode = 1;
+                if (line == 0)
+                {
+                    menu.whole_edit_value = (int16_t)system_config.menu_timeout;
+                    menu.whole_edit_min = 10;   // 10 seconds
+                    menu.whole_edit_max = 240;  // 4:00
+                }
+                else
+                {
+                    menu.whole_edit_value = (int16_t)system_config.power_fail_delay;
+                    menu.whole_edit_min = 2;
+                    menu.whole_edit_max = 30;
+                }
+                // Clamp the STORED value into range on entry. Without this a
+                // value saved under an older range (or a corrupt one) is shown
+                // as-is and can be confirmed straight back out of range - the
+                // rotate clamps only apply once the encoder is turned.
+                if (menu.whole_edit_value < menu.whole_edit_min)
+                    menu.whole_edit_value = menu.whole_edit_min;
+                if (menu.whole_edit_value > menu.whole_edit_max)
+                    menu.whole_edit_value = menu.whole_edit_max;
+                menu_update_edit_value();  // show the clamped value at once
+                encoder_ms_timer = 65535;  // start un-accelerated
+                break;
+            }
+
             int16_t val = 0;
             uint8_t is_unsigned = 1;
             switch (line)
             {
-            case 2: val = (int16_t)system_config.log_entries; break;
-            case 5: val = system_config.brightness; break;
+            case 2: val = system_config.brightness; break;
             }
-            init_numeric_editor(val, is_unsigned);
+            // Start on the TENS digit: starting on hundreds stepped this
+            // field by 100 per click, far too coarse for a brightness of
+            // 3-10. Button then advances to ones.
+            init_numeric_editor(val, is_unsigned, 1);
 
             break;
         }
@@ -2430,9 +2441,7 @@ void menu_handle_button(uint8_t press_type)
             uint16_t secs = 0;
             switch (line)
             {
-            case 3: secs = system_config.menu_timeout * 2; break;
-            case 4: secs = system_config.power_fail_delay; break;
-            case 6: secs = system_config.relay_pulse_time; break;
+            case 3: secs = system_config.relay_pulse_time; break;
             }
             init_time_editor(secs, 0); // MM:SS
             menu.in_edit_mode = 1;

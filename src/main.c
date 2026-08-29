@@ -2,9 +2,9 @@
  * IRRISYS - Full System with Buffered LCD
  * PIC18F26K22 @ 32MHz
  *
- * Version: Ver 3 Rev 13
+ * Version: Ver 3 Rev 36
  *   - Ver 3 = Product/firmware version
- *   - Rev 13 = Incremented on every change; reset to 0 prior to release
+ *   - Rev 36 = Incremented on every change; reset to 0 prior to release
  *
  * Button behavior:
  *   - Press -> immediate short beep (50ms)
@@ -13,7 +13,7 @@
  */
 
 #define FW_VERSION  3     // Product/firmware version
-#define FW_REVISION 13     // Incremented every change; reset to 0 before release
+#define FW_REVISION 36     // Incremented every change; reset to 0 before release
 
 #include "../include/config.h"
 #include "../include/encoder.h"
@@ -23,7 +23,6 @@
 #include "../include/rtc.h"
 #include "../include/pca9535.h"
 #include "../include/lcd.h"
-#include "../include/eventlog.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -261,6 +260,71 @@ static void delay_ms_wdt(uint16_t ms)
     }
 }
 
+// Write `s` horizontally centred on a 20-column row, space-padded.
+// Centring is computed at run time because the revision number changes
+// width (Rev 9 vs Rev 17), so a hard-coded indent drifts off-centre.
+static void lcd_print_centered(uint8_t row, const char *s)
+{
+    char line[21];
+    uint8_t len = (uint8_t)strlen(s);
+
+    if (len > 20) len = 20;
+    memset(line, ' ', 20);
+    line[20] = '\0';
+    memcpy(line + (20 - len) / 2, s, len);
+
+    lcd_set_cursor(row, 0);
+    lcd_print(line);
+}
+
+// Draw the splash into the LCD buffer and send it.
+// Layout is SPECIFIED - see CLAUDE.md "Splash Screen". Shown at boot and
+// again from UTILITY > About.
+static void draw_splash(void)
+{
+    char sbuf[24];
+
+    lcd_clear();
+    lcd_set_cursor(0, 0);
+    lcd_print("====================");
+    lcd_print_centered(1, "Irrisys PumpGuard");
+    sprintf(sbuf, "F/W Ver %d, Rev %d", FW_VERSION, FW_REVISION);
+    lcd_print_centered(2, sbuf);
+    lcd_set_cursor(3, 0);
+    lcd_print("====================");
+    lcd_flush();
+}
+
+// ---------------------------------------------------------------------------
+// About screen (UTILITY > About) - the splash, held for a few seconds.
+//
+// Deliberately NOT a busy-wait. This menu is reachable while the pump is
+// running, and blocking here would stall the 1-second tick that drives the
+// bypass timers - delaying a trip by the length of the hold. The main loop
+// counts it down instead and restores the menu when it expires.
+// ---------------------------------------------------------------------------
+#define ABOUT_HOLD_SECS 5
+static uint8_t about_hold_secs = 0;
+
+void show_about_splash(void)
+{
+    draw_splash();
+    about_hold_secs = ABOUT_HOLD_SECS;
+}
+
+static uint8_t about_splash_active(void)
+{
+    return about_hold_secs != 0;
+}
+
+// Put the UTILITY menu back on screen.
+static void about_splash_dismiss(void)
+{
+    about_hold_secs = 0;
+    menu_draw_utility();
+    lcd_flush();
+}
+
 // [R3] Two beeps separated by a gap, fully non-blocking. Replaces the
 // beep(); __delay_ms(gap); beep(); pattern used for fault-ack and menu timeout.
 void beep_double(uint16_t on_ms, uint16_t gap_ms)
@@ -312,11 +376,38 @@ typedef struct {
 
 static uint8_t sys_state = SYS_STOP;
 static uint32_t run_timer_secs = 0;
+
+// Reload the runtime clock from config.
+//
+// run_timer_secs was previously loaded ONLY on the STOP->RUN edge, so a
+// Run Time set while the pump was already running had no effect at all -
+// the value stayed 0, which satisfies neither the countdown test
+// (run_timer_secs > 0) nor the count-up test (!clock_enabled), leaving the
+// display frozen at 00:00:00 for the rest of the run.
+//
+// Called from the menu whenever Run Time or the clock enable is confirmed.
+// No effect while stopped - the STOP->RUN edge loads it as before.
+void reload_run_timer(void)
+{
+    if (sys_state != SYS_RUN)
+        return;
+
+    if (system_config.clock_enabled)
+    {
+        run_timer_secs = (uint32_t)system_config.runtime_hours * 3600
+                       + (uint32_t)system_config.runtime_minutes * 60;
+    }
+    else
+    {
+        run_timer_secs = 0;  // count-up mode restarts from zero
+    }
+}
 static uint8_t flash_toggle = 0;
 // tick_counter removed — 1-second tick now driven by RTC 1Hz interrupt (rtc_tick_count)
 static uint8_t render_counter = 0;     // Display update throttle
 static uint8_t refresh_counter = 0;    // Periodic full-screen re-assert (display self-heal)
 static uint16_t pwr_detect_countdown = 0;  // Non-blocking power detect delay (seconds)
+
 static uint8_t boot_pwr_fail = 0;             // Set once at boot if power_failure_flag was set in EEPROM
 static uint8_t ext_stop_flag = 0;             // 1=stopped by external run input going low
 static uint8_t wdt_reset_flag = 0;            // [4e-2] 1=booted from a watchdog reset (safe-latch until acknowledged)
@@ -434,6 +525,7 @@ int16_t adc_to_eng(uint16_t counts, int16_t scale_4ma, int16_t scale_20ma)
 }
 
 
+
 // =============================================================================
 // Unit conversion: SUSPENDED — may reinstate later
 // All values currently entered/displayed in standard units (psi, °C, %)
@@ -470,6 +562,16 @@ static const char *bp_lbl_phi[6] = {"PHPBP", "PHTBP", "PHFBP", "PFBP",  "PHVBP",
 static const char *bp_lbl_shi[6] = {"SHPBP", "SHTBP", "SHFBP", "SFBP",  "SHVBP", "SABP"};
 static const char *bp_lbl_plo[6] = {"PLPBP", "PLTBP", "PLFBP", "PNFBP", "PLVBP", "PNABP"};
 static const char *bp_lbl_slo[6] = {"SLPBP", "SLTBP", "SLFBP", "SNFBP", "SLVBP", "SNABP"};
+
+// Digital state text, shown in place of a numeric value [sensor_type 0-5].
+// Only the switch types (3, 5) are used. The old "High"/"Low" read as pin
+// levels but were actually normalised health - with Fault Polarity set to
+// High the display was the inverse of the electrical level, which is
+// exactly backwards when tracing wiring. Naming the sensed condition
+// removes the ambiguity: these say what the switch means, not what the
+// pin is doing.
+static const char *dig_lbl_ok[6]    = {"", "", "", "Flow",    "", "Aux"};
+static const char *dig_lbl_fault[6] = {"", "", "", "No Flow", "", "No Aux"};
 
 // =============================================================================
 // Main screen rendering
@@ -602,17 +704,19 @@ void render_main_screen(uint16_t ch1, uint16_t ch2, uint16_t ch3)
         }
 
         // Build value and units separately
-        char vbuf[8];   // Value string (max 5 chars: sign + 4 digits)
+        char vbuf[10];  // Numeric: 5 chars. Digital state text: up to 8.
         char ubuf[4];   // Units string (max 3 chars)
 
         ubuf[0] = '\0';
 
         if (is_digital)
         {
-            uint8_t sw_on = read_digital_input(i);
-            if (input_config[i].fault_polarity)
-                sw_on = !sw_on;
-            sprintf(vbuf, "%s", sw_on ? "High" : "Low");
+            // The polarity setting names the input level at which the
+            // condition is PRESENT, so "Flow: High" reads the way the menu
+            // shows it - flow is indicated by a high input.
+            uint8_t present =
+                (read_digital_input(i) == input_config[i].fault_polarity);
+            sprintf(vbuf, "%s", present ? dig_lbl_ok[st] : dig_lbl_fault[st]);
         }
         else
         {
@@ -635,6 +739,10 @@ void render_main_screen(uint16_t ch1, uint16_t ch2, uint16_t ch3)
         line[20] = '\0';
 
         uint8_t vlen = (uint8_t)strlen(vbuf);
+
+        // Switch types have no units string, so their state text can use
+        // the columns a numeric value would have left for units.
+        const uint8_t vmax = is_digital ? 8 : 5;
 
         // Alarm active: show name + alarm code only (no value)
         if (alarm_active[i] && i == alarm_input_idx && alarm_code_text[0] != '\0')
@@ -661,7 +769,7 @@ void render_main_screen(uint16_t ch1, uint16_t ch2, uint16_t ch3)
             memcpy(line + 7, tbuf, 5);
 
             // Value right-justified ending at col 19
-            if (vlen > 5) vlen = 5;
+            if (vlen > vmax) vlen = vmax;
             memcpy(line + 20 - vlen, vbuf, vlen);
         }
         else
@@ -678,7 +786,7 @@ void render_main_screen(uint16_t ch1, uint16_t ch2, uint16_t ch3)
                 memcpy(line + 14 - ulen, ubuf, ulen);
 
             // Value right-justified ending at col 19
-            if (vlen > 5) vlen = 5;
+            if (vlen > vmax) vlen = vmax;
             memcpy(line + 20 - vlen, vbuf, vlen);
         }
 
@@ -725,7 +833,8 @@ static uint8_t read_digital_input(uint8_t input_idx)
 }
 
 // Process one bypass direction per 1-second tick.
-// Returns: 0=no alarm, 1=alarm from primary, 2=alarm from secondary
+// Returns: 0=nothing, 1=alarm from primary, 2=alarm from secondary,
+//          3=secondary countdown just started (excursion, no alarm)
 static uint8_t process_bp(bp_dir_t *dir, uint8_t fault, uint16_t sec_time)
 {
     switch (dir->phase)
@@ -754,6 +863,7 @@ static uint8_t process_bp(bp_dir_t *dir, uint8_t fault, uint16_t sec_time)
             {
                 dir->phase = BP_SECONDARY;
                 dir->countdown = sec_time;
+                return 3;  // excursion begun - not a trip
             }
             else
             {
@@ -789,10 +899,19 @@ static uint8_t process_bp(bp_dir_t *dir, uint8_t fault, uint16_t sec_time)
 // Initialize bypass timers for one input on RUN start
 static void init_bp_timers(uint8_t i)
 {
+    // Switch types have no high fault. Park that direction explicitly:
+    // left in BP_PRIMARY it would hold a countdown that never expires, and
+    // the main screen would show and flash it indefinitely.
+    uint8_t st_i = input_config[i].sensor_type;
+    if (st_i == 3 || st_i == 5)
+    {
+        bp_state[i].high.phase = BP_INACTIVE;
+        bp_state[i].high.countdown = 0;
+    }
     // High direction: always monitor if input is enabled
     // Primary bypass > 0: start in BP_PRIMARY with countdown
     // Primary bypass = 0: start in BP_NORMAL (immediate monitoring)
-    if (input_config[i].primary_high_bypass > 0)
+    else if (input_config[i].primary_high_bypass > 0)
     {
         bp_state[i].high.phase = BP_PRIMARY;
         bp_state[i].high.countdown = input_config[i].primary_high_bypass;
@@ -851,8 +970,11 @@ static void resume_bp_timers(void)
 {
     for (uint8_t i = 0; i < 3; i++)
     {
+        uint8_t st_i = input_config[i].sensor_type;
+        uint8_t sw = (st_i == 3 || st_i == 5);
         uint8_t phase = input_config[i].enable ? BP_NORMAL : BP_INACTIVE;
-        bp_state[i].high.phase = phase;
+        // A switch has no high direction to resume
+        bp_state[i].high.phase = sw ? BP_INACTIVE : phase;
         bp_state[i].high.countdown = 0;
         bp_state[i].low.phase = phase;
         bp_state[i].low.countdown = 0;
@@ -999,13 +1121,6 @@ void main(void)
     // Initialize I2C bus
     i2c_init();
 
-    // LOG DISABLED: event-log concept abandoned (code preserved at tag pre-refactor-restore)
-    // eventlog_init();
-    // if (boot_pwr_fail)
-    //     eventlog_write(EVT_PWR_FAIL);
-    // else
-    //     eventlog_write(EVT_POWER_ON);
-
     // Initialize PCA9535 and run LED test
     pca9535_init();
     pca9535_led_init();
@@ -1035,28 +1150,25 @@ void main(void)
     // Confirm relay initial state (energized = closed)
     uart_println("RELAY: Closed (energized)");
 
-    // Wait for display board
-    delay_ms_wdt(500);  // [R5] WDT-fed
+    // Wait for the display board. It takes ~1s to boot, so the old 500ms
+    // was not actually long enough - frames sent into a board that is
+    // still initialising are simply lost.
+    delay_ms_wdt(1000);  // [R5] WDT-fed
 
     // Set power LED
     disp_set_leds(0x01);
 
-    // Splash screen - name on line 2, version on line 3, build stamp on 4.
+    // Splash screen - SPECIFIED LAYOUT, see CLAUDE.md "Splash Screen".
     //
-    // The build stamp is the definitive answer to "did that flash actually
-    // take?" - the programmer reports nothing back, so the display is the
-    // only confirmation available. __DATE__ is always 11 chars and __TIME__
-    // 8, so the two plus a space fill the 20-column line exactly.
-    lcd_clear();
-    lcd_set_cursor(1, 0);
-    lcd_print(" Irrisys PumpGuard  ");
-    lcd_set_cursor(2, 0);
-    sprintf(buf, "    Ver %d  Rev %d", FW_VERSION, FW_REVISION);
-    lcd_print(buf);
-    lcd_set_cursor(3, 0);
-    sprintf(buf, "%s %s", __DATE__, __TIME__);
-    lcd_print(buf);
-    lcd_flush();
+    //   Line 1: ==================== (full width)
+    //   Line 2: Irrisys PumpGuard     (centred)
+    //   Line 3: F/W Ver N, Rev NN     (centred)
+    //   Line 4: ==================== (full width)
+    //
+    // The build date/time that used to sit on line 4 has moved to the
+    // debug UART banner only. FW_REVISION now identifies the build, which
+    // depends on it being incremented for EVERY change.
+    draw_splash();
 
     // Startup beeps
     for (uint8_t i = 0; i < 3; i++)
@@ -1065,11 +1177,21 @@ void main(void)
         __delay_ms(100);
     }
 
-    // Hold the splash for 5s. The display board is already ready by this
-    // point (it boots in ~1s and we waited 500ms above), so this is purely
-    // how long the logo is shown.
+    // Hold the splash for 5s, re-asserting the whole screen once a second.
+    //
+    // The display link is one-way with no ACK, and lcd_flush() only sends
+    // lines that CHANGED - so any splash line dropped while the display
+    // board was still finishing its own boot would never be re-sent, and
+    // the screen would sit half-drawn for the whole hold. Same failure the
+    // main loop guards against with its periodic refresh; the splash had
+    // no equivalent.
     uart_println("Splash hold 5s...");
-    delay_ms_wdt(5000);  // [R5] WDT-fed
+    for (uint8_t i = 0; i < 5; i++)
+    {
+        delay_ms_wdt(1000);  // [R5] WDT-fed
+        lcd_invalidate();    // drop the change-detection cache
+        lcd_flush();         // re-send all four lines
+    }
     beep(200);
 
     // Go to main screen
@@ -1287,7 +1409,6 @@ void main(void)
                     else
                         { bp_state[i].high.phase = BP_INACTIVE; bp_state[i].low.phase = BP_INACTIVE; alarm_active[i] = 0; }
                 }
-                // eventlog_write(EVT_START);  // LOG DISABLED
                 uart_println("STATE: RUN (pwr fail armed, timers init)");
             }
         }
@@ -1298,8 +1419,7 @@ void main(void)
             if (!system_config.active_stop_code)
             {
                 ext_stop_flag = 1;
-                // eventlog_write(EVT_EXT_STOP);  // LOG DISABLED
-            }
+                }
             beep(500);  // [R3] non-blocking (ISR-sequenced)
             // Start non-blocking power detect delay before clearing flag
             pwr_detect_countdown = system_config.power_fail_delay;
@@ -1472,6 +1592,22 @@ void main(void)
                 lcd_invalidate();  // next flush re-sends every line
             }
 
+            // About screen (UTILITY > About): hold, re-asserting each
+            // second so a dropped frame cannot leave it half-drawn, then
+            // put the menu back.
+            if (about_hold_secs > 0)
+            {
+                if (--about_hold_secs == 0)
+                {
+                    about_splash_dismiss();
+                }
+                else
+                {
+                    lcd_invalidate();
+                    lcd_flush();
+                }
+            }
+
             // -------------------------------------------------------
             // Loop integrity (analog inputs only)
             //
@@ -1552,7 +1688,6 @@ void main(void)
                         // Runtime expired — alarm first, then relay
                         system_config.active_stop_code = 1;  // Triggers "End RunTime" flash
                         save_power_flags();
-                        // eventlog_write(EVT_END_RUNTIME);  // LOG DISABLED
                         start_alarm_buzzer();
 
                         // Relay action after alarm starts
@@ -1597,7 +1732,6 @@ void main(void)
                     system_config.power_failure_flag = 0;
                     boot_pwr_fail = 0;
                     save_power_flags();
-                    // eventlog_write(EVT_PWR_RESTORED);  // LOG DISABLED
                     uart_println("Power fail flag cleared (normal stop)");
                 }
             }
@@ -1620,9 +1754,15 @@ void main(void)
                     if (is_digital)
                     {
                         uint8_t pin = read_digital_input(i);
-                        // Fault when pin matches fault_polarity
-                        high_fault = (pin == input_config[i].fault_polarity);
-                        // Digital: low direction not used for fault detection
+                        // The setting names the level at which the condition
+                        // is present (flow running), so the FAULT is the
+                        // opposite level - no flow / aux not asserted.
+                        //
+                        // A switch has one fault and it is a LOW condition,
+                        // so it runs in the low direction - the same one the
+                        // menu's PNFBP/SNFBP timers and relay modes belong to.
+                        low_fault = (pin != input_config[i].fault_polarity);
+                        // Digital: high direction unused
                     }
                     else
                     {
@@ -1635,19 +1775,19 @@ void main(void)
                             low_fault = (val <= input_config[i].low_setpoint);
                     }
 
-                    // Process high direction
-                    uint8_t hi_result = process_bp(&bp_state[i].high, high_fault,
-                                                    input_config[i].secondary_high_bypass);
-                    if (hi_result)
+                    // Process high direction (analog only - a switch has no
+                    // high fault, so its high direction stays inactive)
+                    uint8_t hi_result = is_digital ? 0
+                        : process_bp(&bp_state[i].high, high_fault,
+                                     input_config[i].secondary_high_bypass);
+                    // 3 = secondary countdown started, which is not an alarm
+                    if (hi_result == 1 || hi_result == 2)
                     {
                         uint8_t rly = (hi_result == 1) ? input_config[i].relay_pri_high_mode
                                                        : input_config[i].relay_sec_high_mode;
                         trigger_relay_pulse(rly == 0 ? 1 : 0);
                         system_config.active_stop_code = (uint8_t)(2 + i * 2);  // 2,4,6
                         save_power_flags();
-                        // LOG DISABLED: bypass event logging removed
-                        // uint8_t evt_hi = (uint8_t)((i + 1) * 10 + (hi_result == 1 ? 0 : 1));
-                        // eventlog_write(evt_hi);
                         // Store bypass abbreviation for display
                         const char *lbl = (hi_result == 1) ? bp_lbl_phi[st] : bp_lbl_shi[st];
                         strncpy(alarm_code_text, lbl, 6);
@@ -1664,21 +1804,19 @@ void main(void)
                         { char abuf[40]; sprintf(abuf, "ALARM: In%u HIGH %s", i + 1, alarm_code_text); uart_println(abuf); }
                     }
 
-                    // Process low direction (analog only)
-                    if (!is_digital)
+                    // Process low direction - for a switch this is the only
+                    // direction, and carries its single fault condition.
                     {
                         uint8_t lo_result = process_bp(&bp_state[i].low, low_fault,
                                                         input_config[i].secondary_low_bypass);
-                        if (lo_result)
+                        // 3 = secondary countdown started, which is not an alarm
+                        if (lo_result == 1 || lo_result == 2)
                         {
                             uint8_t rly = (lo_result == 1) ? input_config[i].relay_pri_low_mode
                                                            : input_config[i].relay_sec_low_mode;
                             trigger_relay_pulse(rly == 0 ? 1 : 0);
                             system_config.active_stop_code = (uint8_t)(3 + i * 2);  // 3,5,7
                             save_power_flags();
-                            // LOG DISABLED: bypass event logging removed
-                            // uint8_t evt_lo = (uint8_t)((i + 1) * 10 + (lo_result == 1 ? 2 : 3));
-                            // eventlog_write(evt_lo);
                             // Store bypass abbreviation for display
                             const char *lbl = (lo_result == 1) ? bp_lbl_plo[st] : bp_lbl_slo[st];
                             strncpy(alarm_code_text, lbl, 6);
@@ -1757,6 +1895,9 @@ void main(void)
             }
 
             // Handle rotation - menu_handle_encoder handles all edit modes
+            // The About screen owns the display while it is up
+            if (!about_splash_active())
+            {
             menu_handle_encoder(delta);
 
             // Redraw menu after rotation
@@ -1767,9 +1908,9 @@ void main(void)
             else if (current_menu == 4) menu_draw_utility();
             else if (current_menu == 5) menu_draw_main_menu();
             else if (current_menu == 6) menu_draw_digital();
-            else if (current_menu == 7) menu_draw_log_view();
 
             lcd_flush();
+            }
         }
 
         // =============================================================
@@ -1824,9 +1965,19 @@ void main(void)
             else
             {
                 // In menu - pass to handler
+                if (about_splash_active())
+                {
+                    // Any press dismisses the About screen early
+                    about_splash_dismiss();
+                }
+                else
+                {
                 menu_handle_button(evt);
 
-                // Redraw after button
+                // Redraw after button - unless About has just taken the
+                // display, in which case leave it alone
+                if (!about_splash_active())
+                {
                 if (current_menu == 0) menu_draw_options();
                 else if (current_menu == 1) menu_draw_input();
                 else if (current_menu == 2) menu_draw_setup();
@@ -1834,9 +1985,10 @@ void main(void)
                 else if (current_menu == 4) menu_draw_utility();
                 else if (current_menu == 5) menu_draw_main_menu();
                 else if (current_menu == 6) menu_draw_digital();
-            else if (current_menu == 7) menu_draw_log_view();
 
                 lcd_flush();
+                }
+                }
             }
         }
 
@@ -1894,9 +2046,6 @@ void main(void)
                 case 6:
                     menu_draw_digital();
                     break;
-                case 7:
-                    menu_draw_log_view();
-                    break;
                 }
 
                 lcd_flush();
@@ -1918,7 +2067,7 @@ void main(void)
             beep_double(100, 50);  // [R3] non-blocking (was ~250ms stall)
 
             current_menu = 255;
-            menu.in_edit_mode = 0;
+            menu_cancel_edit();  // clears every sub-mode, not just the flag
             menu.current_line = 0;
             menu.top_line = 0;
             render_counter = 5;  // Force immediate render

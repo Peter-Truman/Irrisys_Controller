@@ -3,7 +3,7 @@
 ## Project Overview
 
 **Product:** IRRISYS Irrigation Pump Protection System
-**Current Firmware:** Ver 3 Rev 13
+**Current Firmware:** Ver 3 Rev 36
 
 **Hardware:**
 - Display board: IrrisysPG_Ver_B_Display_Rev_2
@@ -46,6 +46,19 @@ Communication: Main -> Display via serial (19200 baud, 8N1)
 | 2026-08-21 | Main    | Ver 3 Rev 2 | Versioning scheme -> `Ver N Rev N`; LCD cleared at top of `main()`; splash is "Irrisys PumpGuard" / version on lines 2-3; Pressure defaults corrected (20mA=362, SHPBP=1s, Rly SLPBP=Pulse); factory defaults now derived from `sensor_type_defaults[]` |
 | 2026-08-21 | Main    | Ver 3 Rev 4 | Main screen: input line flashes while a bypass timer counts, stopping when the value is OK |
 | 2026-08-21 | Main    | Ver 3 Rev 5 | Main screen: disabled inputs show "Not Used" |
+| 2026-08-27 | Main    | Ver 3 Rev 36 | **Event log removed entirely.** Concept abandoned after review. `View Log` / `Clear Log` gone from UTILITY (9 -> 7 items, all indices renumbered); `eventlog.c`/`.h` deleted and dropped from both build scripts; `log_entries` retired to `reserved_log_entries` (byte kept so `system_config_t` stays 128). Program space 92.3% -> **81.5%** |
+| 2026-08-26 | Main    | Ver 3 Rev 28-35 | Event log development, **superseded by Rev 36**: 25-entry ring on internal EEPROM, one-entry-per-screen viewer, HH:MM:SS elapsed-time columns, live "time since" counter. Also in this span, and RETAINED: Menu T/O default 30s, range 10s-4min, whole-second editing; Pwr Detect range 2-30s, default 3s |
+| 2026-08-26 | Main    | Ver 3 Rev 27 | Remove the **Log Entries** UTILITY item (10 -> 9 items, all later indices renumbered); `log_entries` default 20 -> **25**, no longer operator-adjustable |
+| 2026-08-25 | Main    | Ver 3 Rev 26 | UTILITY numeric edit starts on the tens digit (was hundreds, stepping 100 per click) |
+| 2026-08-25 | Main    | Ver 3 Rev 22 | Runtime clock takes effect when set mid-run (`reload_run_timer()`) |
+| 2026-08-25 | Main    | Ver 3 Rev 21 | UTILITY > **About** re-shows the splash for 5s. Non-blocking (counted down on the 1s tick) so it cannot stall bypass processing; any button press dismisses it early |
+| 2026-08-25 | Main    | Ver 3 Rev 20 | Fix: splash drew only its first two lines. Display-board wait 500ms -> 1000ms (it boots in ~1s), and the 5s hold now re-asserts the screen every second so a dropped frame recovers |
+| 2026-08-25 | Main    | Ver 3 Rev 19 | Flow Switch default polarity -> **High** (dry contact closes on flow, delivering 24V to the input) |
+| 2026-08-25 | Main    | Ver 3 Rev 18 | Splash screen to specified layout: `=` rules on lines 1 and 4, name and `F/W Ver N, Rev NN` centred on 2 and 3. Build date/time moves to the debug UART banner only |
+| 2026-08-25 | Main    | Ver 3 Rev 17 | Flow Switch default PNFBP 0 -> 30s (startup no-flow window) |
+| 2026-08-25 | Main    | Ver 3 Rev 16 | **Switch menu restructured 13 -> 9 items.** A switch has one fault condition, so it now has one pair of bypass timers (PNFBP/SNFBP) and one pair of relay modes. Previously the fault ran in the HIGH direction as PFBP/SFBP while PNFBP/SNFBP were settable but never read |
+| 2026-08-25 | Main    | Ver 3 Rev 15 | Fix: switch polarity setting now names the level at which the condition is PRESENT (was the fault level, i.e. inverted vs the menu wording). Fix: stale edit sub-mode froze option fields intermittently |
+| 2026-08-25 | Main    | Ver 3 Rev 14 | Switch inputs show the sensed condition (`Flow`/`No Flow`, `Aux`/`No Aux`) instead of `High`/`Low`, which read as pin levels but were normalised health |
 | 2026-08-22 | Main    | Ver 3 Rev 13 | Flow Meter default PLFBP 0 -> 30s (startup low-flow window) |
 | 2026-08-22 | Main    | Ver 3 Rev 12 | **Loop integrity (NAMUR NE43):** open/short detection on enabled analog inputs. Immediate stop in RUN; line shows `err open`/`err shrt` in both RUN and STOP |
 | 2026-08-22 | Main    | Ver 3 Rev 11 | Calibrate `ADC_VREF_MV` 4096 -> 4119 against a precision loop tester (20mA read 359 of 362); endpoints 179/894 |
@@ -409,16 +422,40 @@ PORTC:
    boot sequence
 4. `eeprom_init()`, `i2c_init()`, `pca9535_init()`, `rtc_init()`, `encoder_init()`,
    `menu_init()`
-5. 500ms wait for the display board to finish booting, then the splash:
+5. 500ms wait for the display board to finish booting, then the splash
+   (see **Splash Screen** below)
+6. Three startup beeps, 5s splash hold, then the main screen
+
+### Splash Screen
+
+**This layout is specified — do not vary it.** Any change to the splash must
+keep this structure.
 
 ```
-Line 1:
-Line 2:  Irrisys PumpGuard
-Line 3:     Ver 3  Rev 2
-Line 4:
+Line 1: ====================     full width, 20 '=' characters
+Line 2:  Irrisys PumpGuard       horizontally centred
+Line 3:  F/W Ver 3, Rev 18       horizontally centred
+Line 4: ====================     full width, 20 '=' characters
 ```
 
-6. Three startup beeps, 1.5s splash hold, then the main screen
+Centring is computed at run time by `lcd_print_centered()` ([main.c](src/main.c)),
+not hard-coded, because the revision number changes width as it climbs.
+
+The same splash is re-shown by **UTILITY > About**, held for 5 seconds. That
+hold is counted down on the 1-second tick rather than busy-waiting: the menu is
+reachable while the pump is running, and blocking would stall the tick that
+drives the bypass timers. Any button press dismisses it early.
+
+> **Dropped frames.** The display link is one-way with no ACK and `lcd_flush()`
+> only sends lines that *changed*, so a frame lost while the display board is
+> still booting would never be re-sent — the splash sat half-drawn. Both splash
+> paths now re-assert the whole screen once a second, and the wait for the
+> display board is 1000ms (it boots in ~1s; the old 500ms was not enough).
+
+**`FW_REVISION` MUST be incremented for every change** — it is now the only
+build identifier on the display. The build date/time stamp that used to occupy
+line 4 appears on the debug UART banner only. Reset `FW_REVISION` to 0
+immediately prior to a release build.
 
 ### Timing System
 
@@ -529,7 +566,7 @@ Each input has independent high and low direction bypass timers. When an alarm t
 | ------- | ---------- | --------------------- | ------------------------------------------------------------- |
 | 0       | uint8      | enable                | 0=Disabled, 1=Enabled                                         |
 | 1       | uint8      | sensor_type           | 0=Pressure, 1=Temp, 2=FlowMeter, 3=FlowSw, 4=Oth4-20, 5=OthSw |
-| 2       | uint8      | fault_polarity        | Digital types: 0=Fault Low, 1=Fault High                      |
+| 2       | uint8      | fault_polarity        | Digital: level at which condition is PRESENT (0=Low, 1=High)  |
 | 3       | uint8      | config_flags          | Bit flags for per-input options                               |
 | 4-7     | uint8[4]   | reserved1             | Future expansion                                              |
 | 8-9     | int16      | scale_4ma             | 4mA scaling value (-999 to +999)                              |
@@ -554,6 +591,12 @@ Each input has independent high and low direction bypass timers. When an alarm t
 
 ### Sensor Types
 
+> **Switch polarity.** For types 3 and 5 the `fault_polarity` byte names the
+> input level at which the condition is **present** — `Flow: High` means flow is
+> indicated by a high input, matching how the menu reads. The fault is therefore
+> the opposite level. (Before Ver 3 Rev 15 it named the *fault* level, so the
+> menu wording and the behaviour were inverted.)
+
 | Value | Type         | Analog/Digital | Labels (High/Low)      | Bypass Prefixes    |
 | ----- | ------------ | -------------- | ---------------------- | ------------------ |
 | 0     | Pressure     | Analog         | High Press / Low Press | PHP, SHP, PLP, SLP |
@@ -565,7 +608,16 @@ Each input has independent high and low direction bypass timers. When an alarm t
 
 Analog types (0,1,2,4) have 17 menu items: Enable, High Setpoint, 2 high bypass timers, Low Setpoint, 2 low bypass timers, Sensor, Units, Scale 4mA, Scale 20mA, 4 relay modes, Back, EXIT.
 
-Digital types (3,5) have 13 menu items: Enable, Fault Polarity, 4 bypass timers, Sensor, 4 relay modes, Back, EXIT.
+Digital types (3,5) have 9 menu items: Enable, Polarity, 2 bypass timers, Sensor,
+2 relay modes, Back, EXIT.
+
+> **A switch has one fault condition**, so it gets one pair of timers, not the
+> four an analog input needs. They are the **low** direction fields
+> (`primary_low_bypass` / `secondary_low_bypass` and the matching relay modes),
+> because "no flow" is a low condition. Before Ver 3 Rev 16 the fault was
+> evaluated in the HIGH direction under the labels PFBP/SFBP, while the
+> meaningfully named PNFBP/SNFBP sat on the low direction and **were never read
+> at all** — settable, stored to EEPROM, and completely inert.
 
 ### Sensor-Specific Units
 
@@ -625,7 +677,7 @@ Linear interpolation: adc_to_eng(counts, scale_4ma, scale_20ma)
 | 39     | uint8     | dig4_fault_polarity | DIG4: 0=Fault Low, 1=Fault High                  |
 | 40     | uint8     | dig4_relay_mode     | DIG4: 0=Latch, 1=Pulse                           |
 | 41-47  | uint8[7]  | reserved_digital    | Future digital config                            |
-| 48-49  | uint16    | log_entries         | Number of log entries                            |
+| 48-49  | uint16    | log_entries         | Retained log entries. Default 25, NOT menu-adjustable |
 | 50-63  | uint8[14] | reserved_log        | Future logging config                            |
 | 64-127 | uint8[64] | padding             | Expansion space                                  |
 
@@ -733,7 +785,7 @@ L = Latch, P = Pulse.
 | 0 Pressure | Pressure | psi | 0 | 362 | 200 | 30 | 0 | 1 | 300 | 30 | L/L/L/**P** |
 | 1 Temperature | Temperature | C | -50 | 150 | 85 | -10 | 60 | 0 | 0 | 0 | L/L/L/L |
 | 2 Flow Meter | Flow Meter | % | 0 | 100 | 0 | 0 | 0 | 0 | 30 | 30 | L/L/L/L |
-| 3 Flow Switch | Flow Switch | (none) | - | - | 0 | - | 0 | 0 | 0 | 0 | L/L/L/L |
+| 3 Flow Switch | Flow Switch | (none) | - | - | - | - | - | - | **30** | 0 | L/L (polarity **High**) |
 | 4 Other 4-20 | Other 4-20 | (user) | 0 | 100 | 0 | 0 | 0 | 0 | 0 | 0 | L/L/L/L |
 | 5 Other Switch | Other Sw | (none) | - | - | 0 | - | 0 | 0 | 0 | 0 | L/L/L/L |
 
@@ -788,20 +840,20 @@ SETUP (current_menu = 2, from OPTIONS > Setup Menu)
   +- EXIT    -> Main screen
 
 INPUT (current_menu = 1, unified, dynamic based on sensor type)
-  Analog (17 items):        Digital (13 items):
+  Analog (17 items):        Digital (9 items):
   |- Enable                 |- Enable
-  |- High Setpoint          |- Fault Pol
-  |- Pri High BP            |- Pri High BP
-  |- Sec High BP            |- Sec High BP
-  |- Low Setpoint           |- Pri Low BP
-  |- Pri Low BP             |- Sec Low BP
-  |- Sec Low BP             |- Sensor
-  |- Sensor                 |- Rly Pri High
-  |- Units                  |- Rly Sec High
-  |- Scale 4mA              |- Rly Pri Low
-  |- Scale 20mA             |- Rly Sec Low
-  |- Rly Pri High           |- Back -> SETUP
-  |- Rly Sec High           +- EXIT -> Main screen
+  |- High Setpoint          |- Polarity   (level = present)
+  |- Pri High BP            |- Pri BP     (PNFBP - startup)
+  |- Sec High BP            |- Sec BP     (SNFBP - running)
+  |- Low Setpoint           |- Sensor
+  |- Pri Low BP             |- Rly Pri BP
+  |- Sec Low BP             |- Rly Sec BP
+  |- Sensor                 |- Back -> SETUP
+  |- Units                  +- EXIT -> Main screen
+  |- Scale 4mA
+  |- Scale 20mA
+  |- Rly Pri High
+  |- Rly Sec High
   |- Rly Pri Low
   |- Rly Sec Low
   |- Back     -> SETUP
@@ -814,8 +866,9 @@ CLOCK CONFIG (current_menu = 3, from SETUP > Clock)
   +- EXIT    -> Main screen
 
 UTILITY (current_menu = 4, from OPTIONS > Utility Menu)
-  |- View Log / Clear Log / Log Entries
+  |- View Log / Clear Log
   |- Menu T/O / Pwr Detect / Brightness / Rly Pulse
+  |- About   -> re-shows the splash for 5s
   |- Back    -> OPTIONS
   +- EXIT    -> Main screen
 
@@ -855,7 +908,8 @@ State word ("RUN"/"STOP") left-justified, status message right-justified:
 | Disabled | `Not Used`, left-justified | No |
 | Loop open (<=3.6mA) | name left, `err open` right-justified @12-19 | Yes, if it tripped |
 | Loop short (>=21mA) | name left, `err shrt` right-justified @12-19 | Yes, if it tripped |
-| Normal | name left, units @13, value @19 | No |
+| Normal (analog) | name left, units @13, value @19 | No |
+| Normal (switch) | name left, `Flow`/`No Flow` or `Aux`/`No Aux` right-justified @19 | No |
 | Bypass timer counting | BP code @0, MM:SS @7, value @19 | **Yes** |
 | Alarm | name left, stop code right | **Yes** |
 
@@ -953,10 +1007,40 @@ src\main.c src\encoder.c src\menu.c src\eeprom.c src\lcd.c
 src\i2c.c src\rtc.c src\pca9535.c
 ```
 
-### Last Known Build Size (Ver 3 Rev 12)
+### Programming the board
 
-- Program: 81.4%
-- Data: 66.5%
+Use **`build_pk5.bat`** — it compiles and then flashes via the **PICkit 5**, and
+reports success or failure with a real exit code, so a flash can be confirmed:
+
+```
+ipecmd.exe -P18F26K22 -TPPK5 -F"src\main.hex" -M -OL
+```
+
+at `C:\Program Files\Microchip\MPLABX\v6.30\mplab_platform\mplab_ipe\ipecmd.exe`.
+`-M` program, `-OL` release from reset, no `-W` (the board is self-powered).
+MPLAB IPE must be closed — it and `ipecmd` cannot both own the PICkit, so the
+script closes it first.
+
+> **The MELabs U2 (`build.bat`) is faulty — do not use it.** Diagnosed
+> 2026-08-27: **Vpp collapses to 7V** against the 8-9V the K22 requires, with a
+> verified-good 10k pull-up drawing only 0.4mA. It presented as garbage device-ID
+> reads that differed on every attempt (PIC18F2525, then dsPIC33FJ32GP202),
+> erase failures and config-write failures, while ordinary reads and
+> program-memory writes still scraped through. Half a day was lost to it, and a
+> perfectly good PIC was replaced on its false evidence.
+>
+> **If any programmer reports a wrong or varying device ID, measure Vpp on MCLR
+> *during* an attempt before suspecting the chip or the board** — every static
+> check passes with a dead Vpp driver.
+
+The **PICkit 3 cannot be used here**: MPLAB X v6.30's device packs list only
+ICD3/4/5 for PIC18F-K, v6.20 is a partial install with no IPE, and the
+standalone `PK3CMD.exe` on this machine has no device file.
+
+### Last Known Build Size (Ver 3 Rev 36)
+
+- Program: 81.5%
+- Data: 66.9%
 
 ---
 

@@ -99,7 +99,6 @@ void menu_draw_clock(void);
 void menu_draw_main_menu(void);
 void menu_draw_utility(void);
 void menu_draw_digital(void);
-void menu_draw_log_view(void);
 void menu_update_edit_value(void);
 void menu_handle_encoder(int16_t delta);
 void menu_handle_button(uint8_t press_type);
@@ -107,6 +106,7 @@ void lcd_print_at(uint8_t row, uint8_t col, const char *str);
 void lcd_clear_line(uint8_t row);
 void init_time_editor(uint16_t value_seconds, uint8_t mode);
 void menu_update_time_value(void);
+void menu_cancel_edit(void);
 
 // Name editor functions
 void init_name_editor(uint8_t mode, const char *initial);  // mode: 1=name, 2=units

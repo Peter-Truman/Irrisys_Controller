@@ -51,8 +51,11 @@ const sensor_defaults_t sensor_type_defaults[6] = {
     // 2 - Flow Meter: 0-100%, low flow 0:30 startup window + 0:30 delay
     {0, 100, 0, 0,  0, 0, 30, 30,  0, 0, 0, 0, 0, "Flow Meter",  "%"},
 
-    // 3 - Flow Switch (digital): unmonitored until timers are configured
-    {0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0, 0, "Flow Switch", ""},
+    // 3 - Flow Switch (digital): 0:30 startup window for no flow.
+    //     Switch types use the LOW direction only - PNFBP / SNFBP.
+    //     Polarity HIGH: irrigation flow switches are usually a 2-wire dry
+    //     contact that closes on flow, putting 24V on the input.
+    {0, 0, 0, 0,  0, 0, 30, 0,  0, 0, 0, 0, 1, "Flow Switch", ""},
 
     // 4 - Other 4-20 (analog): neutral 0-100 span, unmonitored, user names it
     {0, 100, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0, 0, "Other 4-20",  ""},
@@ -95,17 +98,18 @@ void apply_sensor_type_defaults(uint8_t idx, uint8_t st)
 
 // System defaults
 const system_config_t system_defaults = {
-    // Clock/timing
-    1, 120, 0, 0, 1, 2, 0, {0, 0, 0, 0, 0, 0, 0},
-    // Display
-    5, 5, 5, 0, 0, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    // Clock/timing: clock on, menu timeout 30s, runtime 0:00,
+    // end-runtime pulse, relay pulse 2s
+    1, 30, 0, 0, 1, 2, 0, {0, 0, 0, 0, 0, 0, 0},
+    // Display: contrast 5, brightness 5, power-detect delay 3s
+    5, 5, 3, 0, 0, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
     // Digital inputs (all disabled)
     0, 0, 0,  // DIG2: disabled, fault_low, latch
     0, 0, 0,  // DIG3: disabled, fault_low, latch
     0, 0, 0,  // DIG4: disabled, fault_low, latch
     {0, 0, 0, 0, 0, 0, 0},
-    // Logging
-    20, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+    // reserved_log (was log_entries) - log concept dropped
+    0, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
     // Padding
     {0}
 };
@@ -237,10 +241,10 @@ void eeprom_init(void)
     sync_menu_variables();
 
     // Load menu timeout value
-    menu_timeout_seconds = system_config.menu_timeout * 2; // Convert from 2-second increments
+    menu_timeout_seconds = system_config.menu_timeout;  // stored value IS seconds
 
-    // Validate the timeout value (10-510 seconds range)
-    if (menu_timeout_seconds < 10 || menu_timeout_seconds > 510)
+    // Validate against the range the menu offers (10s - 4:00)
+    if (menu_timeout_seconds < 10 || menu_timeout_seconds > 240)
     {
         menu_timeout_seconds = 30; // Use default if out of range
     }
@@ -331,12 +335,13 @@ void sync_menu_variables(void)
 // Getter function for menu timeout - safe to call from anywhere
 uint8_t get_menu_timeout_seconds(void)
 {
-    // Return timeout value, with bounds checking
-    if (system_config.menu_timeout < 5)
+    // Bounds MUST match the range the UTILITY menu offers (10s - 4:00),
+    // otherwise the menu accepts values this function silently replaces.
+    if (system_config.menu_timeout < 10)
     {
         return 30; // Default 30 seconds if value too low
     }
-    if (system_config.menu_timeout > 120)
+    if (system_config.menu_timeout > 240)
     {
         return 30; // Default 30 seconds if value too high
     }
