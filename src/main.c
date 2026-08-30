@@ -2,9 +2,9 @@
  * IRRISYS - Full System with Buffered LCD
  * PIC18F26K22 @ 32MHz
  *
- * Version: Ver 3 Rev 36
+ * Version: Ver 3 Rev 37
  *   - Ver 3 = Product/firmware version
- *   - Rev 36 = Incremented on every change; reset to 0 prior to release
+ *   - Rev 37 = Incremented on every change; reset to 0 prior to release
  *
  * Button behavior:
  *   - Press -> immediate short beep (50ms)
@@ -13,7 +13,7 @@
  */
 
 #define FW_VERSION  3     // Product/firmware version
-#define FW_REVISION 36     // Incremented every change; reset to 0 before release
+#define FW_REVISION 37     // Incremented every change; reset to 0 before release
 
 #include "../include/config.h"
 #include "../include/encoder.h"
@@ -251,6 +251,8 @@ void beep(uint16_t duration_ms)
 // [R5] Watchdog-fed blocking delay — BOOT-TIME ONLY, never used in the main
 // loop. Feeds CLRWDT every 1ms so long boot waits can't trip the watchdog,
 // which is what lets us run a much tighter WDT timeout.
+static void check_factory_reset_gesture(void);  // defined below main()'s helpers
+
 static void delay_ms_wdt(uint16_t ms)
 {
     while (ms--)
@@ -465,6 +467,24 @@ static uint8_t alarm_input_idx = 0;   // Which input (0-2) triggered the alarm
 #define ADC_COUNTS_AT_MA(ma)                                     \
     ((uint16_t)((((uint32_t)1023 * (ma) * BURDEN_OHMS)           \
                  + (ADC_VREF_MV / 2)) / ADC_VREF_MV))
+// ---------------------------------------------------------------------------
+// Supply monitoring.
+//
+// The 4.096V FVR needs VDD >= ~4.75V to regulate. Below that it sags and
+// EVERY analog reading is wrong - silently, with no flag. On a pump
+// protection device that is the failure that matters: the display works,
+// the menus work, and the pressure is a lie.
+//
+// Hardware BOR cannot cover this. The part tops out at 2.85V, so the whole
+// band from ~4.75V down to 2.85V runs happily on a bad reference.
+//
+// So measure VDD directly: convert the FVR *using VDD as the reference*.
+//     count = FVR / VDD * 1023   ->   VDD = ADC_VREF_MV * 1023 / count
+// As VDD falls the count RISES toward 1023, and the reading stays
+// meaningful right into dropout (where the FVR tracks just under VDD).
+#define VDD_MIN_MV  4600     // below this the FVR is not trustworthy
+#define VDD_HYST_MV  100     // must recover this far above before clearing
+
 #define ADC_4MA   ADC_COUNTS_AT_MA(4)
 #define ADC_20MA  ADC_COUNTS_AT_MA(20)
 
@@ -507,6 +527,12 @@ typedef char assert_under_range_below_4ma[(ADC_UNDER_RANGE < ADC_4MA) ? 1 : -1];
 #define SENSOR_OPEN   1
 #define SENSOR_SHORT  2
 static uint8_t sensor_fault[3] = {0, 0, 0};
+
+// Supply monitor: 1 = VDD too low for the FVR, so analog readings are
+// not to be trusted. Latches an alarm in RUN, same as a broken loop.
+static uint8_t vdd_low = 0;
+static uint8_t vdd_alarm = 0;
+static uint16_t vdd_mv = 0;      // last measurement, for the debug UART
 static uint8_t sensor_alarm[3] = {0, 0, 0};  // latched: this fault stopped the pump
 
 // A 2-wire transmitter draws no loop current until it has powered up, which
@@ -593,7 +619,9 @@ void render_main_screen(uint16_t ch1, uint16_t ch2, uint16_t ch3)
         const char *state = "Standby";
         const char *msg = "";
 
-        if (wdt_reset_flag)
+        if (vdd_alarm)
+            msg = "Low Volts";                // supply too low for a valid reference
+        else if (wdt_reset_flag)
             msg = "WatchDog";                 // [4e-2] distinct watchdog-reset indication
         else if (boot_pwr_fail)
             msg = "Pwr Fail";
@@ -815,6 +843,37 @@ uint16_t adc_read(uint8_t channel)
         ;  // Wait for completion
 
     return (uint16_t)((ADRESH << 8) | ADRESL);
+}
+
+// Measure VDD by converting the FVR against VDD itself.
+//
+// CHS<4:0> = 11111 selects the FVR buffer as the ADC input; PVCFG = 00
+// selects VDD as the positive reference. Returns millivolts, or 0 if the
+// conversion came back at zero (which would mean the FVR is not running).
+//
+// Leaves ADCON1 as it found it: every other caller sets the channel and
+// reference itself on entry, but restoring keeps this side-effect free.
+static uint16_t read_vdd_mv(void)
+{
+    uint8_t saved_adcon1 = ADCON1;
+
+    ADCON0 = (uint8_t)((31 << 2) | 0x01);  // CHS = 11111 (FVR), ADC ON
+    ADCON1 = 0b00000000;                   // PVCFG = 00 (VDD), NVCFG = 00 (VSS)
+    ADCON2 = 0b10100010;                   // right justified, 8 TAD, Fosc/32
+
+    __delay_us(25);   // FVR settling into the sample cap is slower than a
+                      // plain analog channel; be generous, this runs at 1Hz
+
+    ADCON0bits.GO = 1;
+    while (ADCON0bits.GO)
+        ;
+
+    {
+        uint16_t count = (uint16_t)((ADRESH << 8) | ADRESL);
+        ADCON1 = saved_adcon1;
+        if (count == 0) return 0;
+        return (uint16_t)(((uint32_t)ADC_VREF_MV * 1023u) / count);
+    }
 }
 
 // =============================================================================
@@ -1081,6 +1140,78 @@ static void dump_eeprom_config(void)
 }
 #endif
 
+// Hold the button this long at power-up to wipe to factory defaults.
+// Long enough that nobody does it by accident while handling the unit.
+#define FACTORY_HOLD_SECS 5
+
+static void check_factory_reset_gesture(void)
+{
+    // ENC_SW is active low with a pull-up: 0 means held.
+    if (ENC_SW != 0) return;
+
+    // Debounce the initial read - a floating pin at power-up would
+    // otherwise start a countdown nobody asked for.
+    delay_ms_wdt(50);
+    if (ENC_SW != 0) return;
+
+    for (uint8_t remaining = FACTORY_HOLD_SECS; remaining > 0; remaining--)
+    {
+        char buf[21];
+        lcd_clear();
+        lcd_print_at(0, 0, "== FACTORY RESET ==");
+        sprintf(buf, "Erasing in %u", remaining);
+        lcd_print_at(1, 0, buf);
+        lcd_print_at(2, 0, "Release to cancel");
+        lcd_flush();
+
+        // Poll every 10ms so a release is noticed promptly rather than
+        // at the next whole second.
+        for (uint8_t t = 0; t < 100; t++)
+        {
+            CLRWDT();
+            __delay_ms(10);
+            if (ENC_SW != 0)
+            {
+                lcd_clear();
+                lcd_print_at(1, 0, "Cancelled");
+                lcd_flush();
+                delay_ms_wdt(1000);
+                lcd_clear();
+                lcd_flush();
+                uart_println("Factory reset cancelled (button released)");
+                return;
+            }
+        }
+    }
+
+    lcd_clear();
+    lcd_print_at(1, 0, "Restoring defaults");
+    lcd_flush();
+    uart_println("FACTORY RESET: restoring defaults");
+
+    factory_reset();
+
+    // Clear the latched fault state too - a wiped unit should not boot
+    // still complaining about the last stop it saw.
+    system_config.power_failure_flag = 0;
+    system_config.active_stop_code = 0;
+    save_system_config();
+
+    lcd_clear();
+    lcd_print_at(1, 0, "Defaults restored");
+    lcd_print_at(2, 0, "Release button");
+    lcd_flush();
+
+    // Wait for release so the gesture cannot immediately re-trigger, and
+    // so the operator sees it happened.
+    while (ENC_SW == 0)
+        CLRWDT();
+
+    delay_ms_wdt(1000);
+    lcd_clear();
+    lcd_flush();
+}
+
 void main(void)
 {
     // [4e-2] Capture reset cause BEFORE the first CLRWDT (which sets /TO).
@@ -1099,6 +1230,21 @@ void main(void)
     disp_clear();
 
     eeprom_init();
+
+    // -----------------------------------------------------------------
+    // Hidden factory reset: hold the encoder button while powering up.
+    //
+    // Deliberately undocumented on the unit - there is no menu item for
+    // it, because wiping a commissioned pump controller by accident is a
+    // service call. Boot-time is the safe place for it: the pump cannot
+    // be running, and the gesture is impossible to perform unknowingly.
+    //
+    // Held for FACTORY_HOLD_SECS with a visible countdown; releasing at
+    // any point cancels and boots normally. Runs after eeprom_init() so
+    // the defaults are written over a known-good structure, and before
+    // anything reads config into working state.
+    // -----------------------------------------------------------------
+    check_factory_reset_gesture();
 
     // Capture boot-time power fail state (only show on first screen after power-up)
     boot_pwr_fail = system_config.power_failure_flag;
@@ -1618,6 +1764,47 @@ void main(void)
             // -------------------------------------------------------
             if (sensor_settle_countdown > 0)
                 sensor_settle_countdown--;
+
+            // ---------------------------------------------------------
+            // Supply check. Runs before the loop-integrity test because a
+            // sagging VDD makes those readings meaningless too - there is
+            // no point reporting a loop fault derived from a bad reference.
+            // Shares the sensor settling window so a slow rail at power-up
+            // cannot trip it.
+            // ---------------------------------------------------------
+            vdd_mv = read_vdd_mv();
+            if (sensor_settle_countdown == 0 && vdd_mv > 0)
+            {
+                if (!vdd_low && vdd_mv < VDD_MIN_MV)
+                    vdd_low = 1;
+                else if (vdd_low && vdd_mv > (VDD_MIN_MV + VDD_HYST_MV))
+                    vdd_low = 0;   // recovered, with hysteresis so it cannot chatter
+            }
+
+            // A bad reference blinds every analog channel at once, so this
+            // is an immediate stop - no bypass timer, and latched, because a
+            // pulsed stop would restart the pump on the same bad supply.
+            if (vdd_low && sys_state == SYS_RUN && !vdd_alarm)
+            {
+                vdd_alarm = 1;
+                trigger_relay_pulse(1);
+                system_config.active_stop_code = 23;
+                save_power_flags();
+
+                for (uint8_t j = 0; j < 3; j++)
+                {
+                    bp_state[j].high.phase = BP_INACTIVE;
+                    bp_state[j].high.countdown = 0;
+                    bp_state[j].low.phase = BP_INACTIVE;
+                    bp_state[j].low.countdown = 0;
+                }
+                start_alarm_buzzer();
+                {
+                    char vbuf[40];
+                    sprintf(vbuf, "ALARM: VDD %umV, ref invalid", vdd_mv);
+                    uart_println(vbuf);
+                }
+            }
 
             {
                 uint16_t adc_now[3] = {adc_ch1, adc_ch2, adc_ch3};

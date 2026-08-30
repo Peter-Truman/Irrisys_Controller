@@ -52,7 +52,13 @@ void uart_println(const char *str);
 #pragma config IESO = OFF      // Oscillator Switchover mode disabled
 #pragma config PWRTEN = ON     // Power-up Timer enabled
 #pragma config BOREN = SBORDIS // Brown-out Reset enabled in hardware
-#pragma config BORV = 190      // Brown-out voltage = 1.9V
+#pragma config BORV = 285      // Brown-out voltage = 2.85V (part maximum).
+                               // NOTE: this is NOT enough to protect the ADC.
+                               // The 4.096V FVR needs VDD >= ~4.75V to regulate,
+                               // and no BOR setting on this part reaches that, so
+                               // firmware measures VDD itself - see check_vdd() in
+                               // main.c. BOR is the backstop for the CORE; the FVR
+                               // guard is what protects the READINGS.
 #pragma config WDTEN = ON      // [R5] Watchdog ALWAYS on (not SWON, so no code
                                //      path can leave it disabled)
 #pragma config WDTPS = 512     // [R5] ~2.05s timeout (4ms x 512). Tightened from

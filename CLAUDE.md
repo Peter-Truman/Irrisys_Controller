@@ -3,7 +3,7 @@
 ## Project Overview
 
 **Product:** IRRISYS Irrigation Pump Protection System
-**Current Firmware:** Ver 3 Rev 36
+**Current Firmware:** Ver 3 Rev 37
 
 **Hardware:**
 - Display board: IrrisysPG_Ver_B_Display_Rev_2
@@ -46,6 +46,7 @@ Communication: Main -> Display via serial (19200 baud, 8N1)
 | 2026-08-21 | Main    | Ver 3 Rev 2 | Versioning scheme -> `Ver N Rev N`; LCD cleared at top of `main()`; splash is "Irrisys PumpGuard" / version on lines 2-3; Pressure defaults corrected (20mA=362, SHPBP=1s, Rly SLPBP=Pulse); factory defaults now derived from `sensor_type_defaults[]` |
 | 2026-08-21 | Main    | Ver 3 Rev 4 | Main screen: input line flashes while a bypass timer counts, stopping when the value is OK |
 | 2026-08-21 | Main    | Ver 3 Rev 5 | Main screen: disabled inputs show "Not Used" |
+| 2026-08-30 | Main    | Ver 3 Rev 37 | **Supply guard + hidden factory reset.** BOR raised 1.9V -> 2.85V (part max). Firmware now measures VDD by converting the FVR against VDD (`read_vdd_mv()`); below **4600mV** the reference is untrustworthy, so RUN takes an immediate latched stop, code **23**, line 1 shows `Low Volts`. Factory reset restored via a boot gesture: **hold the encoder button through power-up for 5s** (countdown shown, release cancels). Program 81.5% -> 83.4% |
 | 2026-08-27 | Main    | Ver 3 Rev 36 | **Event log removed entirely.** Concept abandoned after review. `View Log` / `Clear Log` gone from UTILITY (9 -> 7 items, all indices renumbered); `eventlog.c`/`.h` deleted and dropped from both build scripts; `log_entries` retired to `reserved_log_entries` (byte kept so `system_config_t` stays 128). Program space 92.3% -> **81.5%** |
 | 2026-08-26 | Main    | Ver 3 Rev 28-35 | Event log development, **superseded by Rev 36**: 25-entry ring on internal EEPROM, one-entry-per-screen viewer, HH:MM:SS elapsed-time columns, live "time since" counter. Also in this span, and RETAINED: Menu T/O default 30s, range 10s-4min, whole-second editing; Pwr Detect range 2-30s, default 3s |
 | 2026-08-26 | Main    | Ver 3 Rev 27 | Remove the **Log Entries** UTILITY item (10 -> 9 items, all later indices renumbered); `log_entries` default 20 -> **25**, no longer operator-adjustable |
@@ -170,6 +171,61 @@ firmware and the version string carries no hardware letter. Ver 3 Rev 9 on a
 firmware to board by hand.**
 
 Migration checklist: [docs/DEVELOPMENT_PATH.md](docs/DEVELOPMENT_PATH.md) §2.
+
+---
+
+## Supply Monitoring (Ver 3 Rev 37)
+
+**The problem BOR cannot solve.** The ADC runs from the 4.096V FVR, which needs
+**VDD >= ~4.75V** to regulate. Below that it sags and every analog reading is
+wrong — silently. The PIC18F26K22's brown-out threshold tops out at **2.85V**, so
+the whole band from ~4.75V down to 2.85V runs happily on a bad reference: display
+fine, menus fine, pressure a lie. On a pump protection device that is the failure
+mode that matters.
+
+**The fix.** Convert the FVR *using VDD as the ADC reference* (CHS = `11111`,
+PVCFG = `00`):
+
+```
+count = FVR / VDD * 1023        ->    VDD = ADC_VREF_MV * 1023 / count
+```
+
+As VDD falls the count RISES toward 1023, and the reading stays meaningful right
+into dropout, where the FVR tracks just below VDD.
+
+| Item | Value |
+| ---- | ----- |
+| Threshold | `VDD_MIN_MV` **4600** |
+| Hysteresis | `VDD_HYST_MV` **100** (must reach 4700mV to clear) |
+| Rate | once per 1Hz tick, before the loop-integrity check |
+| Settling | shares `sensor_settle_countdown`, so a slow rail at power-up cannot trip it |
+| In RUN | immediate **latched** stop (never pulsed), all bypass countdowns cancelled, alarm buzzer |
+| Stop code | **23** |
+| Display | line 1 shows `Low Volts` |
+
+Latched rather than pulsed for the same reason as a loop fault: a pulsed stop
+would restart the pump on the same bad supply.
+
+`BORV` is still set to its 2.85V maximum. It protects the **core**; the FVR guard
+protects the **readings**. Neither replaces the other.
+
+> Not yet verified on hardware — needs a bench supply wound down through 4.6V to
+> confirm the trip point and that it does not chatter.
+
+---
+
+## Factory Reset (hidden)
+
+There is deliberately **no menu item**. Wiping a commissioned controller by
+accident is a service call, so the gesture is undocumented on the unit:
+
+**Hold the encoder button while powering up.** A countdown appears
+(`Erasing in 5 … 1`); releasing at any point cancels. At zero it calls
+`factory_reset()`, clears the latched power-fail flag and stop code, then waits
+for the button to be released before booting on.
+
+Boot-time is the safe place for it: the pump cannot be running, and it cannot be
+performed unknowingly.
 
 ---
 
@@ -1037,10 +1093,10 @@ The **PICkit 3 cannot be used here**: MPLAB X v6.30's device packs list only
 ICD3/4/5 for PIC18F-K, v6.20 is a partial install with no IPE, and the
 standalone `PK3CMD.exe` on this machine has no device file.
 
-### Last Known Build Size (Ver 3 Rev 36)
+### Last Known Build Size (Ver 3 Rev 37)
 
-- Program: 81.5%
-- Data: 66.9%
+- Program: 83.4%
+- Data: 68.1%
 
 ---
 
