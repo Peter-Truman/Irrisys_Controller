@@ -4,7 +4,7 @@ Running list of things to fix or validate before release. Worked through one at
 a time; move an item to **Done** with the revision it landed in, or to
 **Decided** if the answer was "leave it".
 
-Last updated: 2026-08-31 · firmware Ver 3 Rev 53
+Last updated: 2026-08-31 · firmware Ver 3 Rev 56
 
 ---
 
@@ -12,9 +12,6 @@ Last updated: 2026-08-31 · firmware Ver 3 Rev 53
 
 These are written and building, but unproven on a board. Highest risk first.
 
-- [ ] **Watch Dog trigger modes.** Only `Edge` is exercised by the default.
-      Bench-test `Hi to Lo` and `Lo to Hi` with a switch on DIG_IN2 before
-      trusting either to a radio link.
 - [ ] **Watch Dog against a real receiver.** Confirm the pulse width the radio
       receiver actually produces is caught reliably by the 1 ms ISR sampling.
 - [ ] **Sensor type mapping after the `Oth Sw` retirement.** Confirm an input
@@ -100,6 +97,13 @@ codebase about to be handed over.
       **information only** — never used for control, since PumpGuard cannot
       start a pump. Observed `RCON=0x1C POWER-ON`: bench collapses go past the
       POR threshold rather than stopping in the BOR band.
+- [x] **Watch Dog trigger modes** — Rev 55. All three (`Edge`, `Hi to Lo`,
+      `Lo to Hi`) verified on all three digital inputs, 2026-08-31.
+- [x] **Watch Dog PWDBP** — Rev 56. Was clobbered at every pump start: the
+      reload block intended for `resume_bp_timers()` had been patched onto the
+      tail of `init_bp_timers()` instead (the anchor text appears in both), so
+      init set PRIMARY/1800 and then immediately overwrote it with
+      SECONDARY/300. Retriggering on every pulse verified at the same time.
 - [x] **Analog input menu reorder** — Rev 38. Low-pressure items before high
       throughout: both setpoints together (low first), then low bypasses, then
       high bypasses, then relay modes in the same low-first order. From the team

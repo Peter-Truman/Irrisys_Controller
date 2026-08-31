@@ -3,7 +3,7 @@
 ## Project Overview
 
 **Product:** IRRISYS Irrigation Pump Protection System
-**Current Firmware:** Ver 3 Rev 53
+**Current Firmware:** Ver 3 Rev 60
 
 **Hardware:**
 - Display board: IrrisysPG_Ver_B_Display_Rev_2
@@ -46,6 +46,7 @@ Communication: Main -> Display via serial (19200 baud, 8N1)
 | 2026-08-21 | Main    | Ver 3 Rev 2 | Versioning scheme -> `Ver N Rev N`; LCD cleared at top of `main()`; splash is "Irrisys PumpGuard" / version on lines 2-3; Pressure defaults corrected (20mA=362, SHPBP=1s, Rly SLPBP=Pulse); factory defaults now derived from `sensor_type_defaults[]` |
 | 2026-08-21 | Main    | Ver 3 Rev 4 | Main screen: input line flashes while a bypass timer counts, stopping when the value is OK |
 | 2026-08-21 | Main    | Ver 3 Rev 5 | Main screen: disabled inputs show "Not Used" |
+| 2026-08-31 | Main    | Ver 3 Rev 54-60 | **Watch Dog fixes + time editing.** Fixed **PWDBP never running**: the SWDBP reload meant for `resume_bp_timers()` had been patched onto the tail of `init_bp_timers()` (the anchor text appears in both), so every pump start set PRIMARY then immediately overwrote it. Added a 1s **start blanking** window. All time fields (4 bypass timers, Rly Pulse, Run Time) now edit as **two whole pairs** - minutes, button, seconds, button - with only the live pair flashing; previously bypass timers were a single 0-5999 counter, so 30:00 -> 2:00 took ~84 detents. Main screen shows `WDT PWDBP 29:45`; default name -> `WDT` |
 | 2026-08-31 | Main    | Ver 3 Rev 48-53 | **Watch Dog sensor type (6).** External "still moving" signal, e.g. a reed switch on a traveling irrigator wheel radio-linked to the pumpshed. PWDBP startup grace (default 30:00, once per pump start, abandoned by the first pulse) then SWDBP (default 5:00, reloaded by every pulse). Trigger selectable Hi to Lo / Lo to Hi / Edge. Edges captured in the **1ms ISR**, not the main loop, which can block ~2s during an EEPROM save. Rly SWDBP defaults to **Pulse**, Rly PWDBP to Latch. Loop-integrity (`err open`/`err shrt`) now skipped for every digital type. **`Oth Sw` retired** from the selector (type still honoured if stored). Fixed: `BP_NORMAL` from `resume_bp_timers()` tripped a watchdog instantly |
 | 2026-08-31 | Main    | Ver 3 Rev 42-47 | **Reset cause + supply guard.** `RCON` classified at boot (power-on / brown-out / internal error) and shown top-right in RUN and STOP as **information only** - never control, since PumpGuard cannot start a pump. "Watchdog" renamed **"Int Error"** in all operator-facing text. Fixed `vdd_alarm` never being cleared (one trip and the guard was spent, and it masked `BrownOut` beneath it). Supply trip path proven on hardware; `VDD_MIN_MV` 4600 -> **4750**, the FVR's own requirement |
 | 2026-08-31 | Main    | Ver 3 Rev 39-41 | Factory reset gains a **second confirm stage** (`Erase ALL settings? / Hold to confirm: 3`); debug heartbeat at 4Hz on EUSART2 carrying sequence, VDD, relay pin and raw ADC counts, running through the blocking boot delays too |
@@ -1193,10 +1194,10 @@ The **PICkit 3 cannot be used here**: MPLAB X v6.30's device packs list only
 ICD3/4/5 for PIC18F-K, v6.20 is a partial install with no IPE, and the
 standalone `PK3CMD.exe` on this machine has no device file.
 
-### Last Known Build Size (Ver 3 Rev 53)
+### Last Known Build Size (Ver 3 Rev 60)
 
-- Program: 88.5%
-- Data: 73.6%
+- Program: 90.1%
+- Data: 73.7%
 
 > Includes the temporary 4Hz debug heartbeat (`DEBUG_STREAM`), which comes out
 > before release along with the dead code listed in [OPEN_ITEMS.md](OPEN_ITEMS.md).

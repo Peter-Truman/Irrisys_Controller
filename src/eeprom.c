@@ -73,7 +73,7 @@ const sensor_defaults_t sensor_type_defaults[7] = {
     //   the pump and let it be restarted. PWDBP is left LATCHED - never having
     //   started moving at all points at a setup or plumbing problem that wants
     //   someone to look at it.
-    {0, 0, 0, 0,  0, 0, 1800, 300,  0, 0, 0, 1, 2, "Watch Dog",   ""}
+    {0, 0, 0, 0,  0, 0, 1800, 300,  0, 0, 0, 1, 2, "WDT",         ""}
 };
 
 void apply_sensor_type_defaults(uint8_t idx, uint8_t st)

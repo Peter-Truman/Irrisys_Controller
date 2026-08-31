@@ -316,10 +316,10 @@ uint8_t is_numeric_field(uint8_t line, uint8_t sensor_type, uint8_t flow_type)
     if (current_menu == 1) // INPUT menu — use field tags
     {
         uint8_t tag = input_field_tags[line];
+        // Bypass timers moved to the two-field MM:SS editor - see
+        // is_time_field(). Scales and setpoints stay whole-number.
         return (tag == FT_SCALE_4MA || tag == FT_SCALE_20MA ||
-                tag == FT_HI_LIMIT || tag == FT_LO_LIMIT ||
-                tag == FT_PRI_HI_BP || tag == FT_SEC_HI_BP ||
-                tag == FT_PRI_LO_BP || tag == FT_SEC_LO_BP);
+                tag == FT_HI_LIMIT || tag == FT_LO_LIMIT);
     }
     else if (current_menu == 4) // UTILITY menu
     {
@@ -335,9 +335,16 @@ uint8_t is_time_field(uint8_t line, uint8_t sensor_type, uint8_t flow_type)
     (void)sensor_type;
     (void)flow_type;
 
-    if (current_menu == 1) // INPUT menu — BP fields now use whole-number edit
+    if (current_menu == 1) // INPUT menu — bypass timers edit as MM:SS
     {
-        return 0;  // No time fields in input menu (BP uses whole_edit_mode)
+        // Bypass timers edit as MM:SS in two fields, the same editor the
+        // clock and Rly Pulse use. As a single whole number they ran 0..5999
+        // seconds: taking a WDT startup window from its 30:00 default down to
+        // 2:00 meant ~84 detents even at the accelerated step. Minutes and
+        // seconds separately makes it a handful.
+        uint8_t tag = input_field_tags[line];
+        return (tag == FT_PRI_HI_BP || tag == FT_SEC_HI_BP ||
+                tag == FT_PRI_LO_BP || tag == FT_SEC_LO_BP);
     }
     else if (current_menu == 4) // UTILITY menu
     {
@@ -906,7 +913,29 @@ static void draw_menu_line(uint8_t screen_row, uint8_t menu_line, uint8_t is_sel
     {
         if (is_selected && menu.in_edit_mode && !menu.blink_state)
         {
-            // Value blanked — leave spaces for flash effect
+            // Time fields flash ONLY the pair being edited, so it is obvious
+            // which half the encoder is moving. The value is "MM:SS" laid out
+            // from col 12, so minutes are 12-13 and seconds 15-16 with the
+            // colon between. time_edit_digit is 0 for the left pair and 1
+            // for the right: the button steps from one to the other, then
+            // confirms. Whichever pair is live flashes; the other stays put.
+            if (menu.edit_time_mode > 0)
+            {
+                uint8_t vlen = strlen(val);
+                if (vlen > 8) vlen = 8;
+                memcpy(&line_buf[12], val, vlen);
+                if (menu.time_edit_digit == 0)
+                {
+                    line_buf[12] = ' ';
+                    line_buf[13] = ' ';
+                }
+                else
+                {
+                    line_buf[15] = ' ';
+                    line_buf[16] = ' ';
+                }
+            }
+            // Everything else blanks entirely for the flash.
         }
         else
         {
@@ -1813,19 +1842,19 @@ static void save_input_field(uint8_t line, uint8_t idx)
         input_config[idx].high_setpoint = menu.whole_edit_value;
         break;
     case FT_PRI_HI_BP:
-        input_config[idx].primary_high_bypass = (uint16_t)menu.whole_edit_value;
+        input_config[idx].primary_high_bypass = (uint16_t)(menu.time_xx * 60 + menu.time_yy);
         break;
     case FT_SEC_HI_BP:
-        input_config[idx].secondary_high_bypass = (uint16_t)menu.whole_edit_value;
+        input_config[idx].secondary_high_bypass = (uint16_t)(menu.time_xx * 60 + menu.time_yy);
         break;
     case FT_LO_LIMIT:
         input_config[idx].low_setpoint = menu.whole_edit_value;
         break;
     case FT_PRI_LO_BP:
-        input_config[idx].primary_low_bypass = (uint16_t)menu.whole_edit_value;
+        input_config[idx].primary_low_bypass = (uint16_t)(menu.time_xx * 60 + menu.time_yy);
         break;
     case FT_SEC_LO_BP:
-        input_config[idx].secondary_low_bypass = (uint16_t)menu.whole_edit_value;
+        input_config[idx].secondary_low_bypass = (uint16_t)(menu.time_xx * 60 + menu.time_yy);
         break;
     case FT_RLY_PRI_HI:
         input_config[idx].relay_pri_high_mode = relay_high_edit_flag;
@@ -2076,21 +2105,24 @@ void menu_handle_button(uint8_t press_type)
         // Currently editing a field
 
         // Time field - advance digit or confirm
-        if (menu.edit_time_mode == 4) // Whole-number HH:MM mode
+        if (menu.edit_time_mode == 4) // Whole-pair editing: HH:MM and MM:SS
         {
             if (menu.time_edit_digit == 0)
             {
-                // Done editing HH, move to MM
+                // First pair done - move to the second
                 menu.time_edit_digit = 1;
-
             }
             else
             {
-                // Done editing MM - save and exit
+                // Second pair done - save and exit
                 menu.in_edit_mode = 0;
                 menu.edit_time_mode = 0;
 
-                if (current_menu == 5) save_main_field(menu.current_line);
+                // Every menu with a time field saves here now, not just the
+                // clock - the bypass timers and Rly Pulse use this editor too.
+                if (current_menu == 1) save_input_field(menu.current_line, current_input);
+                else if (current_menu == 4) save_utility_field(menu.current_line);
+                else if (current_menu == 5) save_main_field(menu.current_line);
 
                 // Update display value and return to menu
                 menu_update_time_value();
@@ -2344,7 +2376,11 @@ void menu_handle_button(uint8_t press_type)
             case FT_PRI_LO_BP:  secs = input_config[current_input].primary_low_bypass; break;
             case FT_SEC_LO_BP:  secs = input_config[current_input].secondary_low_bypass; break;
             }
-            init_time_editor(secs, 0); // MM:SS
+            // Mode 3 -> edit_time_mode 4: two FIELDS (minutes, then
+            // seconds) rather than four digit positions. One button
+            // press moves from the minutes pair to the seconds pair,
+            // the next confirms.
+            init_time_editor(secs, 3); // MM:SS, whole-pair editing
             menu.in_edit_mode = 1;
 
             break;
@@ -2492,7 +2528,11 @@ void menu_handle_button(uint8_t press_type)
             {
             case 3: secs = system_config.relay_pulse_time; break;
             }
-            init_time_editor(secs, 0); // MM:SS
+            // Mode 3 -> edit_time_mode 4: two FIELDS (minutes, then
+            // seconds) rather than four digit positions. One button
+            // press moves from the minutes pair to the seconds pair,
+            // the next confirms.
+            init_time_editor(secs, 3); // MM:SS, whole-pair editing
             menu.in_edit_mode = 1;
 
             break;

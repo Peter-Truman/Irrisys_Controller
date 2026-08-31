@@ -2,9 +2,9 @@
  * IRRISYS - Full System with Buffered LCD
  * PIC18F26K22 @ 32MHz
  *
- * Version: Ver 3 Rev 53
+ * Version: Ver 3 Rev 60
  *   - Ver 3 = Product/firmware version
- *   - Rev 53 = Incremented on every change; reset to 0 prior to release
+ *   - Rev 60 = Incremented on every change; reset to 0 prior to release
  *
  * Button behavior:
  *   - Press -> immediate short beep (50ms)
@@ -13,7 +13,7 @@
  */
 
 #define FW_VERSION  3     // Product/firmware version
-#define FW_REVISION 53     // Incremented every change; reset to 0 before release
+#define FW_REVISION 60     // Incremented every change; reset to 0 before release
 
 #include "../include/config.h"
 #include "../include/encoder.h"
@@ -903,6 +903,25 @@ void render_main_screen(uint16_t ch1, uint16_t ch2, uint16_t ch3)
             if (vlen > vmax) vlen = vmax;
             memcpy(line + 20 - vlen, vbuf, vlen);
         }
+        else if (st == 6)
+        {
+            // WDT: "WDT <stage>" on the left, countdown (or contact state when
+            // idle) right-justified. Naming the live stage matters because the
+            // two behave differently - PWDBP is a one-shot startup window,
+            // SWDBP reloads on every pulse - and the number alone cannot say
+            // which is running.
+            //
+            //   WDT PWDBP       29:45
+            //   0-2 4-8         15-19
+            memcpy(line, "WDT", 3);
+
+            uint8_t blen = (uint8_t)strlen(bp_label);
+            if (blen > 5) blen = 5;
+            if (blen > 0) memcpy(line + 4, bp_label, blen);
+
+            if (vlen > vmax) vlen = vmax;
+            memcpy(line + 20 - vlen, vbuf, vlen);
+        }
         else
         {
             // Normal: name left (0-10), units right@13 (11-13), value right@19 (15-19)
@@ -994,6 +1013,15 @@ static uint8_t read_digital_input(uint8_t input_idx)
     }
 }
 
+// Edges are ignored for this long after the pump starts. Starting the pump
+// can itself disturb the input - contactor transient, a receiver powering up,
+// shared wiring - and a transition produced by the start is not evidence that
+// anything is moving yet. Without this, that transient clears PWDBP instantly
+// and the long startup grace never happens.
+#define WDT_START_BLANK_SECS 1
+
+static uint8_t wdt_blank[3] = {0, 0, 0};
+
 // Consume any edge the ISR latched for this input, applying the configured
 // trigger. Clears both flags either way, so a trigger change cannot be fed a
 // stale edge from the other direction.
@@ -1054,8 +1082,29 @@ static uint8_t process_watchdog(uint8_t i, bp_dir_t *dir)
         return 0;
     }
 
+    // Startup blanking: consume the edge (wdt_signal_seen already cleared the
+    // flags) but do not treat it as a signal.
+    if (wdt_blank[i] > 0)
+    {
+        wdt_blank[i]--;
+#if DEBUG_STREAM
+        if (kicked)
+            uart_println("WDT: edge ignored (start blanking)");
+#endif
+        kicked = 0;
+    }
+
     if (kicked)
     {
+#if DEBUG_STREAM
+        {
+            char wb[44];
+            sprintf(wb, "WDT%u: kick in %s (was %us) -> SWDBP %us", i + 1,
+                    (dir->phase == BP_PRIMARY) ? "PWDBP" : "SWDBP",
+                    dir->countdown, swd);
+            uart_println(wb);
+        }
+#endif
         // Alive. Leave the startup window behind for good and reload the
         // running timer. If SWDBP is 0 the operator has asked for no ongoing
         // monitoring, so stop here rather than tripping at once.
@@ -1193,11 +1242,26 @@ static void init_bp_timers(uint8_t i)
             bp_state[i].low.countdown = 0;
         }
 
+        // Ignore edges for the first moment of the run - see
+        // WDT_START_BLANK_SECS.
+        wdt_blank[i] = WDT_START_BLANK_SECS;
+
         // Discard anything the ISR latched before the run began.
         INTCONbits.GIE = 0;
         dig_edge_rise[i] = 0;
         dig_edge_fall[i] = 0;
         INTCONbits.GIE = 1;
+
+#if DEBUG_STREAM
+        {
+            char wb[40];
+            sprintf(wb, "WDT%u: start %s %us", i + 1,
+                    (bp_state[i].low.phase == BP_PRIMARY) ? "PWDBP"
+                    : (bp_state[i].low.phase == BP_SECONDARY) ? "SWDBP" : "OFF",
+                    bp_state[i].low.countdown);
+            uart_println(wb);
+        }
+#endif
     }
     // Low direction: always monitor if input is enabled
     else if (input_config[i].primary_low_bypass > 0)
@@ -1209,24 +1273,6 @@ static void init_bp_timers(uint8_t i)
     {
         bp_state[i].low.phase = BP_NORMAL;
         bp_state[i].low.countdown = 0;
-    }
-
-    // A watchdog has no idle state: resuming means restarting its running
-    // timer, not waiting for a fault to arm one. The startup window is not
-    // restarted - like every other primary, it runs once per pump start.
-    if (input_config[i].sensor_type == 6)
-    {
-        uint16_t swd = input_config[i].secondary_low_bypass;
-        if (swd > 0)
-        {
-            bp_state[i].low.phase = BP_SECONDARY;
-            bp_state[i].low.countdown = swd;
-        }
-        else
-        {
-            bp_state[i].low.phase = BP_INACTIVE;
-            bp_state[i].low.countdown = 0;
-        }
     }
 
     alarm_active[i] = 0;
@@ -1266,13 +1312,33 @@ static void resume_bp_timers(void)
     for (uint8_t i = 0; i < 3; i++)
     {
         uint8_t st_i = input_config[i].sensor_type;
-        uint8_t sw = (st_i == 3 || st_i == 5);
+        uint8_t sw = (st_i == 3 || st_i == 5 || st_i == 6);
         uint8_t phase = input_config[i].enable ? BP_NORMAL : BP_INACTIVE;
-        // A switch has no high direction to resume
+        // A switch and a watchdog both have no high direction to resume
         bp_state[i].high.phase = sw ? BP_INACTIVE : phase;
         bp_state[i].high.countdown = 0;
         bp_state[i].low.phase = phase;
         bp_state[i].low.countdown = 0;
+
+        // A watchdog has no idle state: resuming means restarting its
+        // running timer, not waiting for a fault to arm one. The startup
+        // window is NOT restarted - like every other primary, it runs once
+        // per pump start, and this is a mid-run acknowledge.
+        if (st_i == 6 && input_config[i].enable)
+        {
+            uint16_t swd = input_config[i].secondary_low_bypass;
+            if (swd > 0)
+            {
+                bp_state[i].low.phase = BP_SECONDARY;
+                bp_state[i].low.countdown = swd;
+            }
+            else
+            {
+                bp_state[i].low.phase = BP_INACTIVE;
+                bp_state[i].low.countdown = 0;
+            }
+        }
+
         alarm_active[i] = 0;
         sensor_alarm[i] = 0;
     }
