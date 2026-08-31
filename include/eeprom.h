@@ -66,7 +66,7 @@ typedef struct
 
     // Display settings (16 bytes)
     uint8_t contrast;               // LCD contrast (3-10)
-    uint8_t brightness;             // LCD brightness (3-10)
+    uint8_t brightness;             // LCD brightness, 1-10 -> 10-100%
     uint16_t power_fail_delay;      // Power fail delay (seconds)
     uint8_t power_failure_flag;     // 1=power failure occurred, 0=normal
     uint8_t active_stop_code;       // Latched stop code (persists across power cycles)

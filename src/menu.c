@@ -1180,8 +1180,11 @@ void menu_handle_encoder(int16_t delta)
         // Whole-number signed edit mode (acceleration)
         if (menu.edit_whole_mode)
         {
-            // Acceleration: fast spin (<112ms between detents) = step by 20
-            int16_t step = (encoder_ms_timer < 112) ? 20 : 1;
+            // Acceleration: fast spin (<112ms between detents) = step by 20.
+            // Pointless on a short range - brightness is ten steps, where a
+            // single quick turn would slam straight to the rail.
+            int16_t span = menu.whole_edit_max - menu.whole_edit_min;
+            int16_t step = (span > 20 && encoder_ms_timer < 112) ? 20 : 1;
             encoder_ms_timer = 0; // Reset for next detent timing
 
             if (delta > 0)
@@ -1741,14 +1744,32 @@ void menu_update_edit_value(void)
             case FT_LO_LIMIT:   strcpy(value_low_sp, buf); break;
             }
         }
-        else if (current_menu == 4) // UTILITY - whole seconds shown as MM:SS
+        else if (current_menu == 4) // UTILITY
         {
-            uint16_t secs = (uint16_t)v;
-            sprintf(buf, "%02u:%02u", secs / 60, secs % 60);
-            switch (menu.current_line)
+            if (menu.current_line == 2) // Brightness
             {
-            case 0: strcpy(value_menu_timeout, buf); break;  // Menu T/O
-            case 1: strcpy(value_pwr_fail, buf); break;      // Pwr Detect
+                // A plain 0-9 step, not a duration - MM:SS would be nonsense.
+                // With no case here at all the row simply never updated while
+                // the encoder turned: the value was changing underneath, so it
+                // looked like the control was dead.
+                sprintf(buf, "%u", (unsigned)v);
+                strcpy(value_brightness, buf);
+
+                // Apply on every detent so the operator sees what they are
+                // choosing. The display board persists it (two EEPROM bytes,
+                // ~8ms deaf) but ten steps means at most ten writes for a full
+                // sweep - cheap next to guessing and confirming blind.
+                disp_set_brightness((uint8_t)(v * 10));  // 1-10 -> 10-100%
+            }
+            else
+            {
+                uint16_t secs = (uint16_t)v;
+                sprintf(buf, "%02u:%02u", secs / 60, secs % 60);
+                switch (menu.current_line)
+                {
+                case 0: strcpy(value_menu_timeout, buf); break;  // Menu T/O
+                case 1: strcpy(value_pwr_fail, buf); break;      // Pwr Detect
+                }
             }
         }
         return;
@@ -1927,8 +1948,13 @@ static void save_utility_field(uint8_t line)
         break;
     case 2: // Brightness
     {
-        int16_t val = menu.digit_100 * 100 + menu.digit_10 * 10 + menu.digit_1;
-        system_config.brightness = (uint8_t)val;
+        system_config.brightness = (uint8_t)menu.whole_edit_value;
+        // Apply it now. Previously brightness was only pushed to the display
+        // board at boot, so changing it appeared to do nothing until the next
+        // power cycle. Sent on confirm rather than per detent: the display
+        // board writes its backlight setting to EEPROM and is deaf while it
+        // does, so one frame per edit, not one per click.
+        disp_set_brightness((uint8_t)(system_config.brightness * 10));  // 1-10 -> 10-100%
         break;
     }
     case 3: // Rly Pulse
@@ -2477,7 +2503,7 @@ void menu_handle_button(uint8_t press_type)
             // ranges. Digit editing made them awkward - the first detent
             // moved the tens-of-minutes digit, so 02:00 jumped to 12:00.
             // Edit them as whole seconds instead, clamped to their range.
-            if (line == 0 || line == 1)
+            if (line == 0 || line == 1 || line == 2)
             {
                 menu.in_edit_mode = 1;
                 menu.edit_time_mode = 0;
@@ -2488,11 +2514,23 @@ void menu_handle_button(uint8_t press_type)
                     menu.whole_edit_min = 10;   // 10 seconds
                     menu.whole_edit_max = 240;  // 4:00
                 }
-                else
+                else if (line == 1)
                 {
                     menu.whole_edit_value = (int16_t)system_config.power_fail_delay;
                     menu.whole_edit_min = 2;
                     menu.whole_edit_max = 30;
+                }
+                else
+                {
+                    // Brightness is TEN STEPS, 0-9, mapped to 10-100% by
+                    // disp_set_brightness(). It was on the 3-digit editor,
+                    // which let it reach 999 - a number that means nothing
+                    // here and gets rejected by the display board.
+                    menu.whole_edit_value = (int16_t)system_config.brightness;
+                    menu.whole_edit_min = 1;   // shown as 1-10, not 0-9:
+                    menu.whole_edit_max = 10;  // "1 of 10" reads better than
+                                               // "0 of 9" to a non-technical
+                                               // operator, and 0 reads as off
                 }
                 // Clamp the STORED value into range on entry. Without this a
                 // value saved under an older range (or a corrupt one) is shown
@@ -2507,17 +2545,8 @@ void menu_handle_button(uint8_t press_type)
                 break;
             }
 
-            int16_t val = 0;
-            uint8_t is_unsigned = 1;
-            switch (line)
-            {
-            case 2: val = system_config.brightness; break;
-            }
-            // Start on the TENS digit: starting on hundreds stepped this
-            // field by 100 per click, far too coarse for a brightness of
-            // 3-10. Button then advances to ones.
-            init_numeric_editor(val, is_unsigned, 1);
-
+            // No 3-digit numeric fields remain in UTILITY - all three edit
+            // as clamped whole numbers above.
             break;
         }
 

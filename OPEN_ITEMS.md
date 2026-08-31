@@ -4,13 +4,20 @@ Running list of things to fix or validate before release. Worked through one at
 a time; move an item to **Done** with the revision it landed in, or to
 **Decided** if the answer was "leave it".
 
-Last updated: 2026-08-31 · firmware Ver 3 Rev 56
+Last updated: 2026-08-31 · firmware Ver 3 Rev 63
 
 ---
 
 ## Needs hardware validation
 
 These are written and building, but unproven on a board. Highest risk first.
+
+- [ ] **Rev 63 is BUILT BUT NOT FLASHED.** The board was powered down before it
+      could be programmed. Brightness 1-10 has never run. Flash it first.
+- [ ] **Bypass timers save** after the two-pair editor change (Rev 59) — set one,
+      leave the menu, come back. Affects every sensor type, and a failure is
+      silent: the value flashes correctly and simply does not stick.
+- [ ] **Run Time saves** — its confirm path changed in the same edit.
 
 - [ ] **Watch Dog against a real receiver.** Confirm the pulse width the radio
       receiver actually produces is caught reliably by the 1 ms ISR sampling.

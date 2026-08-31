@@ -2,9 +2,9 @@
  * IRRISYS - Full System with Buffered LCD
  * PIC18F26K22 @ 32MHz
  *
- * Version: Ver 3 Rev 60
+ * Version: Ver 3 Rev 63
  *   - Ver 3 = Product/firmware version
- *   - Rev 60 = Incremented on every change; reset to 0 prior to release
+ *   - Rev 63 = Incremented on every change; reset to 0 prior to release
  *
  * Button behavior:
  *   - Press -> immediate short beep (50ms)
@@ -13,7 +13,7 @@
  */
 
 #define FW_VERSION  3     // Product/firmware version
-#define FW_REVISION 60     // Incremented every change; reset to 0 before release
+#define FW_REVISION 63     // Incremented every change; reset to 0 before release
 
 #include "../include/config.h"
 #include "../include/encoder.h"
@@ -1782,7 +1782,16 @@ void main(void)
     // incoming UART bytes while it runs. Sending line frames immediately after
     // this lands them in that deaf window and they are silently dropped. Give
     // the display time to finish before transmitting anything else.
-    disp_set_brightness(system_config.brightness * 10 + 10); // Map 0-9 to 10-100%
+    // Brightness is stored as the operator sees it: 1-10, mapping to 10-100%.
+    // Clamped here because a config written under the old 0-9 numbering would
+    // otherwise map a stored 0 straight to 0% - a black screen that looks like
+    // a dead display board.
+    {
+        uint8_t br = system_config.brightness;
+        if (br < 1 || br > 10) br = 5;
+        system_config.brightness = br;
+        disp_set_brightness((uint8_t)(br * 10));  // 1-10 -> 10-100%
+    }
     delay_ms_wdt(50);  // let the display board finish its backlight EEPROM write
 
     // Build first main screen manually with debug output
