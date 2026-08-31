@@ -3,7 +3,7 @@
 ## Project Overview
 
 **Product:** IRRISYS Irrigation Pump Protection System
-**Current Firmware:** Ver 3 Rev 37
+**Current Firmware:** Ver 3 Rev 38
 
 **Hardware:**
 - Display board: IrrisysPG_Ver_B_Display_Rev_2
@@ -46,6 +46,7 @@ Communication: Main -> Display via serial (19200 baud, 8N1)
 | 2026-08-21 | Main    | Ver 3 Rev 2 | Versioning scheme -> `Ver N Rev N`; LCD cleared at top of `main()`; splash is "Irrisys PumpGuard" / version on lines 2-3; Pressure defaults corrected (20mA=362, SHPBP=1s, Rly SLPBP=Pulse); factory defaults now derived from `sensor_type_defaults[]` |
 | 2026-08-21 | Main    | Ver 3 Rev 4 | Main screen: input line flashes while a bypass timer counts, stopping when the value is OK |
 | 2026-08-21 | Main    | Ver 3 Rev 5 | Main screen: disabled inputs show "Not Used" |
+| 2026-08-30 | Main    | Ver 3 Rev 38 | **Analog input menu reordered** from the team ballot: Enable, **both setpoints together (low first)**, low bypasses, high bypasses, Sensor, Units, scales, relay modes (low first), Back, EXIT. Low before high throughout - loss of prime is the everyday case on an irrigation pump, over-pressure the rare one. Pure reorder, no size change |
 | 2026-08-30 | Main    | Ver 3 Rev 37 | **Supply guard + hidden factory reset.** BOR raised 1.9V -> 2.85V (part max). Firmware now measures VDD by converting the FVR against VDD (`read_vdd_mv()`); below **4600mV** the reference is untrustworthy, so RUN takes an immediate latched stop, code **23**, line 1 shows `Low Volts`. Factory reset restored via a boot gesture: **hold the encoder button through power-up for 5s** (countdown shown, release cancels). Program 81.5% -> 83.4% |
 | 2026-08-27 | Main    | Ver 3 Rev 36 | **Event log removed entirely.** Concept abandoned after review. `View Log` / `Clear Log` gone from UTILITY (9 -> 7 items, all indices renumbered); `eventlog.c`/`.h` deleted and dropped from both build scripts; `log_entries` retired to `reserved_log_entries` (byte kept so `system_config_t` stays 128). Program space 92.3% -> **81.5%** |
 | 2026-08-26 | Main    | Ver 3 Rev 28-35 | Event log development, **superseded by Rev 36**: 25-entry ring on internal EEPROM, one-entry-per-screen viewer, HH:MM:SS elapsed-time columns, live "time since" counter. Also in this span, and RETAINED: Menu T/O default 30s, range 10s-4min, whole-second editing; Pwr Detect range 2-30s, default 3s |
@@ -550,6 +551,21 @@ Single ISR (`__interrupt()`) with no priority levels (no IPEN). Handles:
 
 ### Safety-Critical Design
 
+**PumpGuard can never START a pump — it can only stop one that is running.**
+
+Closing the relay merely *permits* a start; energising the starter/VSD requires
+an operator to press an external start button. Using a switch rather than a
+momentary button there would be unsafe and probably illegal. The run signal on
+DIG_IN1 is derived from the **actual state of the pump**, not inferred from the
+relay output.
+
+This changes how failures must be reasoned about. A chattering or repeatedly
+re-energised relay cannot restart the pump — it can only drop it once, after
+which it stays down until someone presses start. So a brown-out reset loop is
+not a "repeated start/stop" hazard. Do not assume otherwise when analysing
+fault behaviour.
+
+
 - **Bypass timer processing** (step 5d) runs every 1-second tick when `sys_state == SYS_RUN`, regardless of menu state. Being in any menu does NOT block pump protection.
 - **Relay trip** occurs immediately on alarm, BEFORE any EEPROM or logging operations.
 - **Deferred EEPROM saves** (step 6) ensure menu config changes never block safety-critical bypass timer processing. Menu code sets dirty flags; main loop writes EEPROM after safety processing completes.
@@ -662,7 +678,9 @@ Each input has independent high and low direction bypass timers. When an alarm t
 | 4     | Other 4-20   | Analog         | High Value / Low Value | PHV, SHV, PLV, SLV |
 | 5     | Other Switch | Digital        | Aux (high only)        | PA, SA, PNA, SNA   |
 
-Analog types (0,1,2,4) have 17 menu items: Enable, High Setpoint, 2 high bypass timers, Low Setpoint, 2 low bypass timers, Sensor, Units, Scale 4mA, Scale 20mA, 4 relay modes, Back, EXIT.
+Analog types (0,1,2,4) have 17 menu items: Enable, Low Setpoint, High Setpoint, 2 low bypass timers, 2 high bypass timers, Sensor, Units, Scale 4mA, Scale 20mA, 4 relay modes (low pair first), Back, EXIT.
+
+> **Low before high** throughout, from the team ordering review (Ver 3 Rev 38). Loss of prime is the everyday protection case on an irrigation pump and over-pressure the rare one, so the fields touched most often sit nearest the top. The two setpoints sit together so the trip window reads as one thing.
 
 Digital types (3,5) have 9 menu items: Enable, Polarity, 2 bypass timers, Sensor,
 2 relay modes, Back, EXIT.
@@ -898,20 +916,20 @@ SETUP (current_menu = 2, from OPTIONS > Setup Menu)
 INPUT (current_menu = 1, unified, dynamic based on sensor type)
   Analog (17 items):        Digital (9 items):
   |- Enable                 |- Enable
-  |- High Setpoint          |- Polarity   (level = present)
-  |- Pri High BP            |- Pri BP     (PNFBP - startup)
-  |- Sec High BP            |- Sec BP     (SNFBP - running)
-  |- Low Setpoint           |- Sensor
-  |- Pri Low BP             |- Rly Pri BP
-  |- Sec Low BP             |- Rly Sec BP
+  |- Low Setpoint           |- Polarity   (level = present)
+  |- High Setpoint          |- Pri BP     (PNFBP - startup)
+  |- Pri Low BP             |- Sec BP     (SNFBP - running)
+  |- Sec Low BP             |- Sensor
+  |- Pri High BP            |- Rly Pri BP
+  |- Sec High BP            |- Rly Sec BP
   |- Sensor                 |- Back -> SETUP
   |- Units                  +- EXIT -> Main screen
   |- Scale 4mA
   |- Scale 20mA
-  |- Rly Pri High
-  |- Rly Sec High
   |- Rly Pri Low
   |- Rly Sec Low
+  |- Rly Pri High
+  |- Rly Sec High
   |- Back     -> SETUP
   +- EXIT     -> Main screen
 

@@ -588,8 +588,13 @@ void rebuild_input_menu(void)
     if (is_analog_type(st))
     {
         // --- ANALOG menu ---
-        // Order: Enable, high setpoint + its bypasses, low setpoint + its bypasses,
-        //        Sensor, Units, Scale 4mA, Scale 20mA, relay modes, Back, EXIT
+        // Order (team review, 2026-08-30): Enable, BOTH setpoints (low first),
+        // then the low bypasses, then the high bypasses, then Sensor, Units,
+        // scales, relay modes (low first), Back, EXIT.
+        //
+        // Low before high throughout: loss of prime is the everyday protection
+        // case on an irrigation pump, over-pressure the rare one, so the fields
+        // touched most often sit nearest the top.
 
         // Use custom labels for type 4 (Other 4-20), or default labels for others
         const char *bp_phi = (st == 4) ? custom_bp_phi : lbl_phi_bp[st];
@@ -601,37 +606,38 @@ void rebuild_input_menu(void)
         const char *rly_plo = (st == 4) ? custom_rly_plo : lbl_rly_plo[st];
         const char *rly_slo = (st == 4) ? custom_rly_slo : lbl_rly_slo[st];
 
-        // High setpoint
-        sprintf(value_high_sp, "%03d", input_config[idx].high_setpoint);
-        n = add_menu_item(n, lbl_high[st], value_high_sp, 1, FT_HI_LIMIT);
-
-        // Primary high bypass
-        sprintf(value_pri_high_bp, "%02u:%02u",
-                input_config[idx].primary_high_bypass / 60,
-                input_config[idx].primary_high_bypass % 60);
-        n = add_menu_item(n, bp_phi, value_pri_high_bp, 1, FT_PRI_HI_BP);
-
-        // Secondary high bypass
-        sprintf(value_sec_high_bp, "%02u:%02u",
-                input_config[idx].secondary_high_bypass / 60,
-                input_config[idx].secondary_high_bypass % 60);
-        n = add_menu_item(n, bp_shi, value_sec_high_bp, 1, FT_SEC_HI_BP);
-
-        // Low setpoint
+        // 2. Low setpoint
         sprintf(value_low_sp, "%03d", input_config[idx].low_setpoint);
         n = add_menu_item(n, lbl_low[st], value_low_sp, 1, FT_LO_LIMIT);
 
-        // Primary low bypass
+        // 3. High setpoint - the two setpoints sit together so the trip
+        //    window can be read and set as one thing.
+        sprintf(value_high_sp, "%03d", input_config[idx].high_setpoint);
+        n = add_menu_item(n, lbl_high[st], value_high_sp, 1, FT_HI_LIMIT);
+
+        // 4. Primary low bypass
         sprintf(value_pri_low_bp, "%02u:%02u",
                 input_config[idx].primary_low_bypass / 60,
                 input_config[idx].primary_low_bypass % 60);
         n = add_menu_item(n, bp_plo, value_pri_low_bp, 1, FT_PRI_LO_BP);
 
-        // Secondary low bypass
+        // 5. Secondary low bypass
         sprintf(value_sec_low_bp, "%02u:%02u",
                 input_config[idx].secondary_low_bypass / 60,
                 input_config[idx].secondary_low_bypass % 60);
         n = add_menu_item(n, bp_slo, value_sec_low_bp, 1, FT_SEC_LO_BP);
+
+        // 6. Primary high bypass
+        sprintf(value_pri_high_bp, "%02u:%02u",
+                input_config[idx].primary_high_bypass / 60,
+                input_config[idx].primary_high_bypass % 60);
+        n = add_menu_item(n, bp_phi, value_pri_high_bp, 1, FT_PRI_HI_BP);
+
+        // 7. Secondary high bypass
+        sprintf(value_sec_high_bp, "%02u:%02u",
+                input_config[idx].secondary_high_bypass / 60,
+                input_config[idx].secondary_high_bypass % 60);
+        n = add_menu_item(n, bp_shi, value_sec_high_bp, 1, FT_SEC_HI_BP);
 
         // Sensor type
         n = add_menu_item(n, "Sensor", value_sensor, 1, FT_SENSOR);
@@ -668,10 +674,12 @@ void rebuild_input_menu(void)
         strcpy(value_rly_pri_lo, relay_low_edit_flag ? "Pulse" : "Latch");
         strcpy(value_rly_sec_lo, relay_sec_low_edit_flag ? "Pulse" : "Latch");
 
-        n = add_menu_item(n, rly_phi, value_rly_pri_hi, 1, FT_RLY_PRI_HI);
-        n = add_menu_item(n, rly_shi, value_rly_sec_hi, 1, FT_RLY_SEC_HI);
+        // 12-15. Relay modes, in the same low-before-high order as the
+        //        bypasses above so the two blocks read the same way.
         n = add_menu_item(n, rly_plo, value_rly_pri_lo, 1, FT_RLY_PRI_LO);
         n = add_menu_item(n, rly_slo, value_rly_sec_lo, 1, FT_RLY_SEC_LO);
+        n = add_menu_item(n, rly_phi, value_rly_pri_hi, 1, FT_RLY_PRI_HI);
+        n = add_menu_item(n, rly_shi, value_rly_sec_hi, 1, FT_RLY_SEC_HI);
     }
     else
     {

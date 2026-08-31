@@ -2,9 +2,9 @@
  * IRRISYS - Full System with Buffered LCD
  * PIC18F26K22 @ 32MHz
  *
- * Version: Ver 3 Rev 37
+ * Version: Ver 3 Rev 47
  *   - Ver 3 = Product/firmware version
- *   - Rev 37 = Incremented on every change; reset to 0 prior to release
+ *   - Rev 47 = Incremented on every change; reset to 0 prior to release
  *
  * Button behavior:
  *   - Press -> immediate short beep (50ms)
@@ -13,7 +13,7 @@
  */
 
 #define FW_VERSION  3     // Product/firmware version
-#define FW_REVISION 37     // Incremented every change; reset to 0 before release
+#define FW_REVISION 47     // Incremented every change; reset to 0 before release
 
 #include "../include/config.h"
 #include "../include/encoder.h"
@@ -253,12 +253,63 @@ void beep(uint16_t duration_ms)
 // which is what lets us run a much tighter WDT timeout.
 static void check_factory_reset_gesture(void);  // defined below main()'s helpers
 
+// ---------------------------------------------------------------------------
+// Debug heartbeat  [TEMPORARY - brown-out diagnosis, 2026-08-30]
+//
+// A constant stream on the debug UART so a failure can be placed in time:
+// when the line stops, that is when the PIC stopped. Runs from the first
+// moment the UART is up - including through the blocking boot delays, which
+// would otherwise be several silent seconds.
+//
+// Carries VDD so the rail can be correlated with the moment it dies, the
+// relay pin so it is visible whether the coil is still held, and the raw ADC
+// counts so a collapsing reference shows up before scaling hides it.
+//
+//     #00042 V=5041 R=1 A=0838,0102,0095
+//
+// Set DEBUG_STREAM to 0 to silence it. ~34 chars at 4Hz is about 15% of
+// 9600 baud, so it does not crowd the ordinary messages.
+// ---------------------------------------------------------------------------
+static uint16_t read_vdd_mv(void);   // defined with the ADC driver below
+
+#define DEBUG_STREAM     1
+#define DEBUG_STREAM_MS  250
+
+#if DEBUG_STREAM
+static uint16_t dbg_seq = 0;
+static uint16_t dbg_adc[3] = {0, 0, 0};   // snapshot of the main loop locals
+static uint8_t  dbg_ready = 0;            // set once the UART is initialised
+
+static void debug_heartbeat(void)
+{
+    char b[48];
+    if (!dbg_ready) return;
+    sprintf(b, "#%05u V=%u R=%u A=%04u,%04u,%04u",
+            dbg_seq++, read_vdd_mv(), (unsigned)(RELAY1_PIN ? 1 : 0),
+            dbg_adc[0], dbg_adc[1], dbg_adc[2]);
+    uart_println(b);
+}
+#endif
+
 static void delay_ms_wdt(uint16_t ms)
 {
+#if DEBUG_STREAM
+    static uint16_t since = 0;
+#endif
     while (ms--)
     {
         CLRWDT();
         __delay_ms(1);
+#if DEBUG_STREAM
+        // Keep the stream alive through the boot waits - the 1s display
+        // wait and the 5s splash hold are otherwise dead air, and a failure
+        // in that window would be invisible.
+        if (++since >= DEBUG_STREAM_MS)
+        {
+            since = 0;
+            debug_heartbeat();
+        }
+#endif
     }
 }
 
@@ -413,6 +464,8 @@ static uint16_t pwr_detect_countdown = 0;  // Non-blocking power detect delay (s
 static uint8_t boot_pwr_fail = 0;             // Set once at boot if power_failure_flag was set in EEPROM
 static uint8_t ext_stop_flag = 0;             // 1=stopped by external run input going low
 static uint8_t wdt_reset_flag = 0;            // [4e-2] 1=booted from a watchdog reset (safe-latch until acknowledged)
+static uint8_t bor_reset_flag = 0;            // 1=browned out while powered (safe-latch until acknowledged)
+static uint8_t rcon_at_boot  = 0;             // raw RCON snapshot, for the debug UART
 static uint8_t led_flash_counter = 0;         // 50ms tick counter for 2Hz LED flash
 static uint8_t led_flash_state = 0;           // Toggles at 2Hz for LED flashing
 
@@ -482,7 +535,23 @@ static uint8_t alarm_input_idx = 0;   // Which input (0-2) triggered the alarm
 //     count = FVR / VDD * 1023   ->   VDD = ADC_VREF_MV * 1023 / count
 // As VDD falls the count RISES toward 1023, and the reading stays
 // meaningful right into dropout (where the FVR tracks just under VDD).
-#define VDD_MIN_MV  4600     // below this the FVR is not trustworthy
+// 4750mV is the FVR's own requirement, not an arbitrary margin: below it the
+// 4.096V reference stops regulating and the readings are wrong. Bench test
+// 2026-08-30 showed the original 4600 was too low to be useful - there was a
+// 150mV band where the pressure was already invalid and nothing complained.
+// Clears at 4850, leaving ~190mV to the 5.041V nominal rail.
+//
+// The trip path was proven on hardware 2026-08-31 by temporarily raising
+// this to 5200 (Rev 46): trip, latched relay, alarm, acknowledge and
+// re-trip all confirmed. The threshold VALUE rests on read_vdd_mv()
+// agreeing with a bench meter to within a few mV, which it does.
+//
+// The real 4750 crossing cannot be reached on this board: the 5V regulator
+// holds regulation until the 24V is nearly gone, and DIG_IN1 drops out well
+// before that, so the box is never in RUN when VDD genuinely sags. What the
+// guard actually covers is 5V-side failure - a dying regulator or an
+// overloaded rail - not a failing 24V supply, which stops the pump anyway.
+#define VDD_MIN_MV  4750     // below this the FVR is not trustworthy
 #define VDD_HYST_MV  100     // must recover this far above before clearing
 
 #define ADC_4MA   ADC_COUNTS_AT_MA(4)
@@ -616,30 +685,36 @@ void render_main_screen(uint16_t ch1, uint16_t ch2, uint16_t ch3)
     lcd_set_cursor(0, 0);
     // Use %-15s to left-pad status, then right-justify time at col 15
     {
-        const char *state = "Standby";
+        // The state word reports the STATE; the right-hand message reports the
+        // REASON. Keeping them independent is what lets a reset cause stay
+        // visible after the farmer restarts the pump - he walked in asking why
+        // it stopped, and the answer should not vanish the moment he restarts.
+        const char *state = (sys_state == SYS_RUN) ? "Running" : "Standby";
         const char *msg = "";
 
+        // Reset cause: information only, never control. Shown in RUN and STOP
+        // alike until acknowledged with a button press.
+        const char *reset_msg = bor_reset_flag ? "BrownOut"
+                              : wdt_reset_flag ? "Int Error"
+                                               : "";
+
         if (vdd_alarm)
-            msg = "Low Volts";                // supply too low for a valid reference
-        else if (wdt_reset_flag)
-            msg = "WatchDog";                 // [4e-2] distinct watchdog-reset indication
+            msg = "Low Volts";                // live: supply too low RIGHT NOW
+        else if (reset_msg[0])
+            msg = reset_msg;                  // why we restarted - more specific
+                                              // than "Pwr Fail", so it wins
         else if (boot_pwr_fail)
             msg = "Pwr Fail";
-        else if (system_config.active_stop_code)
-        {
-            if (system_config.active_stop_code == 1)
-                msg = "End RunTime";
-        }
-        else if (sys_state == SYS_RUN)
-            state = "Running";
-        else if (ext_stop_flag)
+        else if (system_config.active_stop_code == 1)
+            msg = "End RunTime";
+        else if (sys_state != SYS_RUN && ext_stop_flag)
             msg = "Ext Stop";
 
         // Show countdown HH:MM:SS when running with clock enabled and runtime > 0
         // (but not after runtime expired — show "STOP End RunTime" instead)
         if (sys_state == SYS_RUN && system_config.clock_enabled &&
             (system_config.runtime_hours > 0 || system_config.runtime_minutes > 0) &&
-            system_config.active_stop_code != 1)
+            !msg[0])
         {
             uint32_t t = run_timer_secs;
             uint8_t hh = t / 3600;
@@ -1144,6 +1219,11 @@ static void dump_eeprom_config(void)
 // Long enough that nobody does it by accident while handling the unit.
 #define FACTORY_HOLD_SECS 5
 
+// Second hold, after the consequence is spelled out. Two deliberate
+// stages rather than one long one: the first proves intent to do
+// SOMETHING, the second proves intent to do THIS.
+#define FACTORY_CONFIRM_SECS 3
+
 static void check_factory_reset_gesture(void)
 {
     // ENC_SW is active low with a pull-up: 0 means held.
@@ -1159,7 +1239,7 @@ static void check_factory_reset_gesture(void)
         char buf[21];
         lcd_clear();
         lcd_print_at(0, 0, "== FACTORY RESET ==");
-        sprintf(buf, "Erasing in %u", remaining);
+        sprintf(buf, "Keep holding: %u", remaining);
         lcd_print_at(1, 0, buf);
         lcd_print_at(2, 0, "Release to cancel");
         lcd_flush();
@@ -1179,6 +1259,39 @@ static void check_factory_reset_gesture(void)
                 lcd_clear();
                 lcd_flush();
                 uart_println("Factory reset cancelled (button released)");
+                return;
+            }
+        }
+    }
+
+    // Second stage. The countdown above only proves the button was held;
+    // it does not prove the operator knew what it was counting down to.
+    // State the consequence in plain words and make them hold through it.
+    for (uint8_t remaining = FACTORY_CONFIRM_SECS; remaining > 0; remaining--)
+    {
+        char buf[21];
+        lcd_clear();
+        lcd_print_at(0, 0, "== FACTORY RESET ==");
+        lcd_print_at(1, 0, "Erase ALL settings?");
+        sprintf(buf, "Hold to confirm: %u", remaining);
+        lcd_print_at(2, 0, buf);
+        lcd_print_at(3, 0, "Release to cancel");
+        lcd_flush();
+
+        for (uint8_t t = 0; t < 100; t++)
+        {
+            CLRWDT();
+            __delay_ms(10);
+            if (ENC_SW != 0)
+            {
+                lcd_clear();
+                lcd_print_at(1, 0, "Cancelled");
+                lcd_print_at(2, 0, "Nothing erased");
+                lcd_flush();
+                delay_ms_wdt(1500);
+                lcd_clear();
+                lcd_flush();
+                uart_println("Factory reset cancelled at confirm stage");
                 return;
             }
         }
@@ -1214,14 +1327,41 @@ static void check_factory_reset_gesture(void)
 
 void main(void)
 {
-    // [4e-2] Capture reset cause BEFORE the first CLRWDT (which sets /TO).
-    // RCON /TO == 0 here means the watchdog timed out and reset the MCU
-    // (only a WDT time-out clears /TO; power-on/BOR/MCLR leave it set).
+    // Capture the reset cause BEFORE the first CLRWDT (which sets /TO).
+    //
+    //   /TO  == 0  watchdog timed out
+    //   /POR == 0  cold power-up. Software sets it to 1 afterwards, so it
+    //              stays 1 through every later reset until power is lost.
+    //   /BOR == 0  brown-out reset - but a power-on clears this one too, so
+    //              it only means "brown-out" when /POR says we were already up.
+    //
+    // That distinction is the whole point: it separates "someone switched it
+    // on" from "the supply dipped while we were running", with no EEPROM flag
+    // and no invented shutdown event - RCON survives a reset and is lost on a
+    // true power-down, which is exactly the semantics wanted.
+    rcon_at_boot   = RCON;
     wdt_reset_flag = (RCONbits.NOT_TO == 0) ? 1 : 0;
+
+    if (RCONbits.NOT_POR == 0)
+    {
+        bor_reset_flag = 0;   // cold start; /BOR being 0 is just the POR side-effect
+    }
+    else if (RCONbits.NOT_BOR == 0)
+    {
+        bor_reset_flag = 1;   // we were already powered and the rail dipped
+    }
+
+    // Re-arm both for the next reset.
+    RCONbits.NOT_POR = 1;
+    RCONbits.NOT_BOR = 1;
 
     CLRWDT();  // [R5] Fresh watchdog window for the whole boot sequence
     system_init();
     uart_init();
+#if DEBUG_STREAM
+    dbg_ready = 1;      // stream from the earliest possible moment
+    debug_heartbeat();
+#endif
 
     // Clear the display as early as possible. EUSART1 is already configured by
     // system_init(), so the clear goes out ahead of EEPROM/I2C/RTC init rather
@@ -1286,6 +1426,15 @@ void main(void)
     encoder_init();
     menu_init();
     // lcd_init() already done at the top of main() for the early display clear
+
+    {
+        char rb[56];
+        sprintf(rb, "RESET: RCON=0x%02X %s%s%s", rcon_at_boot,
+                (rcon_at_boot & 0x02) ? "" : "POWER-ON ",
+                wdt_reset_flag ? "INT-ERROR " : "",
+                bor_reset_flag ? "BROWN-OUT " : "");
+        uart_println(rb);
+    }
 
     uart_println("Peripherals initialized");
 
@@ -1353,15 +1502,21 @@ void main(void)
         sys_state = SYS_STOP;
     run_timer_secs = 0;
 
-    // After boot sequence: check for latched fault, or a watchdog reset
-    // ([4e-2] latch the relay open so an unexpected WDT reset can't auto-run).
-    if (system_config.active_stop_code || wdt_reset_flag)
+    // After boot sequence: check for a latched fault.
+    //
+    // The reset cause (brown-out / internal error) is deliberately NOT part of
+    // this decision. It is INFORMATION ONLY - displayed so the operator can see
+    // why the pump stopped, never used for control. PumpGuard cannot start a
+    // pump: closing the relay only permits a start, and the starter still needs
+    // the external button. So latching the relay open after a reset would not
+    // make anything safer - it would just leave the farmer pressing start with
+    // nothing happening and no clue why.
+    if (system_config.active_stop_code)
     {
         relay_state = 1;
         relay_latch_mode = 1;  // Treat as latched until button pressed
         RELAY1_PIN = 0;        // Stay de-energized = pump stopped
-        uart_println(wdt_reset_flag ? "Boot: WATCHDOG reset, relay latched open"
-                                    : "Boot: active stop code, relay latched open");
+        uart_println("Boot: active stop code, relay latched open");
     }
     else
     {
@@ -1632,8 +1787,15 @@ void main(void)
                 sum2 += adc_buf[2][i];
             }
             adc_ch1 = sum0 >> ADC_AVG_SHIFT;
+#if DEBUG_STREAM
+            dbg_adc[0] = adc_ch1;
+#endif
             adc_ch2 = sum1 >> ADC_AVG_SHIFT;
             adc_ch3 = sum2 >> ADC_AVG_SHIFT;
+#if DEBUG_STREAM
+            dbg_adc[1] = adc_ch2;
+            dbg_adc[2] = adc_ch3;
+#endif
         }
         else
         {
@@ -1647,6 +1809,18 @@ void main(void)
         // 50ms sub-tick (driven by Timer0 ISR)
         // =============================================================
         if (!subtick_flag) continue;
+#if DEBUG_STREAM
+        // Heartbeat from the main loop. Driven off the 50ms subtick, so if
+        // the stream stops the main loop stopped - which is the whole point.
+        {
+            static uint8_t dbg_sub = 0;
+            if (++dbg_sub >= (DEBUG_STREAM_MS / 50))
+            {
+                dbg_sub = 0;
+                debug_heartbeat();
+            }
+        }
+#endif
         subtick_flag = 0;
 
         // [R3] Buzzer timing now lives in the 1ms Timer0 ISR (beep/beep_double),
@@ -1773,6 +1947,24 @@ void main(void)
             // cannot trip it.
             // ---------------------------------------------------------
             vdd_mv = read_vdd_mv();
+
+            // Report VDD on the debug UART: once at first reading, then only
+            // when it moves more than 50mV. Quiet enough to leave in, and it
+            // makes the supply visible during commissioning - otherwise the
+            // guard is invisible right up until it trips the pump.
+            {
+                static uint16_t vdd_reported = 0;
+                uint16_t delta = (vdd_mv > vdd_reported)
+                               ? (uint16_t)(vdd_mv - vdd_reported)
+                               : (uint16_t)(vdd_reported - vdd_mv);
+                if (vdd_mv > 0 && (vdd_reported == 0 || delta > 50))
+                {
+                    char vb[24];
+                    sprintf(vb, "VDD %umV", vdd_mv);
+                    uart_println(vb);
+                    vdd_reported = vdd_mv;
+                }
+            }
             if (sensor_settle_countdown == 0 && vdd_mv > 0)
             {
                 if (!vdd_low && vdd_mv < VDD_MIN_MV)
@@ -2117,13 +2309,16 @@ void main(void)
                     extern system_config_t system_config;
                     extern void save_power_flags(void);
 
-                    if (boot_pwr_fail || system_config.active_stop_code || ext_stop_flag || wdt_reset_flag)
+                    if (boot_pwr_fail || system_config.active_stop_code || ext_stop_flag ||
+                        wdt_reset_flag || bor_reset_flag || vdd_alarm)
                     {
                         // First press: clear fault, close relay if latched, don't enter menu
                         boot_pwr_fail = 0;
                         system_config.power_failure_flag = 0;
                         system_config.active_stop_code = 0;
                         wdt_reset_flag = 0;  // [4e-2] acknowledge watchdog-reset latch
+                        bor_reset_flag = 0;  // acknowledge brown-out latch
+                        vdd_alarm = 0;       // acknowledge low-supply latch
                         if (relay_state == 1)
                             relay_close();
                         clear_bp_timers();  // Clear all bypass alarms
