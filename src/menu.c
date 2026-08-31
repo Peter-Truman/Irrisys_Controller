@@ -91,7 +91,7 @@ typedef struct
 {
     uint8_t option_id;
     uint8_t option_count;
-    const char *options[6];
+    const char *options[7];
 } item_options_t;
 
 #define OPT_ENABLE 0
@@ -108,10 +108,16 @@ typedef struct
 #define OPT_UNITS_TEMP  11
 #define OPT_UNITS_FLOW  12
 #define OPT_UNITS_OTHER 13
+#define OPT_WDT_TRIG    14   // Watch Dog trigger edge
 
 const item_options_t menu_item_options[] = {
     {OPT_ENABLE, 2, {"Disabled", "Enabled", "", "", "", ""}},
-    {OPT_SENSOR, 6, {"Pressure", "Temp", "Flow Meter", "Flow Sw", "Oth 4-20", "Oth Sw"}},
+    // "Oth Sw" (type 5) is retired from the selector. The type is still
+    // handled everywhere so an existing config carrying it keeps working;
+    // it simply cannot be chosen any more. sensor_type_for_option[] maps
+    // menu position to stored type.
+    {OPT_SENSOR, 6, {"Pressure", "Temp", "Flow Meter", "Flow Sw", "Oth 4-20",
+                     "WDT", ""}},
     {OPT_FLOW_TYPE, 2, {"Analog", "Digital", "", "", "", ""}},
     {OPT_NO_FLOW, 2, {"Low", "High", "", "", "", ""}},
     {OPT_FLOW_UNITS, 2, {"%", "LpS", "", "", "", ""}},
@@ -124,9 +130,10 @@ const item_options_t menu_item_options[] = {
     {OPT_UNITS_TEMP, 2, {"\xDF""C", "\xDF""F", "", "", "", ""}},
     {OPT_UNITS_FLOW, 3, {"%", "L/M", "LpS", "", "", ""}},
     {OPT_UNITS_OTHER, 1, {"Value", "", "", "", "", ""}},
+    {OPT_WDT_TRIG, 3, {"Hi to Lo", "Lo to Hi", "Edge", "", "", ""}},
 };
 
-#define NUM_OPTION_TYPES 14
+#define NUM_OPTION_TYPES 15
 
 // Options menu - built dynamically based on clock_enabled
 static const char *options_menu[5];
@@ -444,7 +451,13 @@ static const item_options_t *get_item_options_for_field(uint8_t line)
         case FT_RLY_SEC_HI:
         case FT_RLY_PRI_LO:
         case FT_RLY_SEC_LO:   return &menu_item_options[OPT_RELAY_MODE];
-        case FT_FAULT_POL:     return &menu_item_options[OPT_FAULT_POL];
+        case FT_FAULT_POL:
+            // Same tag, different meaning by sensor type: a switch picks the
+            // level at which its condition is PRESENT; a Watch Dog picks which
+            // edge counts as a "still alive" pulse.
+            return (input_config[current_input].sensor_type == 6)
+                 ? &menu_item_options[OPT_WDT_TRIG]
+                 : &menu_item_options[OPT_FAULT_POL];
         default: return NULL;
         }
     }
@@ -509,16 +522,16 @@ static uint8_t add_menu_item(uint8_t n, const char *label, char *value, uint8_t 
 
 // Sensor-specific label arrays (indexed by sensor_type 0-5)
 //                                  Pressure      Temp          FlowMeter     FlowSwitch    Oth4-20       OthSwitch
-static const char *lbl_high[6]    = {"High Press",  "High Temp",  "High Flow",  "Flow",       "High Value", "Aux"};
-static const char *lbl_low[6]     = {"Low Press",   "Low Temp",   "Low Flow",   "",           "Low Value",  ""};
-static const char *lbl_phi_bp[6]  = {"PHPBP",       "PHTBP",      "PHFBP",      "PFBP",       "PHVBP",      "PABP"};
-static const char *lbl_shi_bp[6]  = {"SHPBP",       "SHTBP",      "SHFBP",      "SFBP",       "SHVBP",      "SABP"};
-static const char *lbl_plo_bp[6]  = {"PLPBP",       "PLTBP",      "PLFBP",      "PNFBP",      "PLVBP",      "PNABP"};
-static const char *lbl_slo_bp[6]  = {"SLPBP",       "SLTBP",      "SLFBP",      "SNFBP",      "SLVBP",      "SNABP"};
-static const char *lbl_rly_phi[6] = {"Rly PHPBP",   "Rly PHTBP",  "Rly PHFBP",  "Rly PFBP",   "Rly PHVBP",  "Rly PABP"};
-static const char *lbl_rly_shi[6] = {"Rly SHPBP",   "Rly SHTBP",  "Rly SHFBP",  "Rly SFBP",   "Rly SHVBP",  "Rly SABP"};
-static const char *lbl_rly_plo[6] = {"Rly PLPBP",   "Rly PLTBP",  "Rly PLFBP",  "Rly PNFBP",  "Rly PLVBP",  "Rly PNABP"};
-static const char *lbl_rly_slo[6] = {"Rly SLPBP",   "Rly SLTBP",  "Rly SLFBP",  "Rly SNFBP",  "Rly SLVBP",  "Rly SNABP"};
+static const char *lbl_high[7]    = {"High Press",  "High Temp",  "High Flow",  "Flow",       "High Value", "Aux",   "Trigger"};
+static const char *lbl_low[7]     = {"Low Press",   "Low Temp",   "Low Flow",   "",           "Low Value",  "",      ""};
+static const char *lbl_phi_bp[7]  = {"PHPBP",       "PHTBP",      "PHFBP",      "PFBP",       "PHVBP",      "PABP",  ""};
+static const char *lbl_shi_bp[7]  = {"SHPBP",       "SHTBP",      "SHFBP",      "SFBP",       "SHVBP",      "SABP",  ""};
+static const char *lbl_plo_bp[7]  = {"PLPBP",       "PLTBP",      "PLFBP",      "PNFBP",      "PLVBP",      "PNABP", "PWDBP"};
+static const char *lbl_slo_bp[7]  = {"SLPBP",       "SLTBP",      "SLFBP",      "SNFBP",      "SLVBP",      "SNABP", "SWDBP"};
+static const char *lbl_rly_phi[7] = {"Rly PHPBP",   "Rly PHTBP",  "Rly PHFBP",  "Rly PFBP",   "Rly PHVBP",  "Rly PABP",  ""};
+static const char *lbl_rly_shi[7] = {"Rly SHPBP",   "Rly SHTBP",  "Rly SHFBP",  "Rly SFBP",   "Rly SHVBP",  "Rly SABP",  ""};
+static const char *lbl_rly_plo[7] = {"Rly PLPBP",   "Rly PLTBP",  "Rly PLFBP",  "Rly PNFBP",  "Rly PLVBP",  "Rly PNABP", "Rly PWDBP"};
+static const char *lbl_rly_slo[7] = {"Rly SLPBP",   "Rly SLTBP",  "Rly SLFBP",  "Rly SNFBP",  "Rly SLVBP",  "Rly SNABP", "Rly SWDBP"};
 
 // Generate custom bypass labels from name (first 2 uppercase chars)
 // Format: P/S + XX + H/L + BP (e.g., "TANK" -> PTAHBP, STAHBP, PTALBP, STALBP)
@@ -559,14 +572,21 @@ void rebuild_input_menu(void)
 {
     uint8_t idx = current_input;
     uint8_t st = input_config[idx].sensor_type;
-    if (st > 5) st = 0;
+    if (st > 6) st = 0;
     uint8_t n = 0;
 
-    static const char *sensor_names[] = {"Pressure", "Temp", "Flow Mtr", "Flow Sw", "Oth 4-20", "Oth Sw"};
+    static const char *sensor_names[] = {"Pressure", "Temp", "Flow Mtr", "Flow Sw",
+                                        "Oth 4-20", "Oth Sw", "WDT"};
+
+    // Menu position -> stored sensor_type. Type 5 is skipped: retired from
+    // the selector but still honoured if a stored config carries it.
+    static const uint8_t sensor_type_for_option[6] = {0, 1, 2, 3, 4, 6};
 
     // --- Common fields ---
     enable_edit_flag = input_config[idx].enable;
-    sensor_edit_flag = st;
+    sensor_edit_flag = 0;
+    for (uint8_t k = 0; k < 6; k++)
+        if (sensor_type_for_option[k] == st) { sensor_edit_flag = k; break; }
     strcpy(value_enable, enable_edit_flag ? "Enabled" : "Disabled");
 
     // For "Other" types with custom name, show the name; otherwise show sensor type
@@ -701,9 +721,20 @@ void rebuild_input_menu(void)
         const char *rly_plo = (st == 5) ? custom_rly_plo : lbl_rly_plo[st];
         const char *rly_slo = (st == 5) ? custom_rly_slo : lbl_rly_slo[st];
 
-        // Polarity: the input level at which flow / aux is PRESENT
+        // Switch types: the input level at which flow / aux is PRESENT.
+        // Watch Dog: which edge counts as a "still alive" pulse. Same field
+        // and same tag; the option table is chosen by sensor type.
         fault_polarity_edit_flag = input_config[idx].fault_polarity;
-        strcpy(value_fault_pol, fault_polarity_edit_flag ? "High" : "Low");
+        if (st == 6)
+        {
+            static const char *wdt_trig[3] = {"Hi to Lo", "Lo to Hi", "Edge"};
+            if (fault_polarity_edit_flag > 2) fault_polarity_edit_flag = 2;
+            strcpy(value_fault_pol, wdt_trig[fault_polarity_edit_flag]);
+        }
+        else
+        {
+            strcpy(value_fault_pol, fault_polarity_edit_flag ? "High" : "Low");
+        }
         n = add_menu_item(n, lbl_high[st], value_fault_pol, 1, FT_FAULT_POL);
 
         // Primary bypass - startup window
@@ -935,9 +966,11 @@ void menu_draw_input(void)
     // If name is empty, use sensor type name instead
     if (upper_name[0] == '\0')
     {
-        static const char *type_names[] = {"PRESSURE", "TEMPERATURE", "FLOW METER", "FLOW SWITCH", "OTHER 4-20", "OTHER SWITCH"};
+        static const char *type_names[] = {"PRESSURE", "TEMPERATURE", "FLOW METER",
+                                           "FLOW SWITCH", "OTHER 4-20", "OTHER SWITCH",
+                                           "WATCH DOG"};
         uint8_t st = input_config[current_input].sensor_type;
-        if (st > 5) st = 0;
+        if (st > 6) st = 0;
         strncpy(upper_name, type_names[st], 12);
         upper_name[12] = '\0';
     }
@@ -1736,13 +1769,21 @@ static void save_input_field(uint8_t line, uint8_t idx)
         // timers, relay modes, fault polarity, name and units - to the new
         // type's defaults. Carrying the previous sensor's trip settings over
         // would leave the input protecting the pump against the wrong thing.
-        apply_sensor_type_defaults(idx, sensor_edit_flag);
+        {
+            static const uint8_t opt_to_type[6] = {0, 1, 2, 3, 4, 6};
+            uint8_t new_st = (sensor_edit_flag < 6) ? opt_to_type[sensor_edit_flag] : 0;
+            apply_sensor_type_defaults(idx, new_st);
+        }
         // Rebuild menu since analog/digital layout may change
         input_config_dirty[idx] = 1;  // Defer EEPROM write to after 1-second tick
         rebuild_input_menu_keep_field(FT_SENSOR);
 
         // For "Other" types, automatically open name editor with empty string
-        if (sensor_edit_flag == 4 || sensor_edit_flag == 5)
+        // Menu position 4 is "Oth 4-20" - a generic analog input that needs a
+        // name of the operator's choosing, since nothing else identifies what
+        // it is measuring. WDT is not offered the editor: a watchdog is always
+        // a watchdog, and its bypass labels are fixed at PWDBP/SWDBP anyway.
+        if (sensor_edit_flag == 4)
         {
             // Mark as auto-opened so cancel can restore previous state
             name_editor_auto_opened = 1;

@@ -59,6 +59,10 @@ extern volatile uint8_t relay_latch_mode;
 
 // RTC 1Hz tick COUNT and 50ms sub-tick flag (set in ISR, consumed in main loop)
 volatile uint8_t rtc_tick_count = 0;
+
+// Watch Dog edge capture - see encoder.h for why this lives in the ISR.
+volatile uint8_t dig_edge_rise[3] = {0, 0, 0};
+volatile uint8_t dig_edge_fall[3] = {0, 0, 0};
 volatile uint8_t subtick_flag = 0;
 static uint8_t subtick_counter = 0;
 
@@ -112,6 +116,27 @@ void __interrupt(low_priority) isr_low(void)
 
         // Free-running ms counter for encoder acceleration
         if (encoder_ms_timer < 65535) encoder_ms_timer++;
+
+        // --- Watch Dog edge capture -------------------------------
+        // Latch both directions for all three digital inputs. No
+        // debounce: a bouncing reed switch just produces extra kicks,
+        // and an extra kick on a retriggerable timer is harmless.
+        {
+            static uint8_t dig_prev[3] = {0, 0, 0};
+            uint8_t now[3];
+            now[0] = DIG_IN2_PORT ? 1 : 0;
+            now[1] = DIG_IN3_PORT ? 1 : 0;
+            now[2] = DIG_IN4_PORT ? 1 : 0;
+            for (uint8_t i = 0; i < 3; i++)
+            {
+                if (now[i] != dig_prev[i])
+                {
+                    if (now[i]) dig_edge_rise[i] = 1;
+                    else        dig_edge_fall[i] = 1;
+                    dig_prev[i] = now[i];
+                }
+            }
+        }
 
         // [R3] Non-blocking buzzer sequencer (1ms resolution). While an alarm
         // pattern is running (alarm_buzz_phase > 0) it owns the BUZZER pin, so

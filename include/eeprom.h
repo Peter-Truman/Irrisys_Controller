@@ -8,8 +8,12 @@ typedef struct
 {
     // Basic config (8 bytes)
     uint8_t enable;               // 0=Disabled, 1=Enabled
-    uint8_t sensor_type;          // 0=Pressure, 1=Temp, 2=FlowMeter, 3=FlowSw, 4=Oth4-20, 5=OthSw
-    uint8_t fault_polarity;       // Digital types: 0=Fault Low, 1=Fault High
+    uint8_t sensor_type;          // 0=Pressure 1=Temp 2=FlowMeter 3=FlowSw
+                                  // 4=Oth4-20 5=OthSw 6=WatchDog
+    uint8_t fault_polarity;       // Switch types: level at which the condition is
+                                  //   PRESENT (0=Low, 1=High)
+                                  // Watch Dog: trigger edge
+                                  //   0=Hi to Lo, 1=Lo to Hi, 2=either edge
     uint8_t config_flags;         // Bit flags for per-input options
     uint8_t reserved1[4];         // Future expansion
 
@@ -134,7 +138,7 @@ typedef struct
     const char *units;
 } sensor_defaults_t;
 
-extern const sensor_defaults_t sensor_type_defaults[6];
+extern const sensor_defaults_t sensor_type_defaults[7];
 
 // Reset every sensor-dependent field of input `idx` to the defaults for
 // sensor type `st`. `enable` is deliberately left untouched.

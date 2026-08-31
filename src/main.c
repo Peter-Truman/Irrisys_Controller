@@ -2,9 +2,9 @@
  * IRRISYS - Full System with Buffered LCD
  * PIC18F26K22 @ 32MHz
  *
- * Version: Ver 3 Rev 47
+ * Version: Ver 3 Rev 53
  *   - Ver 3 = Product/firmware version
- *   - Rev 47 = Incremented on every change; reset to 0 prior to release
+ *   - Rev 53 = Incremented on every change; reset to 0 prior to release
  *
  * Button behavior:
  *   - Press -> immediate short beep (50ms)
@@ -13,7 +13,7 @@
  */
 
 #define FW_VERSION  3     // Product/firmware version
-#define FW_REVISION 47     // Incremented every change; reset to 0 before release
+#define FW_REVISION 53     // Incremented every change; reset to 0 before release
 
 #include "../include/config.h"
 #include "../include/encoder.h"
@@ -653,10 +653,10 @@ int16_t convert_to_standard(int16_t val, const char *units)
 static uint8_t read_digital_input(uint8_t input_idx);
 
 // Bypass abbreviation lookup [sensor_type 0-5] for alarm display
-static const char *bp_lbl_phi[6] = {"PHPBP", "PHTBP", "PHFBP", "PFBP",  "PHVBP", "PABP"};
-static const char *bp_lbl_shi[6] = {"SHPBP", "SHTBP", "SHFBP", "SFBP",  "SHVBP", "SABP"};
-static const char *bp_lbl_plo[6] = {"PLPBP", "PLTBP", "PLFBP", "PNFBP", "PLVBP", "PNABP"};
-static const char *bp_lbl_slo[6] = {"SLPBP", "SLTBP", "SLFBP", "SNFBP", "SLVBP", "SNABP"};
+static const char *bp_lbl_phi[7] = {"PHPBP", "PHTBP", "PHFBP", "PFBP",  "PHVBP", "PABP",  ""};
+static const char *bp_lbl_shi[7] = {"SHPBP", "SHTBP", "SHFBP", "SFBP",  "SHVBP", "SABP",  ""};
+static const char *bp_lbl_plo[7] = {"PLPBP", "PLTBP", "PLFBP", "PNFBP", "PLVBP", "PNABP", "PWDBP"};
+static const char *bp_lbl_slo[7] = {"SLPBP", "SLTBP", "SLFBP", "SNFBP", "SLVBP", "SNABP", "SWDBP"};
 
 // Digital state text, shown in place of a numeric value [sensor_type 0-5].
 // Only the switch types (3, 5) are used. The old "High"/"Low" read as pin
@@ -665,8 +665,8 @@ static const char *bp_lbl_slo[6] = {"SLPBP", "SLTBP", "SLFBP", "SNFBP", "SLVBP",
 // exactly backwards when tracing wiring. Naming the sensed condition
 // removes the ambiguity: these say what the switch means, not what the
 // pin is doing.
-static const char *dig_lbl_ok[6]    = {"", "", "", "Flow",    "", "Aux"};
-static const char *dig_lbl_fault[6] = {"", "", "", "No Flow", "", "No Aux"};
+static const char *dig_lbl_ok[7]    = {"", "", "", "Flow",    "", "Aux",    ""};
+static const char *dig_lbl_fault[7] = {"", "", "", "No Flow", "", "No Aux", ""};
 
 // =============================================================================
 // Main screen rendering
@@ -757,7 +757,7 @@ void render_main_screen(uint16_t ch1, uint16_t ch2, uint16_t ch3)
         }
 
         uint8_t st = input_config[i].sensor_type;
-        uint8_t is_digital = (st == 3 || st == 5);
+        uint8_t is_digital = (st == 3 || st == 5 || st == 6);
 
         // Find most urgent active timer and its label
         uint16_t display_timer = 0;
@@ -784,7 +784,11 @@ void render_main_screen(uint16_t ch1, uint16_t ch2, uint16_t ch3)
         // counting. A countdown only runs while the value is in fault - it is
         // abandoned the moment the value comes good - so the flash stops on
         // its own once the reading is OK.
-        if ((alarm_active[i] || display_timer > 0) && !alarm_flash)
+        //
+        // A WDT is the exception: its timer is ALWAYS counting, that being the
+        // whole idea, so flashing on a running countdown would mean the line
+        // flashed permanently. It still flashes on an actual alarm.
+        if ((alarm_active[i] || (display_timer > 0 && st != 6)) && !alarm_flash)
         {
             lcd_print("                    ");
             continue;
@@ -812,7 +816,28 @@ void render_main_screen(uint16_t ch1, uint16_t ch2, uint16_t ch3)
 
         ubuf[0] = '\0';
 
-        if (is_digital)
+        if (st == 6)
+        {
+            // Watch Dog: show the time left before it trips. That is the
+            // number an operator actually wants - "how long has it got?" -
+            // and it counts down visibly between pulses, so a working link
+            // shows the figure jumping back up each time one arrives.
+            uint16_t rem = bp_state[i].low.countdown;
+            if (bp_state[i].low.phase == BP_INACTIVE ||
+                bp_state[i].low.phase == BP_NORMAL)
+            {
+                // No timer running - stopped, or the stage is disabled. Show
+                // the live contact state instead, so the wiring and the radio
+                // link can be proved from the standby screen without having
+                // to start the pump. Inputs are PNP: 24V present = closed.
+                sprintf(vbuf, "%s", read_digital_input(i) ? "Closed" : "Open");
+            }
+            else
+            {
+                sprintf(vbuf, "%02u:%02u", rem / 60, rem % 60);
+            }
+        }
+        else if (is_digital)
         {
             // The polarity setting names the input level at which the
             // condition is PRESENT, so "Flow: High" reads the way the menu
@@ -858,9 +883,12 @@ void render_main_screen(uint16_t ch1, uint16_t ch2, uint16_t ch3)
             if (clen > 0 && clen <= 6)
                 memcpy(line + 20 - clen, alarm_code_text, clen);
         }
-        else if (display_timer > 0)
+        else if (display_timer > 0 && st != 6)
         {
             // Bypass active: code left (0-6), timer at col 7 (7-11), value right (15-19)
+            // A WDT skips this layout: it has no separate "value", and showing
+            // SWDBP alongside its own countdown says the same thing twice. It
+            // uses the normal name + value line, the value being the time left.
             uint8_t blen = (uint8_t)strlen(bp_label);
             if (blen > 7) blen = 7;
             memcpy(line, bp_label, blen);
@@ -966,6 +994,94 @@ static uint8_t read_digital_input(uint8_t input_idx)
     }
 }
 
+// Consume any edge the ISR latched for this input, applying the configured
+// trigger. Clears both flags either way, so a trigger change cannot be fed a
+// stale edge from the other direction.
+static uint8_t wdt_signal_seen(uint8_t i)
+{
+    uint8_t rise, fall, trig;
+
+    INTCONbits.GIE = 0;
+    rise = dig_edge_rise[i];
+    fall = dig_edge_fall[i];
+    dig_edge_rise[i] = 0;
+    dig_edge_fall[i] = 0;
+    INTCONbits.GIE = 1;
+
+    trig = input_config[i].fault_polarity;   // 0=Hi to Lo, 1=Lo to Hi, 2=Edge
+    if (trig == 0) return fall;
+    if (trig == 1) return rise;
+    return (uint8_t)(rise | fall);
+}
+
+// Watch Dog: one 1-second tick for input i. Unlike a bypass timer, which
+// counts while a fault PERSISTS, this counts while a signal is ABSENT and
+// reloads on every pulse - it is a retriggerable timer, not a delay.
+//
+//   PWDBP  startup grace, once per pump start. The first pulse abandons it,
+//          exactly as a primary bypass is abandoned when the value goes good.
+//   SWDBP  thereafter, reloaded by every pulse.
+//
+// Either reaching zero raises the alarm. A timer set to 0 means that stage is
+// not monitored, matching every other bypass in the system.
+//
+// Returns the same codes as process_bp() so it can share the alarm handling:
+//   0 = nothing, 1 = alarm from primary, 2 = alarm from secondary
+static uint8_t process_watchdog(uint8_t i, bp_dir_t *dir)
+{
+    uint8_t kicked = wdt_signal_seen(i);
+    uint16_t swd = input_config[i].secondary_low_bypass;
+
+    if (dir->phase == BP_INACTIVE || dir->phase == BP_ALARM)
+        return 0;
+
+    // BP_NORMAL means "monitoring, no timer running" - a state a bypass has
+    // and a watchdog cannot. resume_bp_timers() parks every direction there
+    // after a mid-run acknowledge, and falling through to the countdown with
+    // countdown == 0 tripped instantly. Adopt the running timer instead.
+    if (dir->phase == BP_NORMAL)
+    {
+        if (swd == 0)
+        {
+            dir->phase = BP_INACTIVE;
+            dir->countdown = 0;
+        }
+        else
+        {
+            dir->phase = BP_SECONDARY;
+            dir->countdown = swd;
+        }
+        return 0;
+    }
+
+    if (kicked)
+    {
+        // Alive. Leave the startup window behind for good and reload the
+        // running timer. If SWDBP is 0 the operator has asked for no ongoing
+        // monitoring, so stop here rather than tripping at once.
+        if (swd == 0)
+        {
+            dir->phase = BP_INACTIVE;
+            dir->countdown = 0;
+            return 0;
+        }
+        dir->phase = BP_SECONDARY;
+        dir->countdown = swd;
+        return 0;
+    }
+
+    if (dir->countdown > 0)
+        dir->countdown--;
+
+    if (dir->countdown == 0)
+    {
+        uint8_t from_primary = (dir->phase == BP_PRIMARY);
+        dir->phase = BP_ALARM;
+        return from_primary ? 1 : 2;
+    }
+    return 0;
+}
+
 // Process one bypass direction per 1-second tick.
 // Returns: 0=nothing, 1=alarm from primary, 2=alarm from secondary,
 //          3=secondary countdown just started (excursion, no alarm)
@@ -1037,7 +1153,7 @@ static void init_bp_timers(uint8_t i)
     // left in BP_PRIMARY it would hold a countdown that never expires, and
     // the main screen would show and flash it indefinitely.
     uint8_t st_i = input_config[i].sensor_type;
-    if (st_i == 3 || st_i == 5)
+    if (st_i == 3 || st_i == 5 || st_i == 6)
     {
         bp_state[i].high.phase = BP_INACTIVE;
         bp_state[i].high.countdown = 0;
@@ -1056,8 +1172,35 @@ static void init_bp_timers(uint8_t i)
         bp_state[i].high.countdown = 0;
     }
 
+    // Watch Dog: the low direction carries the retriggerable timer.
+    // PWDBP is the startup grace; with PWDBP = 0 there is none, so start
+    // straight on SWDBP. Both 0 means the operator has disabled it.
+    if (st_i == 6)
+    {
+        if (input_config[i].primary_low_bypass > 0)
+        {
+            bp_state[i].low.phase = BP_PRIMARY;
+            bp_state[i].low.countdown = input_config[i].primary_low_bypass;
+        }
+        else if (input_config[i].secondary_low_bypass > 0)
+        {
+            bp_state[i].low.phase = BP_SECONDARY;
+            bp_state[i].low.countdown = input_config[i].secondary_low_bypass;
+        }
+        else
+        {
+            bp_state[i].low.phase = BP_INACTIVE;
+            bp_state[i].low.countdown = 0;
+        }
+
+        // Discard anything the ISR latched before the run began.
+        INTCONbits.GIE = 0;
+        dig_edge_rise[i] = 0;
+        dig_edge_fall[i] = 0;
+        INTCONbits.GIE = 1;
+    }
     // Low direction: always monitor if input is enabled
-    if (input_config[i].primary_low_bypass > 0)
+    else if (input_config[i].primary_low_bypass > 0)
     {
         bp_state[i].low.phase = BP_PRIMARY;
         bp_state[i].low.countdown = input_config[i].primary_low_bypass;
@@ -1066,6 +1209,24 @@ static void init_bp_timers(uint8_t i)
     {
         bp_state[i].low.phase = BP_NORMAL;
         bp_state[i].low.countdown = 0;
+    }
+
+    // A watchdog has no idle state: resuming means restarting its running
+    // timer, not waiting for a fault to arm one. The startup window is not
+    // restarted - like every other primary, it runs once per pump start.
+    if (input_config[i].sensor_type == 6)
+    {
+        uint16_t swd = input_config[i].secondary_low_bypass;
+        if (swd > 0)
+        {
+            bp_state[i].low.phase = BP_SECONDARY;
+            bp_state[i].low.countdown = swd;
+        }
+        else
+        {
+            bp_state[i].low.phase = BP_INACTIVE;
+            bp_state[i].low.countdown = 0;
+        }
     }
 
     alarm_active[i] = 0;
@@ -2005,9 +2166,14 @@ void main(void)
                 {
                     uint8_t st = input_config[i].sensor_type;
 
-                    // Switch types carry no loop current, and a disabled
-                    // input is not ours to complain about.
-                    if (!input_config[i].enable || st == 3 || st == 5 ||
+                    // Digital types (Flow Switch, Other Switch, WDT) carry no
+                    // loop current, so open/short detection is meaningless for
+                    // them - it would report "err open" on a perfectly good
+                    // switch. A disabled input is not ours to complain about
+                    // either. Evaluated fresh every tick from sensor_type, so
+                    // changing an input back to a 4-20mA type re-enables the
+                    // test with no further action.
+                    if (!input_config[i].enable || st == 3 || st == 5 || st == 6 ||
                         sensor_settle_countdown > 0)
                     {
                         sensor_fault[i] = SENSOR_OK;
@@ -2127,7 +2293,7 @@ void main(void)
                     if (!input_config[i].enable) continue;
 
                     uint8_t st = input_config[i].sensor_type;
-                    uint8_t is_digital = (st == 3 || st == 5);
+                    uint8_t is_digital = (st == 3 || st == 5 || st == 6);
                     uint8_t high_fault = 0, low_fault = 0;
 
                     if (is_digital)
@@ -2186,8 +2352,14 @@ void main(void)
                     // Process low direction - for a switch this is the only
                     // direction, and carries its single fault condition.
                     {
-                        uint8_t lo_result = process_bp(&bp_state[i].low, low_fault,
-                                                        input_config[i].secondary_low_bypass);
+                        // A Watch Dog counts while the signal is ABSENT and
+                        // reloads on every pulse, so it needs its own tick.
+                        // It returns the same codes, and its labels sit in the
+                        // same tables, so everything below is shared.
+                        uint8_t lo_result = (st == 6)
+                            ? process_watchdog(i, &bp_state[i].low)
+                            : process_bp(&bp_state[i].low, low_fault,
+                                         input_config[i].secondary_low_bypass);
                         // 3 = secondary countdown started, which is not an alarm
                         if (lo_result == 1 || lo_result == 2)
                         {

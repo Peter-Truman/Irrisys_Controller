@@ -36,7 +36,7 @@ static const uint8_t factory_sensor_type[3] = {
 // Types 3/4/5 (Flow Switch, Other 4-20, Other Switch) default to all bypass
 // timers 0, which means "direction not monitored" — a freshly re-typed input
 // cannot trip the pump until the operator deliberately sets its timers.
-const sensor_defaults_t sensor_type_defaults[6] = {
+const sensor_defaults_t sensor_type_defaults[7] = {
     // scale_4ma, scale_20ma, high_sp, low_sp,
     // pri_hi_bp, sec_hi_bp, pri_lo_bp, sec_lo_bp,
     // rly pri_hi, sec_hi, pri_lo, sec_lo, fault_pol, name, units
@@ -61,12 +61,24 @@ const sensor_defaults_t sensor_type_defaults[6] = {
     {0, 100, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0, 0, "Other 4-20",  ""},
 
     // 5 - Other Switch (digital): unmonitored until timers are configured
-    {0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0, 0, "Other Sw",    ""}
+    {0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0, 0, "Other Sw",    ""},
+    // 6 Watch Dog: an external "still moving" signal, e.g. a reed switch on a
+    //   traveling irrigator wheel, radio-linked back to the pumpshed. Uses the
+    //   LOW-direction fields: PWDBP 30:00 startup grace (an irrigator takes a
+    //   while to pressurise and start moving), SWDBP 5:00 thereafter, reloaded
+    //   by every pulse. fault_polarity carries the trigger edge, default 2 =
+    //   either edge, which works with any receiver output.
+    //   Rly SWDBP defaults to PULSE: a running irrigator that stops signalling
+    //   has usually just stalled or lost the radio link for a moment, so drop
+    //   the pump and let it be restarted. PWDBP is left LATCHED - never having
+    //   started moving at all points at a setup or plumbing problem that wants
+    //   someone to look at it.
+    {0, 0, 0, 0,  0, 0, 1800, 300,  0, 0, 0, 1, 2, "Watch Dog",   ""}
 };
 
 void apply_sensor_type_defaults(uint8_t idx, uint8_t st)
 {
-    if (idx >= 3 || st > 5)
+    if (idx >= 3 || st > 6)
         return;
 
     const sensor_defaults_t *d = &sensor_type_defaults[st];

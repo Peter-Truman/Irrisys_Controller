@@ -3,7 +3,7 @@
 ## Project Overview
 
 **Product:** IRRISYS Irrigation Pump Protection System
-**Current Firmware:** Ver 3 Rev 38
+**Current Firmware:** Ver 3 Rev 53
 
 **Hardware:**
 - Display board: IrrisysPG_Ver_B_Display_Rev_2
@@ -46,6 +46,9 @@ Communication: Main -> Display via serial (19200 baud, 8N1)
 | 2026-08-21 | Main    | Ver 3 Rev 2 | Versioning scheme -> `Ver N Rev N`; LCD cleared at top of `main()`; splash is "Irrisys PumpGuard" / version on lines 2-3; Pressure defaults corrected (20mA=362, SHPBP=1s, Rly SLPBP=Pulse); factory defaults now derived from `sensor_type_defaults[]` |
 | 2026-08-21 | Main    | Ver 3 Rev 4 | Main screen: input line flashes while a bypass timer counts, stopping when the value is OK |
 | 2026-08-21 | Main    | Ver 3 Rev 5 | Main screen: disabled inputs show "Not Used" |
+| 2026-08-31 | Main    | Ver 3 Rev 48-53 | **Watch Dog sensor type (6).** External "still moving" signal, e.g. a reed switch on a traveling irrigator wheel radio-linked to the pumpshed. PWDBP startup grace (default 30:00, once per pump start, abandoned by the first pulse) then SWDBP (default 5:00, reloaded by every pulse). Trigger selectable Hi to Lo / Lo to Hi / Edge. Edges captured in the **1ms ISR**, not the main loop, which can block ~2s during an EEPROM save. Rly SWDBP defaults to **Pulse**, Rly PWDBP to Latch. Loop-integrity (`err open`/`err shrt`) now skipped for every digital type. **`Oth Sw` retired** from the selector (type still honoured if stored). Fixed: `BP_NORMAL` from `resume_bp_timers()` tripped a watchdog instantly |
+| 2026-08-31 | Main    | Ver 3 Rev 42-47 | **Reset cause + supply guard.** `RCON` classified at boot (power-on / brown-out / internal error) and shown top-right in RUN and STOP as **information only** - never control, since PumpGuard cannot start a pump. "Watchdog" renamed **"Int Error"** in all operator-facing text. Fixed `vdd_alarm` never being cleared (one trip and the guard was spent, and it masked `BrownOut` beneath it). Supply trip path proven on hardware; `VDD_MIN_MV` 4600 -> **4750**, the FVR's own requirement |
+| 2026-08-31 | Main    | Ver 3 Rev 39-41 | Factory reset gains a **second confirm stage** (`Erase ALL settings? / Hold to confirm: 3`); debug heartbeat at 4Hz on EUSART2 carrying sequence, VDD, relay pin and raw ADC counts, running through the blocking boot delays too |
 | 2026-08-30 | Main    | Ver 3 Rev 38 | **Analog input menu reordered** from the team ballot: Enable, **both setpoints together (low first)**, low bypasses, high bypasses, Sensor, Units, scales, relay modes (low first), Back, EXIT. Low before high throughout - loss of prime is the everyday case on an irrigation pump, over-pressure the rare one. Pure reorder, no size change |
 | 2026-08-30 | Main    | Ver 3 Rev 37 | **Supply guard + hidden factory reset.** BOR raised 1.9V -> 2.85V (part max). Firmware now measures VDD by converting the FVR against VDD (`read_vdd_mv()`); below **4600mV** the reference is untrustworthy, so RUN takes an immediate latched stop, code **23**, line 1 shows `Low Volts`. Factory reset restored via a boot gesture: **hold the encoder button through power-up for 5s** (countdown shown, release cancels). Program 81.5% -> 83.4% |
 | 2026-08-27 | Main    | Ver 3 Rev 36 | **Event log removed entirely.** Concept abandoned after review. `View Log` / `Clear Log` gone from UTILITY (9 -> 7 items, all indices renumbered); `eventlog.c`/`.h` deleted and dropped from both build scripts; `log_entries` retired to `reserved_log_entries` (byte kept so `system_config_t` stays 128). Program space 92.3% -> **81.5%** |
@@ -661,6 +664,77 @@ Each input has independent high and low direction bypass timers. When an alarm t
 | 96-103  | char[8]    | units                 | Units string (null-terminated, e.g. "psi", "C", "L/M")       |
 | 104-127 | uint8[24]  | padding               | Expansion space                                               |
 
+## Watch Dog (sensor type 6)
+
+An **external** watchdog: something out in the field has to keep saying "still
+moving", and the pump stops if it goes quiet. Nothing to do with the PIC's own
+WDT, which is reported as **Int Error** precisely to keep the two apart.
+
+**The case it was built for.** A traveling irrigator with a magnetic reed switch
+on one wheel and a radio transmitter. Every wheel revolution sends a pulse to a
+receiver in the pumpshed, wired to a digital input. If the irrigator stalls,
+bogs, or the link drops, the pulses stop and the pump is shut down before it
+pumps into a machine that is not moving.
+
+| Menu item | Meaning |
+| --------- | ------- |
+| Enable | Enabled / Disabled |
+| Trigger | `Hi to Lo`, `Lo to Hi`, or `Edge` (either) |
+| PWDBP | Startup grace, **default 30:00**. Once per pump start |
+| SWDBP | Running timeout, **default 5:00**. Reloaded by every pulse |
+| Sensor | Type selection |
+| Rly PWDBP | Latch / Pulse — **default Latch** |
+| Rly SWDBP | Latch / Pulse — **default Pulse** |
+
+Range for both timers is 1 second to 60:00, entered as mm:ss. **0 disables that
+stage**, consistent with every other bypass.
+
+**Timing.** On pump start PWDBP runs — long by default, because an irrigator
+takes a while to pressurise and start moving. The **first pulse abandons it
+permanently** (exactly as an analog primary window is abandoned when the value
+comes good) and switches to SWDBP, which reloads on every subsequent pulse. It
+is a *retriggerable* timer: it counts while the signal is ABSENT, where a bypass
+counts while a fault PERSISTS.
+
+**Relay defaults are deliberately asymmetric.** SWDBP pulses — a running
+irrigator that stops signalling has usually stalled or lost the link for a
+moment, so drop the pump and let it restart. PWDBP latches — never having
+started moving at all points at a setup or plumbing problem that wants someone
+to look at it.
+
+**Edges are captured in the 1ms ISR** ([encoder.c](src/encoder.c)), not the main
+loop. A multi-block EEPROM save blocks the loop for up to ~2s, and a pulse
+arriving in that window would simply be lost. The ISR latches rising and falling
+separately and never reads config; the main loop applies whichever edge is
+configured. No debounce — a bouncing reed switch just produces extra kicks, and
+an extra kick on a retriggerable timer is harmless. Stale edges are discarded at
+pump start, so a pulse that arrived while stopped cannot pre-satisfy PWDBP.
+
+**Display.** Running, the line shows the time left, steady:
+
+```
+Watch Dog            04:32
+```
+
+It does **not** flash while counting. Every other sensor's running countdown
+means something is currently wrong; a watchdog's timer is always running by
+design, so a flash would be permanent and meaningless. It still flashes on a
+real alarm, with `PWDBP` or `SWDBP` as the code.
+
+Stopped, or with the stage disabled, it shows the live contact state instead —
+`Open` or `Closed` (inputs are PNP: 24V present = closed) — so the wiring and
+the radio link can be proved from the standby screen without starting the pump.
+
+**No name editor.** A watchdog is always a watchdog, so it keeps the fixed name
+and its labels are always PWDBP/SWDBP. Only `Oth 4-20` gets the name editor now.
+
+**Loop integrity is skipped** for this and every other digital type — they carry
+no loop current, so open/short detection would report `err open` on a perfectly
+good switch. The test is re-evaluated every tick from `sensor_type`, so changing
+an input back to a 4-20mA type restores it with no further action.
+
+---
+
 ### Sensor Types
 
 > **Switch polarity.** For types 3 and 5 the `fault_polarity` byte names the
@@ -677,12 +751,19 @@ Each input has independent high and low direction bypass timers. When an alarm t
 | 3     | Flow Switch  | Digital        | Flow (high only)       | PF, SF, PNF, SNF   |
 | 4     | Other 4-20   | Analog         | High Value / Low Value | PHV, SHV, PLV, SLV |
 | 5     | Other Switch | Digital        | Aux (high only)        | PA, SA, PNA, SNA   |
+| 6     | **Watch Dog** | Digital       | Trigger (edge select)  | PWDBP, SWDBP       |
+
+> **Type 5 (Other Switch) is retired from the selector** as of Ver 3 Rev 50. The type is
+> still handled everywhere, so a stored config carrying it keeps working - it simply
+> cannot be chosen any more. `sensor_type_for_option[]` in [menu.c](src/menu.c) maps menu
+> position to stored type in both directions, which is what keeps Watch Dog at **6**
+> rather than silently reinterpreting an existing Other Switch input as a watchdog.
 
 Analog types (0,1,2,4) have 17 menu items: Enable, Low Setpoint, High Setpoint, 2 low bypass timers, 2 high bypass timers, Sensor, Units, Scale 4mA, Scale 20mA, 4 relay modes (low pair first), Back, EXIT.
 
 > **Low before high** throughout, from the team ordering review (Ver 3 Rev 38). Loss of prime is the everyday protection case on an irrigation pump and over-pressure the rare one, so the fields touched most often sit nearest the top. The two setpoints sit together so the trip window reads as one thing.
 
-Digital types (3,5) have 9 menu items: Enable, Polarity, 2 bypass timers, Sensor,
+Digital types (3, 5, 6) have 9 menu items: Enable, Polarity/Trigger, 2 bypass timers, Sensor,
 2 relay modes, Back, EXIT.
 
 > **A switch has one fault condition**, so it gets one pair of timers, not the
@@ -862,6 +943,7 @@ L = Latch, P = Pulse.
 | 3 Flow Switch | Flow Switch | (none) | - | - | - | - | - | - | **30** | 0 | L/L (polarity **High**) |
 | 4 Other 4-20 | Other 4-20 | (user) | 0 | 100 | 0 | 0 | 0 | 0 | 0 | 0 | L/L/L/L |
 | 5 Other Switch | Other Sw | (none) | - | - | 0 | - | 0 | 0 | 0 | 0 | L/L/L/L |
+| 6 **Watch Dog** | Watch Dog | (none) | - | - | - | - | - | - | **1800** (30:00) | **300** (5:00) | L/L/L/**P** |
 
 > **TODO - values not yet confirmed.** Types 2-5 (Flow Meter, Flow Switch,
 > Other 4-20, Other Switch) are placeholders awaiting operator-supplied values.
@@ -1111,10 +1193,13 @@ The **PICkit 3 cannot be used here**: MPLAB X v6.30's device packs list only
 ICD3/4/5 for PIC18F-K, v6.20 is a partial install with no IPE, and the
 standalone `PK3CMD.exe` on this machine has no device file.
 
-### Last Known Build Size (Ver 3 Rev 37)
+### Last Known Build Size (Ver 3 Rev 53)
 
-- Program: 83.4%
-- Data: 68.1%
+- Program: 88.5%
+- Data: 73.6%
+
+> Includes the temporary 4Hz debug heartbeat (`DEBUG_STREAM`), which comes out
+> before release along with the dead code listed in [OPEN_ITEMS.md](OPEN_ITEMS.md).
 
 ---
 

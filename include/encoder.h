@@ -23,6 +23,19 @@ extern volatile uint16_t encoder_ms_timer;
 // RTC 1Hz tick COUNT (incremented per INT0, drained by main loop so no second
 // is ever lost) and 50ms sub-tick flag (set in ISR, cleared in main loop).
 extern volatile uint8_t rtc_tick_count;
+
+// Digital-input edge capture for the Watch Dog sensor type.
+//
+// Sampled in the 1ms ISR rather than the main loop: a multi-block EEPROM
+// save blocks the loop for up to ~2s, and a reed-switch pulse arriving
+// through a radio receiver in that window would simply be lost. The ISR
+// stays dumb - it latches BOTH directions and never reads config - and the
+// main loop applies whichever edge the operator selected.
+//
+// Index 0/1/2 = Input 1/2/3, matching read_digital_input().
+// Set by the ISR, cleared by the main loop; sticky until consumed.
+extern volatile uint8_t dig_edge_rise[3];
+extern volatile uint8_t dig_edge_fall[3];
 extern volatile uint8_t subtick_flag;
 
 // [R3] Non-blocking buzzer sequencer state (1ms, Timer0 ISR driven).

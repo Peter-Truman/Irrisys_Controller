@@ -4,13 +4,23 @@ Running list of things to fix or validate before release. Worked through one at
 a time; move an item to **Done** with the revision it landed in, or to
 **Decided** if the answer was "leave it".
 
-Last updated: 2026-08-31 · firmware Ver 3 Rev 46
+Last updated: 2026-08-31 · firmware Ver 3 Rev 53
 
 ---
 
 ## Needs hardware validation
 
 These are written and building, but unproven on a board. Highest risk first.
+
+- [ ] **Watch Dog trigger modes.** Only `Edge` is exercised by the default.
+      Bench-test `Hi to Lo` and `Lo to Hi` with a switch on DIG_IN2 before
+      trusting either to a radio link.
+- [ ] **Watch Dog against a real receiver.** Confirm the pulse width the radio
+      receiver actually produces is caught reliably by the 1 ms ISR sampling.
+- [ ] **Sensor type mapping after the `Oth Sw` retirement.** Confirm an input
+      already set to Pressure still reads back as Pressure, and that WDT is
+      stored as type 6 — a fault in `sensor_type_for_option[]` would misreport
+      types quietly.
 
 - [ ] **`ADC_VREF_MV` on the replacement PIC.** 4119 was calibrated against the
       *old* chip's FVR. Part-to-part tolerance shifts both the pressure readings
