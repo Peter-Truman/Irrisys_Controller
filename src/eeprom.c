@@ -45,11 +45,20 @@ const sensor_defaults_t sensor_type_defaults[7] = {
     //     low trip 30 with 5:00 start grace + 0:30 delay, sec low relay pulses
     {0, 362, 200, 30,  0, 1, 300, 30,  0, 0, 0, 1, 0, "Pressure",    "psi"},
 
-    // 1 - Temperature: -50 to 150 C, trip high at 85 after 1:00 grace
-    {-50, 150, 85, -10,  60, 0, 0, 0,  0, 0, 0, 0, 0, "Temperature", "\xDF""C"},
+    // 1 - Temperature: transmitter scales -50 to 150 C, trip high at 65
+    //     after a 1:00 grace. Setpoints are adjustable -10..150 only - a
+    //     pump at -10 is frozen, so a lower trip is unreachable. The LOW
+    //     direction is deliberately not monitored (both low BPs are 0).
+    {-50, 150, 65, -5,  60, 0, 0, 0,  0, 0, 0, 0, 0, "Temperature", "\xDF""C"},
 
-    // 2 - Flow Meter: 0-100%, low flow 0:30 startup window + 0:30 delay
-    {0, 100, 0, 0,  0, 0, 30, 30,  0, 0, 0, 0, 0, "Flow Meter",  "%"},
+    // 2 - Flow Meter: 0-100% of PUMP capability (set Scale 20mA so the
+    //     meter full scale reads as its percentage of pump rating).
+    //     PLFBP 15:00 startup window - an irrigator takes a while to
+    //     pressurise - then SLFBP 0:30 running. High direction is OFF
+    //     (both high BPs 0): a pump cannot exceed 100% of its own
+    //     capability, and with high_setpoint 0 any non-zero high BP
+    //     would make val >= 0 true and stop the pump on every start.
+    {0, 100, 0, 0,  0, 0, 900, 30,  0, 0, 0, 0, 0, "Flow Meter",  "%"},
 
     // 3 - Flow Switch (digital): 0:30 startup window for no flow.
     //     Switch types use the LOW direction only - PNFBP / SNFBP.

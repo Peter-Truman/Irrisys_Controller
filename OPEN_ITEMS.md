@@ -4,7 +4,7 @@ Running list of things to fix or validate before release. Worked through one at
 a time; move an item to **Done** with the revision it landed in, or to
 **Decided** if the answer was "leave it".
 
-Last updated: 2026-09-01 · firmware Ver 3 Rev 70
+Last updated: 2026-09-01 · firmware Ver 3 Rev 73
 
 ---
 
@@ -22,17 +22,24 @@ These are written and building, but unproven on a board. Highest risk first.
 
 ## Decisions needed
 
-- [ ] **DIG2–DIG4 are unreachable.** Config bytes (offsets 32–40), stop codes
-      10/11/12 and `menu_draw_digital()` all exist, but nothing sets
-      `current_menu = 6`, so an operator cannot configure them at all. Either
-      wire it up or delete the dead half. Candidate uses, best first:
-      motor-protection trip aux contact; VSD fault relay; tank/dam low level
-      (dry-run interlock); phase-failure relay; remote start permissive;
-      sanctioned maintenance bypass keyswitch.
+- [ ] **The RTC driver targets the wrong part.** The fitted device is an
+      **RV-3028-C7** (Micro Crystal, 1ppm TCXO) at I2C **0x52**; `rtc.h` still
+      defines `RTC_I2C_ADDR 0x68` and `rtc_init()` writes DS3231 control
+      register `0x0E = 0x00` to enable the 1Hz SQW. That write cannot be ACKed
+      by an RV-3028, so **`rtc_init()` is inert** and the 1Hz reaching RB0 must
+      be coming from the RTC's own non-volatile CLKOUT configuration, not from
+      anything the firmware does.
+      **Why it matters:** a replacement RTC fitted with factory-default CLKOUT
+      would not produce 1Hz, and the failure would present as a firmware fault
+      - no clock, no bypass countdowns. Confirm by reading the boot line on the
+      debug UART: `RTC OK` or `RTC FAIL`. Fix is to rewrite `rtc.c` for the
+      RV-3028 so a fresh part configures itself.
+
 - [ ] **Is the PCA9535 still fitted?** If not, `pca9535.c` goes entirely — only
       `init`, `led_init` and `led_test` are called, and CLAUDE.md already calls
       the part legacy.
-- [ ] **Sensor-type defaults for types 2–5 are placeholders.** Flow Meter, Flow
+- [ ] **Sensor-type defaults for types 2–5 are placeholders.** (0 Pressure and
+      1 Temperature are confirmed - Temperature fine-tuned in Rev 73.) Flow Meter, Flow
       Switch, Other 4-20, Other Switch. Types 3–5 currently have **all bypass
       timers 0**, which means "not monitored" — such an input cannot trip the
       pump at all until timers are set deliberately.
@@ -109,6 +116,23 @@ codebase about to be handed over.
       anything above 02:00 wrapped: 05:00 saved as **44 seconds** while the menu
       still read 05:00. Now clamped in the editor (so it stops at 02:00 under
       the operator's hand) and again on save. Found by inspection, not testing.
+- [x] **DIG2-DIG4 dead feature removed** — Rev 71. Not a choice in the end:
+      the pins already belong to the sensor inputs via `read_digital_input()`,
+      so wiring up the second design would have double-booked them - two fault
+      paths on one contact with different polarity and relay settings. Menu,
+      draw/save functions, edit flags and all branches deleted; the nine EEPROM
+      bytes kept as `reserved_dig_cfg[9]` so stored configs still load.
+      `OPT_DIG_POLARITY` KEPT - `menu_item_options[]` is indexed positionally.
+      Program 91.1% -> 88.8%.
+- [x] **Setpoint range** — Rev 72. Was hard-coded 0..999, so any NEGATIVE
+      setpoint snapped to zero on the first detent (Temperature -10 became
+      000). Now derived from the input's own Scale 4mA/20mA, and the stored
+      value is clamped into range on entry.
+- [x] **Number formatting** — Rev 73. The row printed `%03d` and the editor
+      `-%03d`, so a value changed width when you pressed the button (-10 vs
+      -010). Both use `%d` now: sign only when negative, no zero padding.
+      Temperature setpoints floored at -10 regardless of scale, defaults
+      high 85 -> 65 and low -10 -> -5.
 - [x] **Flow Meter units** — Rev 70. Settled as `%` (code was right, the docs
       were wrong), list is now `%` / `LpM` / `LpS`. Found while settling it: the
       units row was tagged `FT_CUSTOM_UNITS` for **every** analog type, so all

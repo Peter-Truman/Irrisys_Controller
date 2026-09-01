@@ -21,7 +21,6 @@ void lcd_invalidate(void);   // Drop change-detection cache -> next flush re-sen
 // Display Board Control Functions
 void disp_clear(void);
 void disp_set_brightness(uint8_t percent);
-void disp_set_contrast(uint8_t percent);
 void disp_set_leds(uint8_t led_mask);
 
 #endif

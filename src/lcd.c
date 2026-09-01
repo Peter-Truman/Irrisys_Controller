@@ -247,11 +247,6 @@ void disp_set_brightness(uint8_t percent)
 }
 
 // Set contrast (0-100%)
-void disp_set_contrast(uint8_t percent)
-{
-    if (percent > 100) percent = 100;
-    disp_send_frame(DISP_CMD_CONTRAST, &percent, 1);
-}
 
 // Set LED state (bit 0=PWR, bit 1=Signal, bit 2=Fault)
 void disp_set_leds(uint8_t led_mask)

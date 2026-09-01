@@ -73,15 +73,13 @@ typedef struct
     uint8_t reserved_display[10];
 
     // Digital input config (16 bytes)
-    uint8_t dig2_enable;            // 0=Disabled, 1=Enabled
-    uint8_t dig2_fault_polarity;    // 0=Fault Low, 1=Fault High
-    uint8_t dig2_relay_mode;        // 0=Latch, 1=Pulse
-    uint8_t dig3_enable;
-    uint8_t dig3_fault_polarity;
-    uint8_t dig3_relay_mode;
-    uint8_t dig4_enable;
-    uint8_t dig4_fault_polarity;
-    uint8_t dig4_relay_mode;
+    // DIG2-4 carried a second, unreachable fault-monitoring feature here
+    // (enable / polarity / relay mode each, menu 6, stop codes 10-12).
+    // The pins already belong to the sensor inputs - see
+    // read_digital_input() in main.c - so wiring it up would have
+    // double-booked them. Removed Ver 3 Rev 71; the bytes stay reserved
+    // so system_config_t remains 128 and stored configs still load.
+    uint8_t reserved_dig_cfg[9];
     uint8_t reserved_digital[7];
 
     // Logging (16 bytes)

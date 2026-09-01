@@ -37,7 +37,6 @@
 // Function prototypes
 uint8_t rtc_init(void);
 uint8_t rtc_write_register(uint8_t reg, uint8_t value);
-uint8_t rtc_read_register(uint8_t reg, uint8_t *value);
 
 typedef struct
 {
@@ -50,10 +49,6 @@ typedef struct
     uint8_t year;
 } rtc_time_t;
 
-uint8_t dec_to_bcd(uint8_t dec);
-uint8_t rtc_set_time(rtc_time_t *time);
 
-uint8_t rtc_read_time(rtc_time_t *time);
-uint8_t bcd_to_dec(uint8_t bcd);
 
 #endif // RTC_H

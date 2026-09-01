@@ -3,7 +3,7 @@
 ## Project Overview
 
 **Product:** IRRISYS Irrigation Pump Protection System
-**Current Firmware:** Ver 3 Rev 70
+**Current Firmware:** Ver 3 Rev 71
 
 **Hardware:**
 - Display board: IrrisysPG_Ver_B_Display_Rev_2
@@ -46,6 +46,7 @@ Communication: Main -> Display via serial (19200 baud, 8N1)
 | 2026-08-21 | Main    | Ver 3 Rev 2 | Versioning scheme -> `Ver N Rev N`; LCD cleared at top of `main()`; splash is "Irrisys PumpGuard" / version on lines 2-3; Pressure defaults corrected (20mA=362, SHPBP=1s, Rly SLPBP=Pulse); factory defaults now derived from `sensor_type_defaults[]` |
 | 2026-08-21 | Main    | Ver 3 Rev 4 | Main screen: input line flashes while a bypass timer counts, stopping when the value is OK |
 | 2026-08-21 | Main    | Ver 3 Rev 5 | Main screen: disabled inputs show "Not Used" |
+| 2026-09-01 | Main    | Ver 3 Rev 71 | **Dead DIG2-4 fault feature removed.** A second, unreachable design for the same three pins: per-input enable / polarity / relay mode (EEPROM 32-40), a `menu 6` screen and stop codes 10-12. Nothing ever set `current_menu = 6`, and no main-loop code read the config bytes. The pins already belong to the sensor inputs via `read_digital_input()`, so wiring it up would have double-booked them - two fault paths on one contact with different polarity and relay settings. Bytes kept as `reserved_dig_cfg[9]` so `system_config_t` stays 128 and stored configs still load. `OPT_DIG_POLARITY` deliberately KEPT in `menu_item_options[]`: that array is indexed positionally, so deleting a row would shift every list after it. Program 91.1% -> **88.8%**, data 73.8% -> **72.7%** |
 | 2026-09-01 | Main    | Ver 3 Rev 70 | **Fix: Units opened the character editor on every analog type.** The units row was tagged `FT_CUSTOM_UNITS` for Pressure, Temperature and Flow Meter as well as Oth 4-20, so selecting Units gave the 3-character alphabet editor (`< Short=OK Long=X`) and the psi/bar/kPa, C/F and flow lists were **unreachable dead code**. A Pressure input could be labelled any three letters at all. Units are now an option list for types 0/1/2 and free text only for Oth 4-20; an unrecognised stored unit falls back to the first option. Flow list is now `%` / `LpM` / `LpS` |
 | 2026-09-01 | Main    | Ver 3 Rev 69 | **Fix: short beeps truncated long ones.** The menu tick (`beep(1)`, fired on EVERY encoder detent) overwrote the buzzer sequencer, so the next detent after a range-limit beep reset `buzzer_ms` from 300 to 1 and cut it off. Turning slowly the beep completed; spinning fast enough to engage acceleration clipped it to a click, which read as the limit beep being inconsistent. `beep()` now ignores a request shorter than the time left on an in-progress beep - length stands in for priority (tick 1ms < button 50ms < limit 300ms < stop 500ms). `beep_double()` is unaffected and still preempts, which is correct: fault-ack and menu-timeout outrank a tick |
 | 2026-09-01 | Main    | Ver 3 Rev 67-68 | **Range-limit beep.** A detent that does not move the value now sounds a **300ms** single tone - distinct from the 50ms button click and from the double-beep that means fault-cleared or menu-timeout. Latched, so a continued spin at the rail gives one beep rather than one per detent, and re-armed on entry so a field already at its limit still beeps. The test is on the **value**, not on the clamp: an accelerated 20-step jump that only partly fits still moves the value and stays silent. Applies to every clamped whole-number field; time pairs, option lists and the name editor all wrap, so nothing is ever refused there |
@@ -320,7 +321,7 @@ Irrisys_Controller/
 │   ├── encoder.c              # Rotary encoder driver + ISR (Timer0 + INT0)
 │   ├── lcd.c                  # Buffered LCD via serial to display board
 │   ├── i2c.c                  # I2C bus driver
-│   ├── rtc.c                  # DS3231 RTC driver
+│   ├── rtc.c                  # RTC driver (RV-3028-C7) - SEE OPEN_ITEMS: still DS3231 code
 │   └── pca9535.c              # PCA9535 I/O expander (legacy)
 │
 ├── include/                    # Main board headers
@@ -418,7 +419,7 @@ See `display/CLAUDE.md` for full protocol specification.
 | ------------- | --------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
 | MCU           | PIC18F26K22     | -                | 32MHz (8MHz + 4x PLL)                                                                                                                 |
 | Encoder       | Rotary + switch | GPIO + interrupt | Short/long press                                                                                                                      |
-| RTC           | DS3231          | I2C (0x68)       | 1Hz square wave on RB0/INT0                                                                                                           |
+| RTC           | **RV-3028-C7**  | I2C (**0x52**)   | 1Hz timebase on RB0/INT0. 1ppm TCXO: over the 99:59 max runtime the PIC INTOSC would drift up to ~1hr, this ~0.4s. Driver still targets a DS3231 at 0x68 - see OPEN_ITEMS |
 | ADC           | Internal 10-bit | RA0-RA2          | 3 channels, **4.096V FVR reference**, 180R burden, 4-sample rolling average                                                            |
 | Digital Input | Direct GPIO     | RA4-RA7          | 4 channels (DIG_IN1=Run/Stop, DIG_IN2-4=PNP)                                                                                          |
 | EEPROM (cfg)  | Internal        | -                | 128B x 3 inputs + 128B system + checksum                                                                                               |
@@ -531,7 +532,7 @@ The main loop is non-blocking and driven by two interrupt-sourced flags:
 | Flag             | Source              | Rate   | Purpose                                        |
 | ---------------- | ------------------- | ------ | ---------------------------------------------- |
 | `subtick_flag`   | Timer0 ISR (1ms)    | 50ms   | Fine-grained timing, buzzer, LED flash, render |
-| `rtc_tick_flag`  | DS3231 INT0/RB0     | 1000ms | Runtime clock, bypass timers, relay pulse      |
+| `rtc_tick_flag`  | RTC INT0/RB0        | 1000ms | Runtime clock, bypass timers, relay pulse      |
 
 ### ISR Structure (encoder.c)
 
@@ -1213,5 +1214,5 @@ standalone `PK3CMD.exe` on this machine has no device file.
 ## Reference
 
 - Hardware files: OneDrive (see path above)
-- Datasheets: AD7994, PCA9535, DS3231, MAX22193, PIC18F26K22, PIC18F14K22
+- Datasheets: AD7994, RV-3028-C7, MAX22193, PIC18F26K22, PIC18F14K22
 - LCD: NHD-0420AZ-FL-YBW-33V3 (4x20 HD44780)

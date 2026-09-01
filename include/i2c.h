@@ -17,10 +17,8 @@
 // Function prototypes
 void i2c_init(void);
 uint8_t i2c_start(void);
-uint8_t i2c_restart(void);
 void i2c_stop(void);
 uint8_t i2c_write(uint8_t data);
-uint8_t i2c_read(uint8_t ack);
 uint8_t i2c_wait_idle(void);
 
 #endif // I2C_H

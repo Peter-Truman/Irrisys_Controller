@@ -34,9 +34,6 @@ uint8_t relay_sec_low_edit_flag = 0;
 uint8_t fault_polarity_edit_flag = 0;
 
 // Legacy digital input edit flags (kept for compatibility)
-uint8_t dig_enable_edit_flag = 0;
-uint8_t dig_polarity_edit_flag = 0;
-uint8_t dig_relay_edit_flag = 0;
 
 // Clock menu edit flags
 uint8_t clock_enable_edit_flag = 0;
@@ -44,7 +41,6 @@ uint8_t end_runtime_edit_flag = 0;
 
 uint8_t current_menu = 0;
 uint8_t current_input = 0;
-uint8_t current_digital_input = 0; // legacy
 
 // Deferred EEPROM save flags (set here, saved in main.c after 1-second tick)
 uint8_t input_config_dirty[3] = {0, 0, 0};
@@ -122,6 +118,8 @@ const item_options_t menu_item_options[] = {
     {OPT_NO_FLOW, 2, {"Low", "High", "", "", "", ""}},
     {OPT_FLOW_UNITS, 2, {"%", "LpS", "", "", "", ""}},
     {OPT_RELAY_MODE, 2, {"Latch", "Pulse", "", "", "", ""}},
+    // Unused since Rev 71 (DIG2-4 menu removed) - KEPT because this
+    // array is indexed positionally by the OPT_* constants.
     {OPT_DIG_POLARITY, 2, {"Fault Lo", "Fault Hi", "", "", "", ""}},
     {OPT_CLOCK_ENABLE, 2, {"Disabled", "Enabled", "", "", "", ""}},
     {OPT_END_RUNTIME, 2, {"Latch", "Pulse", "", "", "", ""}},
@@ -276,17 +274,6 @@ const menu_item_t utility_menu_template[] = {
 #define UTILITY_ITEMS 7
 menu_item_t utility_menu[UTILITY_ITEMS];
 
-// Digital input menu template (5 items)
-const menu_item_t digital_menu_template[] = {
-    {"Enable", NULL, 1},         // 0
-    {"Polarity", NULL, 1},       // 1
-    {"Relay", NULL, 1},          // 2
-    {"Back", NULL, 0},           // 3
-    {"EXIT", NULL, 0}            // 4
-};
-
-menu_item_t digital_menu[5];
-
 // Function declarations
 extern void lcd_set_cursor(uint8_t row, uint8_t col);
 extern void lcd_print(const char *str);
@@ -309,7 +296,6 @@ extern void lcd_clear(void);
 void handle_time_rotation(int8_t direction);
 void menu_draw_utility(void);
 void menu_draw_main_menu(void);
-void menu_draw_digital(void);
 void rebuild_main_menu(void);
 static void draw_name_editor(void);
 
@@ -389,10 +375,6 @@ uint8_t is_option_field(uint8_t line, uint8_t sensor_type, uint8_t flow_type)
     {
         return (line == 0 || line == 1); // Enable, Rly Endrun
     }
-    else if (current_menu == 6) // DIGITAL menu
-    {
-        return (line <= 2); // Enable, Polarity, Relay
-    }
     return 0;
 }
 
@@ -427,17 +409,6 @@ uint8_t *get_option_edit_flag(uint8_t line, uint8_t sensor_type, uint8_t flow_ty
         {
         case 0: return &clock_enable_edit_flag;
         case 1: return &end_runtime_edit_flag;
-        default: return NULL;
-        }
-    }
-    else if (current_menu == 6) // DIGITAL menu
-    {
-        uint8_t field_in_group = line % 3;
-        switch (field_in_group)
-        {
-        case 0: return &dig_enable_edit_flag;
-        case 1: return &dig_polarity_edit_flag;
-        case 2: return &dig_relay_edit_flag;
         default: return NULL;
         }
     }
@@ -492,17 +463,6 @@ static const item_options_t *get_item_options_for_field(uint8_t line)
         default: return NULL;
         }
     }
-    else if (current_menu == 6) // DIGITAL menu
-    {
-        uint8_t field_in_group = line % 3;
-        switch (field_in_group)
-        {
-        case 0: return &menu_item_options[OPT_ENABLE];
-        case 1: return &menu_item_options[OPT_DIG_POLARITY];
-        case 2: return &menu_item_options[OPT_RELAY_MODE];
-        default: return NULL;
-        }
-    }
     return NULL;
 }
 
@@ -518,14 +478,6 @@ void menu_init(void)
     current_menu = 0;
     rebuild_options_menu();
     menu.total_items = options_menu_count;
-
-    // Initialize digital menu from template
-    for (uint8_t i = 0; i < 5; i++)
-    {
-        digital_menu[i].label = digital_menu_template[i].label;
-        digital_menu[i].editable = digital_menu_template[i].editable;
-        digital_menu[i].value = NULL;
-    }
 }
 
 //=============================================================================
@@ -649,12 +601,12 @@ void rebuild_input_menu(void)
         const char *rly_slo = (st == 4) ? custom_rly_slo : lbl_rly_slo[st];
 
         // 2. Low setpoint
-        sprintf(value_low_sp, "%03d", input_config[idx].low_setpoint);
+        sprintf(value_low_sp, "%d", input_config[idx].low_setpoint);
         n = add_menu_item(n, lbl_low[st], value_low_sp, 1, FT_LO_LIMIT);
 
         // 3. High setpoint - the two setpoints sit together so the trip
         //    window can be read and set as one thing.
-        sprintf(value_high_sp, "%03d", input_config[idx].high_setpoint);
+        sprintf(value_high_sp, "%d", input_config[idx].high_setpoint);
         n = add_menu_item(n, lbl_high[st], value_high_sp, 1, FT_HI_LIMIT);
 
         // 4. Primary low bypass
@@ -723,16 +675,14 @@ void rebuild_input_menu(void)
         // Scale 4mA
         {
             int16_t v = input_config[idx].scale_4ma;
-            if (v < 0) sprintf(value_scale4, "-%03d", -v);
-            else sprintf(value_scale4, "+%03d", v);
+            sprintf(value_scale4, "%d", v);
         }
         n = add_menu_item(n, "Scale 4mA", value_scale4, 1, FT_SCALE_4MA);
 
         // Scale 20mA
         {
             int16_t v = input_config[idx].scale_20ma;
-            if (v < 0) sprintf(value_scale20, "-%03d", -v);
-            else sprintf(value_scale20, "+%03d", v);
+            sprintf(value_scale20, "%d", v);
         }
         n = add_menu_item(n, "Scale 20mA", value_scale20, 1, FT_SCALE_20MA);
 
@@ -1156,50 +1106,6 @@ void menu_draw_utility(void)
         draw_menu_line(row + 1, line, (line == menu.current_line), utility_menu, UTILITY_ITEMS);
     }
 }
-
-void menu_draw_digital(void)
-{
-    char title[21];
-    sprintf(title, "==== DIGITAL %d =====", current_digital_input + 1);
-    lcd_print_at(0, 0, title);
-
-    // Set value pointers based on current_digital_input
-    for (uint8_t f = 0; f < 3; f++)
-    {
-        uint8_t val = 0;
-        switch (current_digital_input)
-        {
-        case 0:
-            if (f == 0) val = system_config.dig2_enable;
-            else if (f == 1) val = system_config.dig2_fault_polarity;
-            else val = system_config.dig2_relay_mode;
-            break;
-        case 1:
-            if (f == 0) val = system_config.dig3_enable;
-            else if (f == 1) val = system_config.dig3_fault_polarity;
-            else val = system_config.dig3_relay_mode;
-            break;
-        case 2:
-            if (f == 0) val = system_config.dig4_enable;
-            else if (f == 1) val = system_config.dig4_fault_polarity;
-            else val = system_config.dig4_relay_mode;
-            break;
-        }
-
-        const item_options_t *opts = get_item_options_for_field(f);
-        if (opts && val < opts->option_count)
-            digital_menu[f].value = (char *)opts->options[val];
-        else
-            digital_menu[f].value = "?";
-    }
-
-    for (uint8_t row = 0; row < 3; row++)
-    {
-        uint8_t line = menu.top_line + row;
-        draw_menu_line(row + 1, line, (line == menu.current_line), digital_menu, 5);
-    }
-}
-
 
 //=============================================================================
 // ENCODER HANDLING
@@ -1795,13 +1701,12 @@ void menu_update_edit_value(void)
                 }
                 return;
             }
-            // Other numeric fields: signed/unsigned format
-            if (menu.whole_edit_min >= 0)
-                sprintf(buf, "%03d", v);
-            else if (v < 0)
-                sprintf(buf, "-%03d", -v);
-            else
-                sprintf(buf, "+%03d", v);
+            // Sign only when negative, and no zero padding. The row and
+            // the editor MUST format identically: the row printed "%03d"
+            // (so -10 came out as "-10") while the editor printed "-%03d"
+            // (so the same value became "-010"), and the field appeared to
+            // change width the moment the button was pressed.
+            sprintf(buf, "%d", v);
             switch (tag)
             {
             case FT_SCALE_4MA:  strcpy(value_scale4, buf); break;
@@ -2050,63 +1955,12 @@ static void save_main_field(uint8_t line)
     system_config_dirty = 1;  // Defer EEPROM write
 }
 
-static void save_digital_field(uint8_t line)
-{
-    if (line >= 3) return;
-
-    uint8_t *flag = get_option_edit_flag(line, 0, 0);
-    if (!flag) return;
-
-    switch (current_digital_input)
-    {
-    case 0: // DIG2
-        if (line == 0) system_config.dig2_enable = *flag;
-        else if (line == 1) system_config.dig2_fault_polarity = *flag;
-        else system_config.dig2_relay_mode = *flag;
-        break;
-    case 1: // DIG3
-        if (line == 0) system_config.dig3_enable = *flag;
-        else if (line == 1) system_config.dig3_fault_polarity = *flag;
-        else system_config.dig3_relay_mode = *flag;
-        break;
-    case 2: // DIG4
-        if (line == 0) system_config.dig4_enable = *flag;
-        else if (line == 1) system_config.dig4_fault_polarity = *flag;
-        else system_config.dig4_relay_mode = *flag;
-        break;
-    }
-    system_config_dirty = 1;  // Defer EEPROM write
-}
-
 //=============================================================================
 // INIT NUMERIC EDITOR
 //=============================================================================
 
 // start_digit selects which digit the encoder acts on first.
 // Unsigned: 0 = hundreds (100/click), 1 = tens (10/click), 2 = ones.
-static void init_numeric_editor(int16_t value, uint8_t is_unsigned,
-                                uint8_t start_digit)
-{
-    menu.in_edit_mode = 1;
-    menu.edit_time_mode = 0;
-    menu.edit_unsigned = is_unsigned;
-
-    if (value < 0)
-    {
-        menu.sign_negative = 1;
-        value = -value;
-    }
-    else
-    {
-        menu.sign_negative = 0;
-    }
-
-    menu.digit_100 = value / 100;
-    menu.digit_10 = (value / 10) % 10;
-    menu.digit_1 = value % 10;
-    menu.edit_digit = start_digit;
-    menu.original_value = (int16_t)(menu.sign_negative ? -value : value);
-}
 
 //=============================================================================
 // BUTTON HANDLING
@@ -2298,7 +2152,6 @@ void menu_handle_button(uint8_t press_type)
             // Save to config and EEPROM
             if (current_menu == 1) save_input_field(menu.current_line, current_input);
             else if (current_menu == 3) save_clock_field(menu.current_line);
-            else if (current_menu == 6) save_digital_field(menu.current_line);
 
             // Advance cursor to next item
             if (menu.current_line + 1 < menu.total_items)
@@ -2454,8 +2307,37 @@ void menu_handle_button(uint8_t press_type)
             }
             else if (tag == FT_HI_LIMIT || tag == FT_LO_LIMIT)
             {
-                menu.whole_edit_min = 0;
-                menu.whole_edit_max = 999;
+                // Bound both setpoints by the transmitter's own scaled span.
+                // A setpoint outside 4mA..20mA can never be reached, so it can
+                // never trip - the field would be settable and inert.
+                //
+                // The old range started at 0, which dragged every NEGATIVE
+                // setpoint to zero on the first detent: Temperature's -10 low
+                // trip became 000 as soon as the encoder moved. Deriving the
+                // range gives Temperature -50..+150 and Pressure 0..362 with
+                // no per-type table to keep in step.
+                int16_t s4  = input_config[current_input].scale_4ma;
+                int16_t s20 = input_config[current_input].scale_20ma;
+                menu.whole_edit_min = (s4 < s20) ? s4  : s20;
+                menu.whole_edit_max = (s4 < s20) ? s20 : s4;
+
+                // Temperature floor: never allow a trip below -10C, even
+                // though the transmitter scales from -50. A pump body at
+                // -10 is frozen - physics stops it turning and the drive
+                // trips on overcurrent long before firmware could act - so
+                // a setpoint under that is unreachable in practice.
+                if (input_config[current_input].sensor_type == 1 &&
+                    menu.whole_edit_min < -10)
+                    menu.whole_edit_min = -10;
+
+                // Clamp the STORED value into range on entry, so a setpoint
+                // left over from a wider scale is shown as what it will
+                // actually become rather than snapping on the first detent.
+                if (menu.whole_edit_value < menu.whole_edit_min)
+                    menu.whole_edit_value = menu.whole_edit_min;
+                if (menu.whole_edit_value > menu.whole_edit_max)
+                    menu.whole_edit_value = menu.whole_edit_max;
+                menu_update_edit_value();
             }
             else
             {
@@ -2685,57 +2567,6 @@ void menu_handle_button(uint8_t press_type)
         break;
     }
 
-    case 6: // DIGITAL menu
-    {
-        uint8_t line = menu.current_line;
-        if (line == 3) // Back
-        {
-            current_menu = 2;
-            menu.current_line = current_digital_input + 3; // Return to this digital input in setup
-            menu.top_line = menu.current_line > 2 ? menu.current_line - 2 : 0;
-            menu.total_items = 6;
-            break;
-        }
-        if (line == 4) // EXIT
-        {
-            current_menu = 255;
-            lcd_clear();
-            break;
-        }
-        if (is_option_field(line, 0, 0))
-        {
-            // Load current value into edit flag
-            uint8_t val = 0;
-            switch (current_digital_input)
-            {
-            case 0:
-                if (line == 0) val = system_config.dig2_enable;
-                else if (line == 1) val = system_config.dig2_fault_polarity;
-                else val = system_config.dig2_relay_mode;
-                break;
-            case 1:
-                if (line == 0) val = system_config.dig3_enable;
-                else if (line == 1) val = system_config.dig3_fault_polarity;
-                else val = system_config.dig3_relay_mode;
-                break;
-            case 2:
-                if (line == 0) val = system_config.dig4_enable;
-                else if (line == 1) val = system_config.dig4_fault_polarity;
-                else val = system_config.dig4_relay_mode;
-                break;
-            }
-
-            uint8_t *flag = get_option_edit_flag(line, 0, 0);
-            if (flag)
-            {
-                *flag = val;
-                menu.in_edit_mode = 1;
-                menu.edit_time_mode = 0;
-
-            }
-        }
-        break;
-    }
     }
 }
 
@@ -2749,7 +2580,3 @@ void lcd_print_at(uint8_t row, uint8_t col, const char *str)
     lcd_print(str);
 }
 
-void lcd_clear_line(uint8_t row)
-{
-    lcd_print_at(row, 0, "                    ");
-}

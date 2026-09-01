@@ -2,7 +2,7 @@
  * IRRISYS - Full System with Buffered LCD
  * PIC18F26K22 @ 32MHz
  *
- * Version: Ver 3 Rev 70
+ * Version: Ver 3 Rev 74
  *   - Ver 3 = Product/firmware version
  *   - Rev 63 = Incremented on every change; reset to 0 prior to release
  *
@@ -13,7 +13,7 @@
  */
 
 #define FW_VERSION  3     // Product/firmware version
-#define FW_REVISION 70     // Incremented every change; reset to 0 before release
+#define FW_REVISION 74     // Incremented every change; reset to 0 before release
 
 #include "../include/config.h"
 #include "../include/encoder.h"
@@ -21,7 +21,6 @@
 #include "../include/eeprom.h"
 #include "../include/i2c.h"
 #include "../include/rtc.h"
-#include "../include/pca9535.h"
 #include "../include/lcd.h"
 #include <stdio.h>
 #include <string.h>
@@ -36,7 +35,6 @@ extern void handle_time_rotation(int8_t direction);
 extern void menu_update_time_value(void);
 extern void menu_draw_utility(void);
 extern void menu_draw_main_menu(void);
-extern void menu_draw_digital(void);
 
 // Relay pulse control
 volatile uint8_t relay_state = 0;
@@ -1412,11 +1410,6 @@ static void dump_eeprom_config(void)
     sprintf(b, "  pwr_fail_flag=%u  active_stop_code=%u",
             system_config.power_failure_flag, system_config.active_stop_code);
     uart_println(b); CLRWDT();
-    sprintf(b, "  DIG2 en/pol/rly=%u/%u/%u  DIG3=%u/%u/%u  DIG4=%u/%u/%u",
-            system_config.dig2_enable, system_config.dig2_fault_polarity, system_config.dig2_relay_mode,
-            system_config.dig3_enable, system_config.dig3_fault_polarity, system_config.dig3_relay_mode,
-            system_config.dig4_enable, system_config.dig4_fault_polarity, system_config.dig4_relay_mode);
-    uart_println(b); CLRWDT();
 
     for (uint8_t i = 0; i < 3; i++)
     {
@@ -1646,11 +1639,6 @@ void main(void)
 
     // Initialize I2C bus
     i2c_init();
-
-    // Initialize PCA9535 and run LED test
-    pca9535_init();
-    pca9535_led_init();
-    pca9535_led_test();
 
     // Initialize RTC
     if (rtc_init() == 0)
@@ -2546,7 +2534,6 @@ void main(void)
             else if (current_menu == 3) menu_draw_clock();
             else if (current_menu == 4) menu_draw_utility();
             else if (current_menu == 5) menu_draw_main_menu();
-            else if (current_menu == 6) menu_draw_digital();
 
             lcd_flush();
             }
@@ -2626,7 +2613,6 @@ void main(void)
                 else if (current_menu == 3) menu_draw_clock();
                 else if (current_menu == 4) menu_draw_utility();
                 else if (current_menu == 5) menu_draw_main_menu();
-                else if (current_menu == 6) menu_draw_digital();
 
                 lcd_flush();
                 }
@@ -2684,9 +2670,6 @@ void main(void)
                     break;
                 case 5:
                     menu_draw_main_menu();
-                    break;
-                case 6:
-                    menu_draw_digital();
                     break;
                 }
 

@@ -20,7 +20,6 @@ echo.
     src\lcd.c ^
     src\i2c.c ^
     src\rtc.c ^
-    src\pca9535.c ^
     -o src\main.hex ^
     -I include
 
