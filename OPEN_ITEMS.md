@@ -4,7 +4,7 @@ Running list of things to fix or validate before release. Worked through one at
 a time; move an item to **Done** with the revision it landed in, or to
 **Decided** if the answer was "leave it".
 
-Last updated: 2026-08-31 · firmware Ver 3 Rev 63
+Last updated: 2026-09-01 · firmware Ver 3 Rev 70
 
 ---
 
@@ -12,31 +12,12 @@ Last updated: 2026-08-31 · firmware Ver 3 Rev 63
 
 These are written and building, but unproven on a board. Highest risk first.
 
-- [ ] **Rev 63 is BUILT BUT NOT FLASHED.** The board was powered down before it
-      could be programmed. Brightness 1-10 has never run. Flash it first.
-- [ ] **Bypass timers save** after the two-pair editor change (Rev 59) — set one,
-      leave the menu, come back. Affects every sensor type, and a failure is
-      silent: the value flashes correctly and simply does not stick.
-- [ ] **Run Time saves** — its confirm path changed in the same edit.
-
 - [ ] **Watch Dog against a real receiver.** Confirm the pulse width the radio
       receiver actually produces is caught reliably by the 1 ms ISR sampling.
-- [ ] **Sensor type mapping after the `Oth Sw` retirement.** Confirm an input
-      already set to Pressure still reads back as Pressure, and that WDT is
-      stored as type 6 — a fault in `sensor_type_for_option[]` would misreport
-      types quietly.
-
 - [ ] **`ADC_VREF_MV` on the replacement PIC.** 4119 was calibrated against the
       *old* chip's FVR. Part-to-part tolerance shifts both the pressure readings
       and the supply trip point together. Re-check 20.00 mA against the loop
       tester — one measurement confirms both.
-- [ ] **Reordered input menu (Rev 38).** Confirm the new order on the display,
-      and — more importantly — that editing each field still writes the field
-      you edited. The menu is tag-based so a reorder *should* be safe, but this
-      is the `[C8]` class of bug and worth ten minutes.
-- [ ] **UTILITY menu after the log removal (Rev 36).** 7 items. Confirm
-      `Menu T/O` and `Pwr Detect` each edit their own value.
-
 ---
 
 ## Decisions needed
@@ -51,12 +32,29 @@ These are written and building, but unproven on a board. Highest risk first.
 - [ ] **Is the PCA9535 still fitted?** If not, `pca9535.c` goes entirely — only
       `init`, `led_init` and `led_test` are called, and CLAUDE.md already calls
       the part legacy.
-- [ ] **Flow Meter units disagree.** Code uses `%`, CLAUDE.md's factory-defaults
-      table says `L/M`.
 - [ ] **Sensor-type defaults for types 2–5 are placeholders.** Flow Meter, Flow
       Switch, Other 4-20, Other Switch. Types 3–5 currently have **all bypass
       timers 0**, which means "not monitored" — such an input cannot trip the
       pump at all until timers are set deliberately.
+
+---
+
+## Decided
+
+- [x] **Run clock does not resume the remaining time after a power cycle.**
+      Confirmed by inspection 2026-09-01: `run_timer_secs` is RAM-only and is
+      reloaded from `system_config.runtime_hours/minutes` on the STOP -> RUN
+      edge, so a restart always runs the **full set time**. The stale countdown
+      visible between boot and restart is display only.
+      **Accepted as-is for this release.** It is a genuine over-application risk
+      for `Rly Endrun = Pulse` sites, where the farmer can restart remotely by
+      phone or radio and therefore never sees the display and cannot edit the
+      time before starting. With `Latch` the operator must attend the pumpshed,
+      sees the run time and can adjust it, so the behaviour is correct there.
+      Post-release fix if wanted: persist the remaining minutes at 10-minute
+      granularity (~6 writes/hour, roughly 10 years of EEPROM life) and resume
+      it **only** when `power_failure_flag` shows the last stop was an outage
+      rather than a normal end of runtime. Do not offer it as a menu setting.
 
 ---
 
@@ -79,8 +77,9 @@ codebase about to be handed over.
 
 ## Housekeeping
 
-- [ ] **`Rly Pulse` still uses the digit editor** while its UTILITY neighbours
-      edit in whole seconds. Inconsistent.
+- [ ] **`init_numeric_editor` is now dead** (compiler-confirmed). The three-digit
+      editor has no remaining callers — every field moved to whole-number or
+      two-pair editing.
 - [ ] **Reset `FW_REVISION` to 0** immediately before the release build.
 - [ ] **`build.bat` (MELabs) should probably be deleted.** The U2's Vpp driver
       is dead (7 V against the 8–9 V required); leaving the script invites
@@ -104,6 +103,35 @@ codebase about to be handed over.
       **information only** — never used for control, since PumpGuard cannot
       start a pump. Observed `RCON=0x1C POWER-ON`: bench collapses go past the
       POR threshold rather than stopping in the BOR band.
+- [x] **`Rly Pulse` truncated silently** — Rev 64. Moving it onto the two-pair
+      MM:SS editor in Rev 59 let it dial up to 99:59, but
+      `system_config.relay_pulse_time` is a **uint8_t** limited to 1-120 s, so
+      anything above 02:00 wrapped: 05:00 saved as **44 seconds** while the menu
+      still read 05:00. Now clamped in the editor (so it stops at 02:00 under
+      the operator's hand) and again on save. Found by inspection, not testing.
+- [x] **Flow Meter units** — Rev 70. Settled as `%` (code was right, the docs
+      were wrong), list is now `%` / `LpM` / `LpS`. Found while settling it: the
+      units row was tagged `FT_CUSTOM_UNITS` for **every** analog type, so all
+      three fixed unit lists were unreachable and Pressure could be labelled
+      any three letters. Option list for types 0/1/2 now, free text only for
+      Oth 4-20.
+- [x] **Range-limit beep** — Rev 67-69. 300ms single tone when a detent is
+      refused, latched to once per rail. Rev 69 stopped the 1ms menu tick
+      truncating it on the following detent, which had made it sound
+      shorter the faster you spun.
+- [x] **Bypass timers save** — Rev 59 two-pair editor. Verified on hardware
+      2026-09-01: PLPBP set to 99:00, power cycled, read back correctly. That
+      exercises the whole chain — editor, `time_xx * 60 + time_yy`, dirty flag,
+      deferred EEPROM write and reload.
+- [x] **`Rly Dwell` editor** — Rev 66. The two-pair editor left the row showing a
+      mix of the old 3-digit format and MM:SS. Its minutes pair could only ever
+      read 00-02, so the button step between pairs bought nothing. Now one whole
+      value clamped 1-120, displayed MM:SS, like Menu T/O.
+- [x] **Brightness control** — Rev 63. Verified 1-10 with live backlight,
+      2026-09-01.
+- [x] **Run Time / clock editing** — Rev 59 two-pair editor verified.
+- [x] **UTILITY menu, sensor-type mapping, reordered input menu** — all
+      verified on hardware 2026-08-31/09-01.
 - [x] **Watch Dog trigger modes** — Rev 55. All three (`Edge`, `Hi to Lo`,
       `Lo to Hi`) verified on all three digital inputs, 2026-08-31.
 - [x] **Watch Dog PWDBP** — Rev 56. Was clobbered at every pump start: the

@@ -2,7 +2,7 @@
  * IRRISYS - Full System with Buffered LCD
  * PIC18F26K22 @ 32MHz
  *
- * Version: Ver 3 Rev 63
+ * Version: Ver 3 Rev 70
  *   - Ver 3 = Product/firmware version
  *   - Rev 63 = Incremented on every change; reset to 0 prior to release
  *
@@ -13,7 +13,7 @@
  */
 
 #define FW_VERSION  3     // Product/firmware version
-#define FW_REVISION 63     // Incremented every change; reset to 0 before release
+#define FW_REVISION 70     // Incremented every change; reset to 0 before release
 
 #include "../include/config.h"
 #include "../include/encoder.h"
@@ -239,6 +239,19 @@ volatile uint8_t alarm_buzz_phase = 0;  // 0=idle, 1-12=on/off cycles (odd=on, e
 void beep(uint16_t duration_ms)
 {
     INTCONbits.GIE = 0;          // atomic update of the buzzer state group
+
+    // A shorter beep must not cut a longer one short. The 1ms menu tick fires
+    // on EVERY encoder detent, so a fast spin used to truncate the 300ms
+    // range-limit beep to a click — and the faster the spin, the shorter it
+    // sounded, which read as the limit beep itself being inconsistent.
+    // Length stands in for priority here: tick 1ms < button 50ms < limit
+    // 300ms < stop 500ms, which is already the order that matters.
+    if (buzzer_phase == 1 && buzzer_ms > duration_ms)
+    {
+        INTCONbits.GIE = 1;
+        return;
+    }
+
     buzzer_on_ms   = duration_ms;
     buzzer_off_ms  = 0;
     buzzer_repeats = 0;

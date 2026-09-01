@@ -3,7 +3,7 @@
 ## Project Overview
 
 **Product:** IRRISYS Irrigation Pump Protection System
-**Current Firmware:** Ver 3 Rev 63
+**Current Firmware:** Ver 3 Rev 70
 
 **Hardware:**
 - Display board: IrrisysPG_Ver_B_Display_Rev_2
@@ -46,6 +46,11 @@ Communication: Main -> Display via serial (19200 baud, 8N1)
 | 2026-08-21 | Main    | Ver 3 Rev 2 | Versioning scheme -> `Ver N Rev N`; LCD cleared at top of `main()`; splash is "Irrisys PumpGuard" / version on lines 2-3; Pressure defaults corrected (20mA=362, SHPBP=1s, Rly SLPBP=Pulse); factory defaults now derived from `sensor_type_defaults[]` |
 | 2026-08-21 | Main    | Ver 3 Rev 4 | Main screen: input line flashes while a bypass timer counts, stopping when the value is OK |
 | 2026-08-21 | Main    | Ver 3 Rev 5 | Main screen: disabled inputs show "Not Used" |
+| 2026-09-01 | Main    | Ver 3 Rev 70 | **Fix: Units opened the character editor on every analog type.** The units row was tagged `FT_CUSTOM_UNITS` for Pressure, Temperature and Flow Meter as well as Oth 4-20, so selecting Units gave the 3-character alphabet editor (`< Short=OK Long=X`) and the psi/bar/kPa, C/F and flow lists were **unreachable dead code**. A Pressure input could be labelled any three letters at all. Units are now an option list for types 0/1/2 and free text only for Oth 4-20; an unrecognised stored unit falls back to the first option. Flow list is now `%` / `LpM` / `LpS` |
+| 2026-09-01 | Main    | Ver 3 Rev 69 | **Fix: short beeps truncated long ones.** The menu tick (`beep(1)`, fired on EVERY encoder detent) overwrote the buzzer sequencer, so the next detent after a range-limit beep reset `buzzer_ms` from 300 to 1 and cut it off. Turning slowly the beep completed; spinning fast enough to engage acceleration clipped it to a click, which read as the limit beep being inconsistent. `beep()` now ignores a request shorter than the time left on an in-progress beep - length stands in for priority (tick 1ms < button 50ms < limit 300ms < stop 500ms). `beep_double()` is unaffected and still preempts, which is correct: fault-ack and menu-timeout outrank a tick |
+| 2026-09-01 | Main    | Ver 3 Rev 67-68 | **Range-limit beep.** A detent that does not move the value now sounds a **300ms** single tone - distinct from the 50ms button click and from the double-beep that means fault-cleared or menu-timeout. Latched, so a continued spin at the rail gives one beep rather than one per detent, and re-armed on entry so a field already at its limit still beeps. The test is on the **value**, not on the clamp: an accelerated 20-step jump that only partly fits still moves the value and stays silent. Applies to every clamped whole-number field; time pairs, option lists and the name editor all wrap, so nothing is ever refused there |
+| 2026-09-01 | Main    | Ver 3 Rev 66 | **`Rly Dwell` edits as one whole value.** The two-pair MM:SS editor left the row showing a mix of the old 3-digit format and MM:SS, and its minutes pair could only ever read 00, 01 or 02 - the button step between pairs bought nothing. Now a whole number clamped 1-120 and displayed MM:SS, the same treatment as Menu T/O. UTILITY has no two-pair fields left |
+| 2026-09-01 | Main    | Ver 3 Rev 64-65 | **`Rly Pulse` renamed `Rly Dwell`, and a truncation fixed.** Moving the field onto the two-pair MM:SS editor in Rev 59 let it dial 99:59 while `relay_pulse_time` is a `uint8_t` capped at 120s, so 05:00 silently stored as **44s** with the menu still reading 05:00 - now clamped in the editor and again on save. Renamed because the value is not the length of a pulse: a pulsed stop holds the relay open until **DIG_IN1 goes low** and only then for this long, so a VSD holding its run signal high through ramp-down cannot get the pump back. "Pulse" invited setting it long enough to cover the ramp, double-counting what the firmware already does |
 | 2026-08-31 | Main    | Ver 3 Rev 61-63 | **Brightness fixed.** Was on the 3-digit numeric editor so it reached 999, the live-update path had no case for it (so the row never changed while the encoder turned, though the value did), and `disp_set_brightness()` was only ever called at boot so a change did nothing until the next power cycle. Now a clamped whole number **1-10 mapping to 10-100%**, applied on every detent. Encoder acceleration disabled on ranges under 20 steps - the 20-per-detent spin slammed short fields straight to the rail |
 | 2026-08-31 | Main    | Ver 3 Rev 54-60 | **Watch Dog fixes + time editing.** Fixed **PWDBP never running**: the SWDBP reload meant for `resume_bp_timers()` had been patched onto the tail of `init_bp_timers()` (the anchor text appears in both), so every pump start set PRIMARY then immediately overwrote it. Added a 1s **start blanking** window. All time fields (4 bypass timers, Rly Pulse, Run Time) now edit as **two whole pairs** - minutes, button, seconds, button - with only the live pair flashing; previously bypass timers were a single 0-5999 counter, so 30:00 -> 2:00 took ~84 detents. Main screen shows `WDT PWDBP 29:45`; default name -> `WDT` |
 | 2026-08-31 | Main    | Ver 3 Rev 48-53 | **Watch Dog sensor type (6).** External "still moving" signal, e.g. a reed switch on a traveling irrigator wheel radio-linked to the pumpshed. PWDBP startup grace (default 30:00, once per pump start, abandoned by the first pulse) then SWDBP (default 5:00, reloaded by every pulse). Trigger selectable Hi to Lo / Lo to Hi / Edge. Edges captured in the **1ms ISR**, not the main loop, which can block ~2s during an EEPROM save. Rly SWDBP defaults to **Pulse**, Rly PWDBP to Latch. Loop-integrity (`err open`/`err shrt`) now skipped for every digital type. **`Oth Sw` retired** from the selector (type still honoured if stored). Fixed: `BP_NORMAL` from `resume_bp_timers()` tripped a watchdog instantly |
@@ -782,7 +787,7 @@ Digital types (3, 5, 6) have 9 menu items: Enable, Polarity/Trigger, 2 bypass ti
 | ------------ | --------------- |
 | Pressure     | psi, bar, kPa   |
 | Temperature  | C, F            |
-| Flow Meter   | L/M, %, LpS     |
+| Flow Meter   | %, LpM, LpS     |
 | Flow Switch  | (none)          |
 | Other 4-20   | Value           |
 | Other Switch | (none)          |
@@ -815,7 +820,7 @@ Linear interpolation: adc_to_eng(counts, scale_4ma, scale_20ma)
 | 2-3    | uint16    | runtime_hours       | Runtime hours                                    |
 | 4-5    | uint16    | runtime_minutes     | Runtime minutes                                  |
 | 6      | uint8     | end_runtime_mode    | Relay mode for end of runtime                    |
-| 7      | uint8     | relay_pulse_time    | Relay pulse duration (1-120 seconds)             |
+| 7      | uint8     | relay_pulse_time    | Rly Dwell: hold-open after run signal drops (1-120s) |
 | 8      | uint8     | config_flags        | Bit flags for system options                     |
 | 9-15   | uint8[7]  | reserved_time       | Future timing config                             |
 | 16     | uint8     | contrast            | LCD contrast (3-10)                              |
@@ -911,7 +916,7 @@ Sensor Type Change Defaults table below.
 |-----------|---------|
 | Enable | Yes |
 | Sensor Type | Flow Meter |
-| Units | L/M |
+| Units | % |
 | 4mA Scale | 0 |
 | 20mA Scale | 100 |
 | Pri Low BP | 30s (0:30) |
@@ -1025,7 +1030,7 @@ CLOCK CONFIG (current_menu = 3, from SETUP > Clock)
 
 UTILITY (current_menu = 4, from OPTIONS > Utility Menu)
   |- View Log / Clear Log
-  |- Menu T/O / Pwr Detect / Brightness / Rly Pulse
+  |- Menu T/O / Pwr Detect / Brightness / Rly Dwell
   |- About   -> re-shows the splash for 5s
   |- Back    -> OPTIONS
   +- EXIT    -> Main screen

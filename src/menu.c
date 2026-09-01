@@ -128,7 +128,7 @@ const item_options_t menu_item_options[] = {
     {OPT_FAULT_POL, 2, {"Low", "High", "", "", "", ""}},
     {OPT_UNITS_PRESS, 3, {"psi", "bar", "kPa", "", "", ""}},
     {OPT_UNITS_TEMP, 2, {"\xDF""C", "\xDF""F", "", "", "", ""}},
-    {OPT_UNITS_FLOW, 3, {"%", "L/M", "LpS", "", "", ""}},
+    {OPT_UNITS_FLOW, 3, {"%", "LpM", "LpS", "", "", ""}},
     {OPT_UNITS_OTHER, 1, {"Value", "", "", "", "", ""}},
     {OPT_WDT_TRIG, 3, {"Hi to Lo", "Lo to Hi", "Edge", "", "", ""}},
 };
@@ -267,7 +267,7 @@ const menu_item_t utility_menu_template[] = {
     {"Menu T/O", NULL, 1},     // 0 - Whole seconds
     {"Pwr Detect", NULL, 1},   // 1 - Whole seconds
     {"Brightness", NULL, 1},   // 2 - Numeric
-    {"Rly Pulse", NULL, 1},    // 3 - Time MM:SS
+    {"Rly Dwell", NULL, 1},    // 3 - Time MM:SS
     {"About", NULL, 0},        // 4 - Action: re-show the splash
     {"Back", NULL, 0},         // 5
     {"EXIT", NULL, 0}          // 6
@@ -292,6 +292,16 @@ extern void lcd_set_cursor(uint8_t row, uint8_t col);
 extern void lcd_print(const char *str);
 extern void beep(uint16_t duration_ms);
 extern void beep_double(uint16_t on_ms, uint16_t gap_ms);
+
+// Sounded once when a rotation is refused because the value is already at
+// the end of its range. Long enough not to be mistaken for the 50ms button
+// click, and a single tone so it cannot be confused with the double-beep
+// that means "fault cleared" or "menu timed out".
+#define LIMIT_BEEP_MS 300
+
+// Latched so a continued spin at the rail gives ONE beep, not a beep per
+// detent. Cleared as soon as the value moves, and on entry to any editor.
+static uint8_t limit_beeped = 0;
 extern void uart_println(const char *str);
 extern void lcd_clear(void);
 // extern int16_t convert_for_display(int16_t val, const char *units);  // SUSPENDED
@@ -323,9 +333,10 @@ uint8_t is_numeric_field(uint8_t line, uint8_t sensor_type, uint8_t flow_type)
     }
     else if (current_menu == 4) // UTILITY menu
     {
-        // 0 Menu T/O and 1 Pwr Detect edit as whole seconds (see the
-        // button handler); 2 Brightness uses the digit editor.
-        return (line == 0 || line == 1 || line == 2);
+        // All four editable UTILITY fields are whole numbers (see the
+        // button handler). Menu T/O, Pwr Detect and Rly Dwell are seconds
+        // shown as MM:SS; Brightness is a plain 1-10.
+        return (line <= 3);
     }
     return 0;
 }
@@ -338,7 +349,7 @@ uint8_t is_time_field(uint8_t line, uint8_t sensor_type, uint8_t flow_type)
     if (current_menu == 1) // INPUT menu — bypass timers edit as MM:SS
     {
         // Bypass timers edit as MM:SS in two fields, the same editor the
-        // clock and Rly Pulse use. As a single whole number they ran 0..5999
+        // clock and Rly Dwell use. As a single whole number they ran 0..5999
         // seconds: taking a WDT startup window from its 30:00 default down to
         // 2:00 meant ~84 detents even at the accelerated step. Minutes and
         // seconds separately makes it a handful.
@@ -348,7 +359,11 @@ uint8_t is_time_field(uint8_t line, uint8_t sensor_type, uint8_t flow_type)
     }
     else if (current_menu == 4) // UTILITY menu
     {
-        return (line == 3); // Rly Pulse only - the others edit as whole seconds
+        // Rly Dwell is 1-120 s, so its minutes pair only ever reads 00, 01
+        // or 02. A button press between pairs bought nothing and left the
+        // row looking like a mix of the old 3-digit format and MM:SS.
+        // It edits as one whole value now, displayed MM:SS.
+        return 0;
     }
     else if (current_menu == 5) // MAIN menu
     {
@@ -669,10 +684,41 @@ void rebuild_input_menu(void)
         // Sensor type
         n = add_menu_item(n, "Sensor", value_sensor, 1, FT_SENSOR);
 
-        // Units are customizable via name editor
-        strncpy(value_custom_units, input_config[idx].units, 3);
-        value_custom_units[3] = '\0';
-        n = add_menu_item(n, "Units", value_custom_units, 1, FT_CUSTOM_UNITS);
+        // Units: a fixed list for the known sensor types, free text only for
+        // Oth 4-20. EVERY analog type used to get the 3-character editor, so
+        // the psi/C/% lists were unreachable and a Pressure input could be
+        // given any three letters at all. Units are a label - the number
+        // comes from Scale 4mA/20mA - so a free-text unit bought nothing
+        // except a way to mislabel a reading.
+        if (st == 4)
+        {
+            strncpy(value_custom_units, input_config[idx].units, 3);
+            value_custom_units[3] = '\0';
+            n = add_menu_item(n, "Units", value_custom_units, 1, FT_CUSTOM_UNITS);
+        }
+        else
+        {
+            const item_options_t *uo =
+                (st == 0) ? &menu_item_options[OPT_UNITS_PRESS] :
+                (st == 1) ? &menu_item_options[OPT_UNITS_TEMP]  :
+                            &menu_item_options[OPT_UNITS_FLOW];
+
+            // Recover the stored unit as an index into the list. Anything
+            // unrecognised (an older config, or one left by the free-text
+            // editor) falls back to the first option rather than showing a
+            // unit the operator can no longer select.
+            flow_units_edit_flag = 0;
+            for (uint8_t u = 0; u < uo->option_count; u++)
+            {
+                if (strcmp(input_config[idx].units, uo->options[u]) == 0)
+                {
+                    flow_units_edit_flag = u;
+                    break;
+                }
+            }
+            strcpy(value_units, uo->options[flow_units_edit_flag]);
+            n = add_menu_item(n, "Units", value_units, 1, FT_UNITS);
+        }
 
         // Scale 4mA
         {
@@ -1187,6 +1233,8 @@ void menu_handle_encoder(int16_t delta)
             int16_t step = (span > 20 && encoder_ms_timer < 112) ? 20 : 1;
             encoder_ms_timer = 0; // Reset for next detent timing
 
+            int16_t before = menu.whole_edit_value;
+
             if (delta > 0)
                 menu.whole_edit_value += step;
             else if (delta < 0)
@@ -1197,6 +1245,24 @@ void menu_handle_encoder(int16_t delta)
                 menu.whole_edit_value = menu.whole_edit_max;
             if (menu.whole_edit_value < menu.whole_edit_min)
                 menu.whole_edit_value = menu.whole_edit_min;
+
+            // A detent that changes nothing means the range is exhausted.
+            // Without this the encoder just feels dead and the operator has
+            // no way to tell a limit from a fault. Note the test is on the
+            // value, not on the clamp: an accelerated step that only partly
+            // fits still moves the value, so it is not a refusal.
+            if (menu.whole_edit_value == before)
+            {
+                if (!limit_beeped)
+                {
+                    beep(LIMIT_BEEP_MS);
+                    limit_beeped = 1;
+                }
+            }
+            else
+            {
+                limit_beeped = 0;
+            }
 
             menu_update_edit_value();
             return;
@@ -1348,6 +1414,7 @@ void handle_time_rotation(int8_t direction)
             else
                 menu.time_yy = (menu.time_yy == 0) ? 59 : menu.time_yy - 1;
         }
+
         menu_update_time_value();
         return;
     }
@@ -1645,7 +1712,7 @@ void menu_update_time_value(void)
     else if (current_menu == 4) // UTILITY
     {
         // [C8] Indices MUST match utility_menu_template:
-        //   0 Menu T/O | 1 Pwr Detect | 2 Brightness | 3 Rly Pulse |
+        //   0 Menu T/O | 1 Pwr Detect | 2 Brightness | 3 Rly Dwell |
         //   4 About | 5 Back | 6 EXIT
         // These were 4/5/7 (each +1), so the live value never updated while
         // editing, and editing Pwr Detect wrote into the Menu T/O buffer —
@@ -1654,7 +1721,6 @@ void menu_update_time_value(void)
         {
         case 0: strcpy(value_menu_timeout, buf); break;  // Menu T/O
         case 1: strcpy(value_pwr_fail, buf); break;      // Pwr Detect
-        case 3: strcpy(value_relay_pulse, buf); break;   // Rly Pulse
         }
     }
     else if (current_menu == 5) // MAIN
@@ -1769,6 +1835,7 @@ void menu_update_edit_value(void)
                 {
                 case 0: strcpy(value_menu_timeout, buf); break;  // Menu T/O
                 case 1: strcpy(value_pwr_fail, buf); break;      // Pwr Detect
+                case 3: strcpy(value_relay_pulse, buf); break;   // Rly Dwell
                 }
             }
         }
@@ -1957,8 +2024,14 @@ static void save_utility_field(uint8_t line)
         disp_set_brightness((uint8_t)(system_config.brightness * 10));  // 1-10 -> 10-100%
         break;
     }
-    case 3: // Rly Pulse
-        system_config.relay_pulse_time = menu.time_xx * 60 + menu.time_yy;
+    // Rly Dwell: how long the relay is held open AFTER the run signal
+    // drops, not the total open time. A pulsed stop keeps the relay open
+    // until DIG_IN1 goes low and then for this long, so a VSD that holds
+    // its run signal high while ramping down cannot get the pump back.
+    case 3: // Rly Dwell
+        // The editor clamps to 1-120, which is the whole range of the
+        // uint8_t field, so nothing can arrive here out of range.
+        system_config.relay_pulse_time = (uint8_t)menu.whole_edit_value;
         break;
     }
     system_config_dirty = 1;  // Defer EEPROM write
@@ -2145,7 +2218,7 @@ void menu_handle_button(uint8_t press_type)
                 menu.edit_time_mode = 0;
 
                 // Every menu with a time field saves here now, not just the
-                // clock - the bypass timers and Rly Pulse use this editor too.
+                // clock - the bypass timers and Rly Dwell use this editor too.
                 if (current_menu == 1) save_input_field(menu.current_line, current_input);
                 else if (current_menu == 4) save_utility_field(menu.current_line);
                 else if (current_menu == 5) save_main_field(menu.current_line);
@@ -2370,6 +2443,8 @@ void menu_handle_button(uint8_t press_type)
             menu.in_edit_mode = 1;
             menu.edit_time_mode = 0;
             menu.edit_whole_mode = 1;
+            limit_beeped = 0;  // re-arm: entering a field already at
+                               // its rail should still beep once
             menu.whole_edit_value = val;
             if (tag == FT_PRI_HI_BP || tag == FT_SEC_HI_BP ||
                 tag == FT_PRI_LO_BP || tag == FT_SEC_LO_BP)
@@ -2503,11 +2578,13 @@ void menu_handle_button(uint8_t press_type)
             // ranges. Digit editing made them awkward - the first detent
             // moved the tens-of-minutes digit, so 02:00 jumped to 12:00.
             // Edit them as whole seconds instead, clamped to their range.
-            if (line == 0 || line == 1 || line == 2)
+            if (line <= 3)
             {
                 menu.in_edit_mode = 1;
                 menu.edit_time_mode = 0;
                 menu.edit_whole_mode = 1;
+                limit_beeped = 0;  // re-arm: entering a field already at
+                                   // its rail should still beep once
                 if (line == 0)
                 {
                     menu.whole_edit_value = (int16_t)system_config.menu_timeout;
@@ -2520,7 +2597,7 @@ void menu_handle_button(uint8_t press_type)
                     menu.whole_edit_min = 2;
                     menu.whole_edit_max = 30;
                 }
-                else
+                else if (line == 2)
                 {
                     // Brightness is TEN STEPS, 0-9, mapped to 10-100% by
                     // disp_set_brightness(). It was on the 3-digit editor,
@@ -2531,6 +2608,13 @@ void menu_handle_button(uint8_t press_type)
                     menu.whole_edit_max = 10;  // "1 of 10" reads better than
                                                // "0 of 9" to a non-technical
                                                // operator, and 0 reads as off
+                }
+                else
+                {
+                    // Rly Dwell: hold-open after the run signal drops.
+                    menu.whole_edit_value = (int16_t)system_config.relay_pulse_time;
+                    menu.whole_edit_min = 1;
+                    menu.whole_edit_max = 120;  // 02:00
                 }
                 // Clamp the STORED value into range on entry. Without this a
                 // value saved under an older range (or a corrupt one) is shown
