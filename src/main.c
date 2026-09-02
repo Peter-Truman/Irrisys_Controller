@@ -2,7 +2,7 @@
  * IRRISYS - Full System with Buffered LCD
  * PIC18F26K22 @ 32MHz
  *
- * Version: Ver 3 Rev 89
+ * Version: Ver 3 Rev 93
  *   - Ver 3 = Product/firmware version
  *   - Rev 63 = Incremented on every change; reset to 0 prior to release
  *
@@ -13,7 +13,7 @@
  */
 
 #define FW_VERSION  3     // Product/firmware version
-#define FW_REVISION 89     // Incremented every change; reset to 0 before release
+#define FW_REVISION 93     // Incremented every change; reset to 0 before release
 
 #include "../include/config.h"
 #include "../include/encoder.h"
@@ -1250,18 +1250,22 @@ static void init_bp_timers(uint8_t i)
         bp_state[i].high.phase = BP_INACTIVE;
         bp_state[i].high.countdown = 0;
     }
-    // High direction: always monitor if input is enabled
-    // Primary bypass > 0: start in BP_PRIMARY with countdown
-    // Primary bypass = 0: start in BP_NORMAL (immediate monitoring)
-    else if (input_config[i].primary_high_bypass > 0)
+    // High direction: always monitor if the input is enabled. Start in
+    // BP_PRIMARY even when the primary bypass is ZERO.
+    //
+    // A zero primary used to skip straight to BP_NORMAL, so a fault already
+    // present at pump start was reported as SECONDARY - the trip came through
+    // the "excursion while running" path. That is the wrong diagnosis: the
+    // condition was there from the start, which is precisely what the PRIMARY
+    // code is meant to tell the operator.
+    //
+    // process_bp()'s BP_PRIMARY branch already does the right thing with a zero
+    // countdown - no fault abandons the window on the first tick exactly as
+    // before, a fault trips at once and is attributed to the primary.
+    else
     {
         bp_state[i].high.phase = BP_PRIMARY;
         bp_state[i].high.countdown = input_config[i].primary_high_bypass;
-    }
-    else
-    {
-        bp_state[i].high.phase = BP_NORMAL;
-        bp_state[i].high.countdown = 0;
     }
 
     // Watch Dog: the low direction carries the retriggerable timer.
@@ -1296,16 +1300,13 @@ static void init_bp_timers(uint8_t i)
         INTCONbits.GIE = 1;
 
     }
-    // Low direction: always monitor if input is enabled
-    else if (input_config[i].primary_low_bypass > 0)
+    // Low direction: same treatment - a zero primary is a zero-length startup
+    // window, not the absence of one, so a fault present at start is reported
+    // against the PRIMARY code.
+    else
     {
         bp_state[i].low.phase = BP_PRIMARY;
         bp_state[i].low.countdown = input_config[i].primary_low_bypass;
-    }
-    else
-    {
-        bp_state[i].low.phase = BP_NORMAL;
-        bp_state[i].low.countdown = 0;
     }
 
     alarm_active[i] = 0;
@@ -2511,10 +2512,27 @@ void main(void)
                         int16_t val = adc_to_eng(adc_arr[i],
                                                   input_config[i].scale_4ma,
                                                   input_config[i].scale_20ma);
-                        if (input_config[i].high_setpoint != 0 || input_config[i].primary_high_bypass > 0 || input_config[i].secondary_high_bypass > 0)
-                            high_fault = (val >= input_config[i].high_setpoint);
-                        if (input_config[i].low_setpoint != 0 || input_config[i].primary_low_bypass > 0 || input_config[i].secondary_low_bypass > 0)
-                            low_fault = (val <= input_config[i].low_setpoint);
+                        // Both directions are ALWAYS evaluated. A bypass timer
+                        // is a DELAY, never an on/off switch.
+                        //
+                        // These tests used to be gated on "setpoint non-zero OR
+                        // either timer non-zero", which gave 0 a second, hidden
+                        // meaning. An operator who set both timers of a direction
+                        // to 0 - entirely reasonable if he wants it to trip at
+                        // once - silently disabled that direction instead,
+                        // wherever the setpoint was also 0 (Flow Meter low, Other
+                        // 4-20). Two innocuous edits combined into no protection,
+                        // with nothing on screen to say so.
+                        //
+                        // Everywhere else 0 already meant "no delay":
+                        // init_bp_timers() starts a 0 primary in BP_NORMAL, and
+                        // process_bypass() takes a 0 secondary straight to
+                        // BP_ALARM. This makes that consistent - the operator can
+                        // choose an instant shutdown, and cannot choose "off" by
+                        // accident. Turning a direction off is what the setpoint
+                        // and the input Enable flag are for.
+                        high_fault = (val >= input_config[i].high_setpoint);
+                        low_fault  = (val <= input_config[i].low_setpoint);
                     }
 
                     // Process high direction (analog only - a switch has no

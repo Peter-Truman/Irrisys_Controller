@@ -43,13 +43,21 @@ const sensor_defaults_t sensor_type_defaults[7] = {
 
     // 0 - Pressure: 0-362 psi, high trip 200 (0s pri / 1s sec),
     //     low trip 30 with 5:00 start grace + 0:30 delay, sec low relay pulses
-    {0, 362, 200, 30,  0, 1, 300, 30,  0, 0, 0, 1, 0, "Pressure",    "psi"},
+    //     BOTH high bypasses are 0 = trip immediately, at start or while
+    //     running. Safe to say so now: since Rev 91 a 0 timer is a DELAY of
+    //     zero, never a hidden "off" - the direction is monitored either
+    //     way. Over-pressure has no reason to be tolerated for a window.
+    {0, 362, 200, 30,  0, 0, 300, 30,  0, 0, 0, 1, 0, "Pressure",    "psi"},
 
     // 1 - Temperature: transmitter scales -50 to 150 C, trip high at 65
     //     after a 1:00 grace. Setpoints are adjustable -10..150 only - a
     //     pump at -10 is frozen, so a lower trip is unreachable. The LOW
     //     direction is deliberately not monitored (both low BPs are 0).
-    {-50, 150, 65, -5,  60, 0, 0, 0,  0, 0, 0, 0, 0, "Temperature", "\xDF""C"},
+    //     SHTBP was 0 (instant) on the reasoning that a pump losing prime
+    //     churns and heats fast. Set to 0:30 deliberately in Rev 90 - if
+    //     nuisance trips appear, the answer is threshold hysteresis, NOT a
+    //     longer window.
+    {-50, 150, 65, -5,  60, 30, 0, 0,  0, 0, 0, 0, 0, "Temperature", "\xDF""C"},
 
     // 2 - Flow Meter: 0-100% of PUMP capability (set Scale 20mA so the
     //     meter full scale reads as its percentage of pump rating).
@@ -58,16 +66,27 @@ const sensor_defaults_t sensor_type_defaults[7] = {
     //     (both high BPs 0): a pump cannot exceed 100% of its own
     //     capability, and with high_setpoint 0 any non-zero high BP
     //     would make val >= 0 true and stop the pump on every start.
-    {0, 100, 0, 0,  0, 0, 900, 30,  0, 0, 0, 0, 0, "Flow Meter",  "%"},
+    //     HIGH SETPOINT 85 IS A FORCING FUNCTION, not a trip point. We
+    //     cannot know what meter will be fitted, so a default that provokes
+    //     a stop makes the installer confront the setting rather than leave
+    //     an input silently unmonitored. Same reasoning as Other 4-20.
+    {0, 100, 85, 0,  10, 2, 900, 30,  0, 0, 0, 0, 0, "Flow Meter",  "%"},
 
     // 3 - Flow Switch (digital): 0:30 startup window for no flow.
     //     Switch types use the LOW direction only - PNFBP / SNFBP.
     //     Polarity HIGH: irrigation flow switches are usually a 2-wire dry
     //     contact that closes on flow, putting 24V on the input.
-    {0, 0, 0, 0,  0, 0, 30, 0,  0, 0, 0, 0, 1, "Flow Switch", ""},
+    //     Secondary was 0 - the first tick of no-flow stopped the pump with
+    //     no ride-through, and nothing in the path debounces a chattering
+    //     paddle at marginal flow. 0:05 covers that.
+    {0, 0, 0, 0,  0, 0, 10, 5,  0, 0, 0, 0, 1, "Flow Switch", ""},
 
     // 4 - Other 4-20 (analog): neutral 0-100 span, unmonitored, user names it
-    {0, 100, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0, 0, "Other 4-20",  ""},
+    //     Every bypass 1s and high setpoint 85 for the same reason as Flow
+    //     Meter: on a protection device an unconfigured input must not sit
+    //     silently unmonitored. It stops the pump until real values are
+    //     entered, which is the intended prompt.
+    {0, 100, 85, 0,  1, 1, 1, 1,  0, 0, 0, 0, 0, "Other 4-20",  ""},
 
     // 5 - Other Switch (digital): unmonitored until timers are configured
     {0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0, 0, "Other Sw",    ""},

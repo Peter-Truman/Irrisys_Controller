@@ -3,7 +3,7 @@
 ## Project Overview
 
 **Product:** IRRISYS Irrigation Pump Protection System
-**Current Firmware:** Ver 3 Rev 71
+**Current Firmware:** Ver 3 Rev 93
 
 **Hardware:**
 - Display board: IrrisysPG_Ver_B_Display_Rev_2
@@ -46,6 +46,7 @@ Communication: Main -> Display via serial (19200 baud, 8N1)
 | 2026-08-21 | Main    | Ver 3 Rev 2 | Versioning scheme -> `Ver N Rev N`; LCD cleared at top of `main()`; splash is "Irrisys PumpGuard" / version on lines 2-3; Pressure defaults corrected (20mA=362, SHPBP=1s, Rly SLPBP=Pulse); factory defaults now derived from `sensor_type_defaults[]` |
 | 2026-08-21 | Main    | Ver 3 Rev 4 | Main screen: input line flashes while a bypass timer counts, stopping when the value is OK |
 | 2026-08-21 | Main    | Ver 3 Rev 5 | Main screen: disabled inputs show "Not Used" |
+| 2026-09-02 | Main    | Ver 3 Rev 90-93 | **A bypass timer is a delay, never an off switch.** The fault test was gated on "setpoint non-zero OR either timer non-zero", giving `0` a second, hidden meaning: an operator setting both timers of a direction to 0 - reasonable if he wants an instant trip - silently DISABLED that direction wherever the setpoint was also 0. Both directions are now always evaluated (Rev 91). Also fixed the **attribution**: a zero primary skipped straight to BP_NORMAL, so a fault already present at pump start was reported as SECONDARY, i.e. as a running excursion. Every direction now starts in BP_PRIMARY - a zero primary is a zero-length window, not the absence of one - so a startup fault reports `PHPBP` (Rev 92). Verified on hardware both ways. Defaults revised: Pressure high pair **0/0** (over-pressure has no reason to be tolerated; a user who wants to ride out a spike changes it deliberately), Temperature SHTBP 30, Flow Meter high SP **85** with PHFBP 10 / SHFBP 2, Flow Switch 10/5, Other 4-20 high SP 85 with every timer 1. The 85s are **forcing functions**, not trip points: with no idea what meter is fitted, a default that provokes a stop makes the installer confront the setting rather than leave an input silently unmonitored |
 | 2026-09-02 | Main    | Ver 3 Rev 88-89 | **Fault Log in UTILITY.** Same record as the boot dump, on the screen - which covers the common case that the display still works and someone on the phone needs to read out what the box has been through. One entry per line, scrolled with the encoder, clamped at both ends: `Boots`, `Brown Out`, `Int Error`, `RTC Fail`, `Low Volts`, `Loop In1/2/3`, then each recorded stop code oldest-first and numbered. **Viewer only - no clear function**, since a log the operator can clear is one that gets cleared before it is read. UTILITY 7 -> 8 items, so About/Back/EXIT shifted to 5/6/7 ([C8] renumbering). Fixed: the log bytes were padding until Rev 85, so on existing units they read erased EEPROM - every counter showed **255**; now zeroed once, detected via `boot_count == 0xFFFF` |
 | 2026-09-02 | Main    | Ver 3 Rev 85-87 | **Failure log.** Units ship sealed, so the debug UART is a bench-only channel and a live stream is worthless - an event printed in January is long gone before the unit reaches the bench. 18 bytes inside the existing `system_config` padding hold counters plus a ring of the last 8 stop codes, dumped at boot. Written from **one** hook that watches state transitions, not from each of the five sites that set a stop code, so a sixth site cannot be missed. **Survives a factory reset on purpose**: a user is quite likely to be told to try a reset before returning a unit, which is exactly when the history matters. `System Started` added as the first line out of the port |
 | 2026-09-02 | Main    | Ver 3 Rev 83-84 | **Boot trimmed to a 5s budget; debug instrumentation removed.** The splash now holds until `BOOT_SPLASH_MS` total from power-up rather than a flat 5s on top of ~1.6s of init, so it absorbs init cost instead of adding to it. The debug EEPROM dump moved out of the pre-splash path (~1.3s at 9600 baud) and was then deleted along with the 4Hz `DEBUG_STREAM` heartbeat and six bring-up trace lines. Program 93.6% -> **89.7%** |
@@ -621,7 +622,7 @@ if (system_config_dirty) { save_system_config(); system_config_dirty = 0; }
 
 | State        | Value | Description                                         |
 | ------------ | ----- | --------------------------------------------------- |
-| BP_INACTIVE  | 0     | Direction not monitored (timer = 0)                 |
+| BP_INACTIVE  | 0     | Direction parked (switch types, or after an alarm)  |
 | BP_PRIMARY   | 1     | Startup grace period (runs only while faulted)      |
 | BP_NORMAL    | 2     | Normal monitoring (no timer running)                |
 | BP_SECONDARY | 3     | Fault detected, secondary countdown                 |
@@ -639,9 +640,23 @@ Each input has independent high and low direction bypass timers. When an alarm t
 
 ### Bypass Monitoring Rules
 
-- If both primary and secondary bypass timers are 0 for a direction, that direction is NOT monitored (BP_INACTIVE).
+- **A bypass timer is a DELAY, never an on/off switch.** `0` means *no delay* -
+  trip at once - and nothing else. It used to carry a second, hidden meaning:
+  the fault test was gated on "setpoint non-zero OR either timer non-zero", so
+  an operator who set both timers of a direction to 0 - entirely reasonable if
+  he wants it to trip immediately - silently **disabled** that direction
+  wherever the setpoint was also 0. Two innocuous edits combined into no
+  protection, with nothing on screen to say so. Removed in Ver 3 Rev 91: both
+  directions are always evaluated. Turning protection off is what the input
+  **Enable** flag and the **setpoint** are for.
+- Every direction starts in BP_PRIMARY on RUN, **including when the primary
+  bypass is 0** - that is a zero-length startup window, not the absence of
+  one. A fault already present at pump start therefore reports the **primary**
+  code (`PHPBP`), which says the condition was there from the start: wrong
+  setpoint, wrong sensor, valve shut. Before Ver 3 Rev 92 a zero primary
+  skipped to BP_NORMAL and the same trip was reported as **secondary** - a
+  running excursion - sending the diagnosis in the wrong direction.
 - If primary > 0, starts in BP_PRIMARY on RUN. The primary window is **abandoned the moment the threshold is reached** (value goes good) -> BP_NORMAL, and any further excursion is handled by the secondary timer. If the value is still in fault when the primary countdown reaches 0 -> BP_ALARM (relay trip attributed to the primary timer). Primary and secondary are never summed.
-- If primary = 0 but secondary > 0, starts directly in BP_NORMAL on RUN.
 - Fault during BP_NORMAL starts BP_SECONDARY countdown. If fault persists through secondary, triggers BP_ALARM.
 - Fault clearing during BP_SECONDARY returns to BP_NORMAL. The secondary timer re-arms on **every** subsequent excursion -- it is not a one-shot.
 - **Primary vs secondary lifetime:** a primary window runs once per pump start (STOP -> RUN). Secondary timers run as many times as the value crosses the threshold, for as long as the pump runs.
@@ -971,11 +986,11 @@ L = Latch, P = Pulse.
 
 | Type | Name | Units | 4mA | 20mA | High SP | Low SP | Pri Hi BP | Sec Hi BP | Pri Lo BP | Sec Lo BP | Relays |
 | ---- | ---- | ----- | --- | ---- | ------- | ------ | --------- | --------- | --------- | --------- | ------ |
-| 0 Pressure | Pressure | psi | 0 | 362 | 200 | 30 | 0 | 1 | 300 | 30 | L/L/L/**P** |
-| 1 Temperature | Temperature | C | -50 | 150 | 85 | -10 | 60 | 0 | 0 | 0 | L/L/L/L |
-| 2 Flow Meter | Flow Meter | % | 0 | 100 | 0 | 0 | 0 | 0 | 30 | 30 | L/L/L/L |
-| 3 Flow Switch | Flow Switch | (none) | - | - | - | - | - | - | **30** | 0 | L/L (polarity **High**) |
-| 4 Other 4-20 | Other 4-20 | (user) | 0 | 100 | 0 | 0 | 0 | 0 | 0 | 0 | L/L/L/L |
+| 0 Pressure | Pressure | psi | 0 | 362 | 200 | 30 | **0** | **0** | 300 | 30 | L/L/L/**P** |
+| 1 Temperature | Temperature | C | -50 | 150 | **65** | **-5** | 60 | **30** | 0 | 0 | L/L/L/L |
+| 2 Flow Meter | Flow Meter | % | 0 | 100 | **85** | 0 | **10** | **2** | **900** | 30 | L/L/L/L |
+| 3 Flow Switch | Flow Switch | (none) | - | - | - | - | - | - | **10** | **5** | L/L (polarity **High**) |
+| 4 Other 4-20 | Other 4-20 | (user) | 0 | 100 | **85** | 0 | **1** | **1** | **1** | **1** | L/L/L/L |
 | 5 Other Switch | Other Sw | (none) | - | - | 0 | - | 0 | 0 | 0 | 0 | L/L/L/L |
 | 6 **Watch Dog** | Watch Dog | (none) | - | - | - | - | - | - | **1800** (30:00) | **300** (5:00) | L/L/L/**P** |
 

@@ -4,7 +4,7 @@ Running list of things to fix or validate before release. Worked through one at
 a time; move an item to **Done** with the revision it landed in, or to
 **Decided** if the answer was "leave it".
 
-Last updated: 2026-09-01 · firmware Ver 3 Rev 89
+Last updated: 2026-09-01 · firmware Ver 3 Rev 93
 
 ---
 
@@ -26,19 +26,9 @@ These are written and building, but unproven on a board. Highest risk first.
       the likely cause but was not proven.
 - [ ] **Watch Dog against a real receiver.** Confirm the pulse width the radio
       receiver actually produces is caught reliably by the 1 ms ISR sampling.
-- [ ] **`ADC_VREF_MV` on the replacement PIC.** 4119 was calibrated against the
-      *old* chip's FVR. Part-to-part tolerance shifts both the pressure readings
-      and the supply trip point together. Re-check 20.00 mA against the loop
-      tester — one measurement confirms both.
 ---
 
 ## Decisions needed
-
-- [ ] **Sensor-type defaults for types 2–5 are placeholders.** (0 Pressure and
-      1 Temperature are confirmed - Temperature fine-tuned in Rev 73.) Flow Meter, Flow
-      Switch, Other 4-20, Other Switch. Types 3–5 currently have **all bypass
-      timers 0**, which means "not monitored" — such an input cannot trip the
-      pump at all until timers are set deliberately.
 
 ---
 
@@ -97,6 +87,21 @@ These are written and building, but unproven on a board. Highest risk first.
       anything above 02:00 wrapped: 05:00 saved as **44 seconds** while the menu
       still read 05:00. Now clamped in the editor (so it stops at 02:00 under
       the operator's hand) and again on save. Found by inspection, not testing.
+- [x] **4-20mA loops validated** — 2026-09-02. Checked against a proper loop
+      tester on the replacement PIC: correct across the range and unaffected
+      by supply voltage, which also confirms `ADC_VREF_MV` 4119 still holds
+      for this part and that the FVR reference is doing its job (readings do
+      not track the 5V rail).
+- [x] **Bypass timer semantics** — Rev 91-92. `0` is now a DELAY of zero and
+      nothing else. It used to also mean "not monitored" when the setpoint was
+      0 as well, so an operator setting both timers to 0 for a faster trip got
+      no protection instead. Attribution fixed too: a fault present at pump
+      start now reports the PRIMARY code, not the secondary. Both verified on
+      hardware 2026-09-02.
+- [x] **Sensor-type defaults settled** — Rev 90-93. Pressure high pair 0/0,
+      Temperature 65/-5 with SHTBP 30, Flow Meter high 85 + 10/2, Flow Switch
+      10/5, Other 4-20 high 85 with all timers 1. The 85s are forcing
+      functions: an unconfigured input must not sit silently unmonitored.
 - [x] **RTC plausibility + Timer0 fallback** — Rev 80-82. Timer0 bounds the RTC
       and vice versa; `RTC Fail` latches on no tick for 2s or a flood, and the
       1s tick then comes from Timer0 so bypass protection keeps running.
