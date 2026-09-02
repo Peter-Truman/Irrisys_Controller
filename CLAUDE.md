@@ -46,6 +46,11 @@ Communication: Main -> Display via serial (19200 baud, 8N1)
 | 2026-08-21 | Main    | Ver 3 Rev 2 | Versioning scheme -> `Ver N Rev N`; LCD cleared at top of `main()`; splash is "Irrisys PumpGuard" / version on lines 2-3; Pressure defaults corrected (20mA=362, SHPBP=1s, Rly SLPBP=Pulse); factory defaults now derived from `sensor_type_defaults[]` |
 | 2026-08-21 | Main    | Ver 3 Rev 4 | Main screen: input line flashes while a bypass timer counts, stopping when the value is OK |
 | 2026-08-21 | Main    | Ver 3 Rev 5 | Main screen: disabled inputs show "Not Used" |
+| 2026-09-02 | Main    | Ver 3 Rev 88-89 | **Fault Log in UTILITY.** Same record as the boot dump, on the screen - which covers the common case that the display still works and someone on the phone needs to read out what the box has been through. One entry per line, scrolled with the encoder, clamped at both ends: `Boots`, `Brown Out`, `Int Error`, `RTC Fail`, `Low Volts`, `Loop In1/2/3`, then each recorded stop code oldest-first and numbered. **Viewer only - no clear function**, since a log the operator can clear is one that gets cleared before it is read. UTILITY 7 -> 8 items, so About/Back/EXIT shifted to 5/6/7 ([C8] renumbering). Fixed: the log bytes were padding until Rev 85, so on existing units they read erased EEPROM - every counter showed **255**; now zeroed once, detected via `boot_count == 0xFFFF` |
+| 2026-09-02 | Main    | Ver 3 Rev 85-87 | **Failure log.** Units ship sealed, so the debug UART is a bench-only channel and a live stream is worthless - an event printed in January is long gone before the unit reaches the bench. 18 bytes inside the existing `system_config` padding hold counters plus a ring of the last 8 stop codes, dumped at boot. Written from **one** hook that watches state transitions, not from each of the five sites that set a stop code, so a sixth site cannot be missed. **Survives a factory reset on purpose**: a user is quite likely to be told to try a reset before returning a unit, which is exactly when the history matters. `System Started` added as the first line out of the port |
+| 2026-09-02 | Main    | Ver 3 Rev 83-84 | **Boot trimmed to a 5s budget; debug instrumentation removed.** The splash now holds until `BOOT_SPLASH_MS` total from power-up rather than a flat 5s on top of ~1.6s of init, so it absorbs init cost instead of adding to it. The debug EEPROM dump moved out of the pre-splash path (~1.3s at 9600 baud) and was then deleted along with the 4Hz `DEBUG_STREAM` heartbeat and six bring-up trace lines. Program 93.6% -> **89.7%** |
+| 2026-09-02 | Main    | Ver 3 Rev 80-82 | **RTC plausibility check + Timer0 fallback.** Timer0 and the RTC are independent clocks and neither checked the other. No tick for 2s, or more than 20 ticks in a 10s Timer0 window, latches `RTC Fail`. Both directions are silent and both matter: no tick freezes every bypass countdown, while an unconfigured RV-3028 at 32.768kHz makes a 5:00 bypass expire in ~9ms. Naming the fault is not enough on a protection device, so the 1s tick then falls back to **Timer0** - protection keeps running and it is the runtime figure that becomes approximate, which is the right way round. Line 1 alternates `RTC Fail` / `PIC Clock` so both facts reach the operator. Fixed a false positive: a 1s rate window mistook the drained boot backlog for a flood |
+| 2026-09-02 | Main    | Ver 3 Rev 75-79 | **RTC driver reworked; part detected at runtime.** A bus scan settled which RTC is fitted: **0x68 answers, nothing at 0x52**, so the Rev 1 development board carries the DS3231MZ+ its BOM specifies. Its control write (`0x0E = 0x00`) is not housekeeping - the power-on default leaves SQW in alarm mode with **no square wave**, so that write IS the timebase. It was briefly deleted as dead code in Rev 75 and survived only because the register is held up by the backup cell; restored in Rev 77. `rtc_init()` now detects the part by address - **0x68 DS3231 (Rev 1), 0x52 RV-3028 (Rev 2)** - so one hex file serves both boards rather than adding a second thing to match by hand. Both paths verify rather than assume: DS3231 reads its control register back and reports the OSF oscillator-stop flag; RV-3028 reads CLKOUT `35h`, writes only if it differs (finite EEPROM endurance), then forces a refresh and re-reads to prove the value reached EEPROM and not just the RAM mirror. **A factory-default RV-3028 does not go silent - it drives 32.768kHz**, the opposite failure to the DS3231 and the more dangerous one. Sequence, bit layout and manual citations in [Docs/RV3028_CLKOUT.md](Docs/RV3028_CLKOUT.md) |
 | 2026-09-01 | Main    | Ver 3 Rev 71 | **Dead DIG2-4 fault feature removed.** A second, unreachable design for the same three pins: per-input enable / polarity / relay mode (EEPROM 32-40), a `menu 6` screen and stop codes 10-12. Nothing ever set `current_menu = 6`, and no main-loop code read the config bytes. The pins already belong to the sensor inputs via `read_digital_input()`, so wiring it up would have double-booked them - two fault paths on one contact with different polarity and relay settings. Bytes kept as `reserved_dig_cfg[9]` so `system_config_t` stays 128 and stored configs still load. `OPT_DIG_POLARITY` deliberately KEPT in `menu_item_options[]`: that array is indexed positionally, so deleting a row would shift every list after it. Program 91.1% -> **88.8%**, data 73.8% -> **72.7%** |
 | 2026-09-01 | Main    | Ver 3 Rev 70 | **Fix: Units opened the character editor on every analog type.** The units row was tagged `FT_CUSTOM_UNITS` for Pressure, Temperature and Flow Meter as well as Oth 4-20, so selecting Units gave the 3-character alphabet editor (`< Short=OK Long=X`) and the psi/bar/kPa, C/F and flow lists were **unreachable dead code**. A Pressure input could be labelled any three letters at all. Units are now an option list for types 0/1/2 and free text only for Oth 4-20; an unrecognised stored unit falls back to the first option. Flow list is now `%` / `LpM` / `LpS` |
 | 2026-09-01 | Main    | Ver 3 Rev 69 | **Fix: short beeps truncated long ones.** The menu tick (`beep(1)`, fired on EVERY encoder detent) overwrote the buzzer sequencer, so the next detent after a range-limit beep reset `buzzer_ms` from 300 to 1 and cut it off. Turning slowly the beep completed; spinning fast enough to engage acceleration clipped it to a click, which read as the limit beep being inconsistent. `beep()` now ignores a request shorter than the time left on an in-progress beep - length stands in for priority (tick 1ms < button 50ms < limit 300ms < stop 500ms). `beep_double()` is unaffected and still preempts, which is correct: fault-ack and menu-timeout outrank a tick |
@@ -536,7 +541,20 @@ The main loop is non-blocking and driven by two interrupt-sourced flags:
 
 ### ISR Structure (encoder.c)
 
-Single ISR (`__interrupt()`) with no priority levels (no IPEN). Handles:
+**Two prioritised ISRs** (`encoder.c`), `IPEN = 1`:
+
+| ISR | Source | Priority | Work |
+| --- | ------ | -------- | ---- |
+| `isr_high` | INT0 (RTC 1Hz on RB0) | **High** | Increment `rtc_tick_count` and return. |
+| `isr_low` | Timer0 (1ms) | Low (`TMR0IP = 0`) | Encoder decode, button FSM, buzzer sequencer, 50ms subtick, menu timeout, watchdog edge capture. |
+
+**INT0 has no priority bit on the PIC18** - it is fixed high priority whenever
+`IPEN = 1`. That is the ordering we want: the safety-critical 1Hz tick that
+drives every bypass countdown is serviced immediately and cannot be delayed by
+the much longer encoder/button ISR. The cost is one preemption per second, of a
+handler a few instructions long.
+
+Handles:
 - **Timer0** (1ms): Encoder polling, button debounce/hold detection, `subtick_flag` every 50ms, menu timeout
 - **INT0** (RTC 1Hz): Sets `rtc_tick_flag`
 
@@ -842,7 +860,15 @@ Linear interpolation: adc_to_eng(counts, scale_4ma, scale_20ma)
 | 41-47  | uint8[7]  | reserved_digital    | Future digital config                            |
 | 48-49  | uint16    | log_entries         | Retained log entries. Default 25, NOT menu-adjustable |
 | 50-63  | uint8[14] | reserved_log        | Future logging config                            |
-| 64-127 | uint8[64] | padding             | Expansion space                                  |
+| 64-65  | uint16    | boot_count          | Power-ups (saturating). 0xFFFF = region never written |
+| 66     | uint8     | cnt_brownout        | Brown-out resets                                 |
+| 67     | uint8     | cnt_int_error       | Watchdog / internal-error resets                 |
+| 68     | uint8     | cnt_rtc_fault       | Timebase judged implausible                      |
+| 69     | uint8     | cnt_low_volts       | Supply guard trips                               |
+| 70-72  | uint8[3]  | cnt_loop_fault      | NAMUR loop faults, per input                     |
+| 73-80  | uint8[8]  | stop_ring           | Last 8 stop codes, oldest overwritten            |
+| 81     | uint8     | stop_ring_pos       | Next write position (also the oldest entry)      |
+| 82-127 | uint8[46] | padding             | Expansion space                                  |
 
 ### Event Log
 
@@ -1032,6 +1058,7 @@ CLOCK CONFIG (current_menu = 3, from SETUP > Clock)
 UTILITY (current_menu = 4, from OPTIONS > Utility Menu)
   |- View Log / Clear Log
   |- Menu T/O / Pwr Detect / Brightness / Rly Dwell
+  |- Fault Log -> FAULT LOG viewer (menu 8)
   |- About   -> re-shows the splash for 5s
   |- Back    -> OPTIONS
   +- EXIT    -> Main screen

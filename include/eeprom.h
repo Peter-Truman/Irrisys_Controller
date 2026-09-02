@@ -90,7 +90,25 @@ typedef struct
     uint8_t reserved_log[14];
 
     // Padding to 128 bytes
-    uint8_t padding[64];
+    // ---- Failure log, offsets 64-81 ---------------------------------
+    // Read over the debug connector on a unit returned for repair. Units are
+    // sealed, so this is the ONLY diagnostic path once a display has failed -
+    // and a display failure is undetectable from this end, because the link to
+    // the display board is one-way with no ACK.
+    //
+    // Counters and a short ring, NOT a journal. The event log removed in Rev 36
+    // was abandoned for the weight of its on-screen VIEWER - menu items, index
+    // renumbering, an external EEPROM - not for the value of the record. This
+    // keeps the record and none of the viewer.
+    uint16_t boot_count;         // 64-65  power-ups, saturating
+    uint8_t  cnt_brownout;       // 66     RCON said brown-out
+    uint8_t  cnt_int_error;      // 67     RCON said watchdog / internal error
+    uint8_t  cnt_rtc_fault;      // 68     timebase judged implausible
+    uint8_t  cnt_low_volts;      // 69     supply guard tripped
+    uint8_t  cnt_loop_fault[3];  // 70-72  NAMUR open/short, per input
+    uint8_t  stop_ring[8];       // 73-80  last 8 stop codes, oldest overwritten
+    uint8_t  stop_ring_pos;      // 81     next write position, 0-7
+    uint8_t  padding[46];        // 82-127
 } system_config_t;
 
 // EEPROM addresses

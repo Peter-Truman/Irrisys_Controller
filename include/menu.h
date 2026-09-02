@@ -98,6 +98,7 @@ void menu_draw_setup(void);
 void menu_draw_clock(void);
 void menu_draw_main_menu(void);
 void menu_draw_utility(void);
+void menu_draw_fault_log(void);
 void menu_update_edit_value(void);
 void menu_handle_encoder(int16_t delta);
 void menu_handle_button(uint8_t press_type);

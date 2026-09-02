@@ -4,7 +4,7 @@ Running list of things to fix or validate before release. Worked through one at
 a time; move an item to **Done** with the revision it landed in, or to
 **Decided** if the answer was "leave it".
 
-Last updated: 2026-09-01 · firmware Ver 3 Rev 73
+Last updated: 2026-09-01 · firmware Ver 3 Rev 89
 
 ---
 
@@ -12,6 +12,18 @@ Last updated: 2026-09-01 · firmware Ver 3 Rev 73
 
 These are written and building, but unproven on a board. Highest risk first.
 
+- [ ] **RV-3028 path has never run on a PIC.** Written in Rev 79 from the
+      bench-proven sequence in Docs/RV3028_CLKOUT.md, but this board has a
+      DS3231, so the branch is unreachable here and untested end to end.
+      Test on Rev 2 bring-up, or by putting one RV-3028 on this bus.
+      Also confirm the reasoned-but-unobserved claim in that document: an
+      unconfigured RV-3028 feeds **32.768 kHz** into INT0, which shares the
+      single non-prioritised ISR with the 1 ms Timer0 poll - about one
+      interrupt every 244 instruction cycles. Whether the main loop still
+      runs under that load determines what a field failure looks like.
+      That document also records one **unexplained** bench result: a first
+      board never showed 1 Hz despite correct registers. Probe contact is
+      the likely cause but was not proven.
 - [ ] **Watch Dog against a real receiver.** Confirm the pulse width the radio
       receiver actually produces is caught reliably by the 1 ms ISR sampling.
 - [ ] **`ADC_VREF_MV` on the replacement PIC.** 4119 was calibrated against the
@@ -22,22 +34,6 @@ These are written and building, but unproven on a board. Highest risk first.
 
 ## Decisions needed
 
-- [ ] **The RTC driver targets the wrong part.** The fitted device is an
-      **RV-3028-C7** (Micro Crystal, 1ppm TCXO) at I2C **0x52**; `rtc.h` still
-      defines `RTC_I2C_ADDR 0x68` and `rtc_init()` writes DS3231 control
-      register `0x0E = 0x00` to enable the 1Hz SQW. That write cannot be ACKed
-      by an RV-3028, so **`rtc_init()` is inert** and the 1Hz reaching RB0 must
-      be coming from the RTC's own non-volatile CLKOUT configuration, not from
-      anything the firmware does.
-      **Why it matters:** a replacement RTC fitted with factory-default CLKOUT
-      would not produce 1Hz, and the failure would present as a firmware fault
-      - no clock, no bypass countdowns. Confirm by reading the boot line on the
-      debug UART: `RTC OK` or `RTC FAIL`. Fix is to rewrite `rtc.c` for the
-      RV-3028 so a fresh part configures itself.
-
-- [ ] **Is the PCA9535 still fitted?** If not, `pca9535.c` goes entirely — only
-      `init`, `led_init` and `led_test` are called, and CLAUDE.md already calls
-      the part legacy.
 - [ ] **Sensor-type defaults for types 2–5 are placeholders.** (0 Pressure and
       1 Temperature are confirmed - Temperature fine-tuned in Rev 73.) Flow Meter, Flow
       Switch, Other 4-20, Other Switch. Types 3–5 currently have **all bypass
@@ -65,28 +61,13 @@ These are written and building, but unproven on a board. Highest risk first.
 
 ---
 
-## Dead code to remove
-
-Compiler-confirmed unused. Cosmetic, but it is 12 functions of noise in a
-codebase about to be handed over.
-
-- [ ] `rtc.c` — `rtc_read_register`, `bcd_to_dec`, `dec_to_bcd`, `rtc_set_time`,
-      `rtc_read_time`. **The entire RTC time API is unused**: the DS3231 is only
-      a 1 Hz interrupt source. Worth asking whether a battery-backed RTC is
-      still the right part for that job.
-- [ ] `pca9535.c` — `read_register`, `write_register`, `led_on`, `led_off`,
-      `led_set`, `led_toggle`, `update_power_led` (see decision above).
-- [ ] `i2c.c` — `i2c_restart`, `i2c_read`.
-- [ ] `lcd.c` — `disp_set_contrast`.
-- [ ] `menu.c` — `lcd_clear_line`.
-
----
-
 ## Housekeeping
 
-- [ ] **`init_numeric_editor` is now dead** (compiler-confirmed). The three-digit
-      editor has no remaining callers — every field moved to whole-number or
-      two-pair editing.
+- [ ] **Strip the event-time UART lines at the release build.** Units ship
+      sealed, so anything printed when an event happens goes into a
+      disconnected connector and is never read. Only the BOOT-time output
+      (banner, RTC report, fault log) is ever seen, because that is when a
+      returned unit is powered up on the bench. Worth ~1% of program space.
 - [ ] **Reset `FW_REVISION` to 0** immediately before the release build.
 - [ ] **`build.bat` (MELabs) should probably be deleted.** The U2's Vpp driver
       is dead (7 V against the 8–9 V required); leaving the script invites
@@ -116,6 +97,43 @@ codebase about to be handed over.
       anything above 02:00 wrapped: 05:00 saved as **44 seconds** while the menu
       still read 05:00. Now clamped in the editor (so it stops at 02:00 under
       the operator's hand) and again on save. Found by inspection, not testing.
+- [x] **RTC plausibility + Timer0 fallback** — Rev 80-82. Timer0 bounds the RTC
+      and vice versa; `RTC Fail` latches on no tick for 2s or a flood, and the
+      1s tick then comes from Timer0 so bypass protection keeps running.
+      Line 1 alternates `RTC Fail` / `PIC Clock`.
+- [x] **Boot trimmed to a 5s budget** — Rev 83. The splash absorbs init cost
+      rather than adding to it, so changes to init no longer lengthen the boot.
+- [x] **Debug instrumentation removed** — Rev 84. `DEBUG_STREAM` heartbeat,
+      EEPROM dump and six trace lines. Program 93.6% -> 89.7%.
+- [x] **Failure log** — Rev 85-89. 18 bytes in existing padding; counters plus
+      the last 8 stop codes, dumped at boot AND viewable in UTILITY > Fault
+      Log. Survives a factory reset deliberately. Fixed the unwritten region
+      reading 255 on units configured before Rev 85.
+- [x] **RTC driver reworked for both boards** — Rev 77-79. A bus scan settled
+      which part is fitted: **0x68 answers, nothing at 0x52**, so this Rev 1
+      board carries the DS3231MZ+ the BOM says, and `rtc_init()` was never
+      inert - its control write is what creates the timebase. (I had claimed
+      the opposite and deleted it in Rev 75; it survived only because the
+      register is held up by the backup cell. Restored.)
+      The driver now **detects the part at runtime** - 0x68 DS3231 (Rev 1),
+      0x52 RV-3028 (Rev 2) - so one hex file runs on both boards and nobody
+      has to match a build to a board by hand, which is the one defence the
+      4-20mA burden hazard has and is easy to get wrong twice.
+      Both paths verify: DS3231 reads its control register back and reports
+      OSF; RV-3028 reads CLKOUT, writes only if it differs (finite EEPROM
+      endurance), then forces a refresh and re-reads to prove the value
+      reached EEPROM rather than only the RAM mirror. Single-byte command
+      `21h`, not the block update - it cannot reach the password registers.
+      Sequence and citations: [Docs/RV3028_CLKOUT.md](Docs/RV3028_CLKOUT.md).
+- [x] **PCA9535 removed** — Rev 74. Confirmed not fitted on Ver B Rev 2.
+      `pca9535.c`/`.h` deleted, boot self-test removed, dropped from all
+      three build scripts.
+- [x] **Dead functions removed** — Rev 74. The whole RTC time API, plus
+      `i2c_restart`, `i2c_read`, `disp_set_contrast`, `lcd_clear_line`,
+      `init_numeric_editor` and every matching header declaration. No
+      "never called" warnings remained. **`i2c_read` and `i2c_restart` were
+      then restored in Rev 77** - reading an RTC register needs both. A fair
+      argument for doing the dead-code sweep last, not mid-stream.
 - [x] **DIG2-DIG4 dead feature removed** — Rev 71. Not a choice in the end:
       the pins already belong to the sensor inputs via `read_digital_input()`,
       so wiring up the second design would have double-booked them - two fault

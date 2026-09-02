@@ -2,7 +2,7 @@
  * IRRISYS - Full System with Buffered LCD
  * PIC18F26K22 @ 32MHz
  *
- * Version: Ver 3 Rev 74
+ * Version: Ver 3 Rev 89
  *   - Ver 3 = Product/firmware version
  *   - Rev 63 = Incremented on every change; reset to 0 prior to release
  *
@@ -13,7 +13,7 @@
  */
 
 #define FW_VERSION  3     // Product/firmware version
-#define FW_REVISION 74     // Incremented every change; reset to 0 before release
+#define FW_REVISION 89     // Incremented every change; reset to 0 before release
 
 #include "../include/config.h"
 #include "../include/encoder.h"
@@ -34,6 +34,7 @@ extern void menu_update_edit_value(void);
 extern void handle_time_rotation(int8_t direction);
 extern void menu_update_time_value(void);
 extern void menu_draw_utility(void);
+extern void menu_draw_fault_log(void);
 extern void menu_draw_main_menu(void);
 
 // Relay pulse control
@@ -155,7 +156,11 @@ void system_init(void)
     RELAY2_TRIS = 0;
     RELAY2_PIN = 0;
 
-    // EEPROM write protect (RC2)
+    // RC2: M24M01 write protect on Rev 1 boards. Rev 2 deletes the EEPROM
+    // and leaves RC2 UNCONNECTED, so this becomes a driven output going
+    // nowhere - harmless, and cheaper than another board-revision test.
+    // Nothing has written to that EEPROM since the event log was removed
+    // in Rev 36; the pin is held low only so a stray write cannot occur.
     EEPROM_WP_TRIS = 0;
     EEPROM_WP = 0;
 
@@ -283,44 +288,21 @@ static void check_factory_reset_gesture(void);  // defined below main()'s helper
 // ---------------------------------------------------------------------------
 static uint16_t read_vdd_mv(void);   // defined with the ADC driver below
 
-#define DEBUG_STREAM     1
-#define DEBUG_STREAM_MS  250
 
-#if DEBUG_STREAM
-static uint16_t dbg_seq = 0;
-static uint16_t dbg_adc[3] = {0, 0, 0};   // snapshot of the main loop locals
-static uint8_t  dbg_ready = 0;            // set once the UART is initialised
 
-static void debug_heartbeat(void)
-{
-    char b[48];
-    if (!dbg_ready) return;
-    sprintf(b, "#%05u V=%u R=%u A=%04u,%04u,%04u",
-            dbg_seq++, read_vdd_mv(), (unsigned)(RELAY1_PIN ? 1 : 0),
-            dbg_adc[0], dbg_adc[1], dbg_adc[2]);
-    uart_println(b);
-}
-#endif
+// Milliseconds spent in blocking boot waits. Used to hold the splash for a
+// TOTAL of BOOT_SPLASH_MS from power-up rather than for a fixed period on top
+// of everything else - so if the pre-splash work grows, the hold shrinks to
+// match instead of the boot quietly getting longer.
+static uint16_t boot_ms = 0;
 
 static void delay_ms_wdt(uint16_t ms)
 {
-#if DEBUG_STREAM
-    static uint16_t since = 0;
-#endif
+    boot_ms += ms;
     while (ms--)
     {
         CLRWDT();
         __delay_ms(1);
-#if DEBUG_STREAM
-        // Keep the stream alive through the boot waits - the 1s display
-        // wait and the 5s splash hold are otherwise dead air, and a failure
-        // in that window would be invisible.
-        if (++since >= DEBUG_STREAM_MS)
-        {
-            since = 0;
-            debug_heartbeat();
-        }
-#endif
     }
 }
 
@@ -612,6 +594,63 @@ static uint8_t sensor_fault[3] = {0, 0, 0};
 // not to be trusted. Latches an alarm in RUN, same as a broken loop.
 static uint8_t vdd_low = 0;
 static uint8_t vdd_alarm = 0;
+
+// ---------------------------------------------------------------------------
+// RTC plausibility check  [Ver 3 Rev 80]
+//
+// Timer0 and the RTC are INDEPENDENT clocks, and until now neither checked the
+// other. Timer0 runs from the PIC's internal oscillator - far too coarse to
+// time a 99-hour run, but more than accurate enough to say whether about a
+// second has passed. That is all we need to bound the RTC.
+//
+// Both failure directions are silent and both matter:
+//
+//   NO ticks    - a dead RTC, or a control write that did not take. Every
+//                 bypass countdown FREEZES. The pump keeps running with no
+//                 protection at all and nothing on screen says so.
+//   TOO MANY    - an RV-3028 left at its factory default drives 32.768kHz, not
+//                 silence. Countdowns then race: a 5:00 secondary bypass
+//                 expires in milliseconds. This is the direction the next
+//                 prototype is exposed to, since the DS3231 is being dropped.
+//
+// Neither looks like a fault from the outside, which is exactly why it is
+// worth spending a few bytes to name it.
+// ---------------------------------------------------------------------------
+#define RTC_GAP_FAULT_SUBTICKS  40   // 40 x 50ms = 2s with no tick at all
+
+// The rate check MUST be measured over a long window, not per second.
+//
+// rtc_tick_count is a saturating counter drained by the main loop, so whenever
+// the loop is blocked the ticks pile up and are all drained in one pass. That
+// is correct behaviour - no second is lost - but it means a short window sees
+// a burst and mistakes it for a flood. The 5s splash hold did exactly that and
+// flagged RTC Fail on every boot; a multi-block EEPROM save (~2s) would have
+// done it at random during normal use.
+//
+// Over ten seconds the drained count still equals elapsed seconds however the
+// loop was delayed, so the average is sound. A 32.768kHz flood saturates the
+// counter on the first pass and is still caught immediately.
+#define RTC_RATE_WINDOW_SUBTICKS 200  // 200 x 50ms = 10s of Timer0 time
+#define RTC_MAX_TICKS_PER_WINDOW  20  // 10 expected; 2x that is unambiguous
+
+static uint8_t rtc_fault = 0;          // latched: reported until acknowledged
+static uint8_t rtc_gap_subticks = 0;   // 50ms periods since the last tick
+static uint8_t rtc_rate_subticks = 0;  // 50ms periods in the current window
+                                       // (200 max, fits a byte)
+static uint8_t rtc_rate_ticks = 0;     // RTC ticks counted in that window
+static uint8_t rtc_backup_subticks = 0; // Timer0 substitute-tick divider
+static uint8_t rtc_backup_announced = 0;// one-shot debug notice
+
+// FALLBACK. Naming the fault is not enough on a protection device: with no
+// tick every bypass countdown FREEZES, so the pump runs on with no protection
+// while the screen says RTC Fail to an empty pumpshed. Once the timebase is
+// judged bad we drive the 1-second tick from Timer0 instead.
+//
+// Timer0 is the PIC's internal oscillator, roughly +/-1-2%. Hopeless for
+// billing a 99-hour run - it could be an hour out - but entirely adequate for
+// bypass timers measured in seconds and minutes. So protection keeps working
+// and it is the RUNTIME figure that is known to be suspect, which is the right
+// way round: over-running a paddock is recoverable, an unprotected pump is not.
 static uint16_t vdd_mv = 0;      // last measurement, for the debug UART
 static uint8_t sensor_alarm[3] = {0, 0, 0};  // latched: this fault stopped the pump
 
@@ -709,7 +748,13 @@ void render_main_screen(uint16_t ch1, uint16_t ch2, uint16_t ch3)
                               : wdt_reset_flag ? "Int Error"
                                                : "";
 
-        if (vdd_alarm)
+        if (rtc_fault)
+            // Alternated once a second because both facts matter and only one
+            // fits: WHAT failed, and that the box is still timing on the PIC.
+            // A farmer reporting "it says RTC Fail and PIC Clock" hands over a
+            // complete diagnosis without touching anything.
+            msg = flash_toggle ? "RTC Fail" : "PIC Clock";
+        else if (vdd_alarm)
             msg = "Low Volts";                // live: supply too low RIGHT NOW
         else if (reset_msg[0])
             msg = reset_msg;                  // why we restarted - more specific
@@ -1098,24 +1143,11 @@ static uint8_t process_watchdog(uint8_t i, bp_dir_t *dir)
     if (wdt_blank[i] > 0)
     {
         wdt_blank[i]--;
-#if DEBUG_STREAM
-        if (kicked)
-            uart_println("WDT: edge ignored (start blanking)");
-#endif
         kicked = 0;
     }
 
     if (kicked)
     {
-#if DEBUG_STREAM
-        {
-            char wb[44];
-            sprintf(wb, "WDT%u: kick in %s (was %us) -> SWDBP %us", i + 1,
-                    (dir->phase == BP_PRIMARY) ? "PWDBP" : "SWDBP",
-                    dir->countdown, swd);
-            uart_println(wb);
-        }
-#endif
         // Alive. Leave the startup window behind for good and reload the
         // running timer. If SWDBP is 0 the operator has asked for no ongoing
         // monitoring, so stop here rather than tripping at once.
@@ -1263,16 +1295,6 @@ static void init_bp_timers(uint8_t i)
         dig_edge_fall[i] = 0;
         INTCONbits.GIE = 1;
 
-#if DEBUG_STREAM
-        {
-            char wb[40];
-            sprintf(wb, "WDT%u: start %s %us", i + 1,
-                    (bp_state[i].low.phase == BP_PRIMARY) ? "PWDBP"
-                    : (bp_state[i].low.phase == BP_SECONDARY) ? "SWDBP" : "OFF",
-                    bp_state[i].low.countdown);
-            uart_println(wb);
-        }
-#endif
     }
     // Low direction: always monitor if input is enabled
     else if (input_config[i].primary_low_bypass > 0)
@@ -1381,75 +1403,14 @@ static void start_alarm_buzzer(void)
 //
 // Costs ~1.3s of boot time at 9600 baud. Set to 0 to disable.
 // ============================================================================
-#define DEBUG_EEPROM_DUMP 1
 
-#if DEBUG_EEPROM_DUMP
-extern uint16_t calculate_config_checksum(void);
-extern uint16_t eeprom_read_word(uint16_t address);
-
-static void dump_eeprom_config(void)
-{
-    char b[64];
-
-    uart_println("");
-    uart_println("===== EEPROM CONFIG DUMP =====");
-
-    uart_println("[SYSTEM]");
-    sprintf(b, "  clock_en=%u  menu_timeout=%u  end_rt_mode=%u",
-            system_config.clock_enabled, system_config.menu_timeout,
-            system_config.end_runtime_mode);
-    uart_println(b); CLRWDT();
-    sprintf(b, "  runtime=%u:%02u  relay_pulse=%us",
-            system_config.runtime_hours, system_config.runtime_minutes,
-            system_config.relay_pulse_time);
-    uart_println(b); CLRWDT();
-    sprintf(b, "  contrast=%u  brightness=%u  pwr_fail_delay=%us",
-            system_config.contrast, system_config.brightness,
-            system_config.power_fail_delay);
-    uart_println(b); CLRWDT();
-    sprintf(b, "  pwr_fail_flag=%u  active_stop_code=%u",
-            system_config.power_failure_flag, system_config.active_stop_code);
-    uart_println(b); CLRWDT();
-
-    for (uint8_t i = 0; i < 3; i++)
-    {
-        sprintf(b, "[INPUT %u] name='%s' units='%s'",
-                i + 1, input_config[i].name, input_config[i].units);
-        uart_println(b); CLRWDT();
-        sprintf(b, "  enable=%u  sensor=%u  fault_pol=%u",
-                input_config[i].enable, input_config[i].sensor_type,
-                input_config[i].fault_polarity);
-        uart_println(b); CLRWDT();
-        sprintf(b, "  scale 4mA=%d  20mA=%d",
-                input_config[i].scale_4ma, input_config[i].scale_20ma);
-        uart_println(b); CLRWDT();
-        sprintf(b, "  setpoint HI=%d  LO=%d",
-                input_config[i].high_setpoint, input_config[i].low_setpoint);
-        uart_println(b); CLRWDT();
-        sprintf(b, "  bypass PriHi=%u SecHi=%u PriLo=%u SecLo=%u",
-                input_config[i].primary_high_bypass, input_config[i].secondary_high_bypass,
-                input_config[i].primary_low_bypass, input_config[i].secondary_low_bypass);
-        uart_println(b); CLRWDT();
-        sprintf(b, "  relay PriHi=%u SecHi=%u PriLo=%u SecLo=%u  (0=Latch 1=Pulse)",
-                input_config[i].relay_pri_high_mode, input_config[i].relay_sec_high_mode,
-                input_config[i].relay_pri_low_mode, input_config[i].relay_sec_low_mode);
-        uart_println(b); CLRWDT();
-    }
-
-    // Checksum health: stored (in EEPROM) vs freshly computed over the EEPROM
-    // image. MISMATCH => config was corrupt at boot and factory defaults loaded.
-    uint16_t stored = eeprom_read_word(EEPROM_CHECKSUM_ADDR);
-    uint16_t calc   = calculate_config_checksum();
-    sprintf(b, "  checksum stored=0x%04X calc=0x%04X  %s",
-            stored, calc, (stored == calc) ? "MATCH" : "*** MISMATCH ***");
-    uart_println(b); CLRWDT();
-    uart_println("==============================");
-    uart_println("");
-}
-#endif
 
 // Hold the button this long at power-up to wipe to factory defaults.
 // Long enough that nobody does it by accident while handling the unit.
+// Total time from power-up to the main screen. The splash absorbs whatever is
+// left after init, so this is the whole boot budget, not an extra delay.
+#define BOOT_SPLASH_MS 5000
+
 #define FACTORY_HOLD_SECS 5
 
 // Second hold, after the consequence is spelled out. Two deliberate
@@ -1558,6 +1519,88 @@ static void check_factory_reset_gesture(void)
     lcd_flush();
 }
 
+// ---------------------------------------------------------------------------
+// Failure log
+//
+// Sealed units mean the debug UART is a bench-only channel, so a live stream
+// is worth nothing: an event printed in January is gone long before the unit
+// reaches the bench in March. What survives is what was WRITTEN DOWN.
+//
+// Everything here is driven by watching state TRANSITIONS from one place,
+// rather than by calling a logger at each of the five sites that set a stop
+// code. One hook cannot be forgotten when a sixth site is added.
+// ---------------------------------------------------------------------------
+static void sat_inc(uint8_t *c)
+{
+    if (*c < 255) (*c)++;
+}
+
+static void fault_log_update(void)
+{
+    static uint8_t last_stop = 0;
+    static uint8_t last_rtc  = 0;
+    static uint8_t last_vdd  = 0;
+    uint8_t changed = 0;
+
+    uint8_t code = system_config.active_stop_code;
+    if (code != 0 && code != last_stop)
+    {
+        system_config.stop_ring[system_config.stop_ring_pos & 7] = code;
+        system_config.stop_ring_pos = (uint8_t)((system_config.stop_ring_pos + 1) & 7);
+
+        // Codes 20-22 are the NAMUR loop faults, one per input. Counting them
+        // from the stop code avoids a second hook that could drift out of step.
+        if (code >= 20 && code <= 22)
+            sat_inc(&system_config.cnt_loop_fault[code - 20]);
+
+        changed = 1;
+    }
+    last_stop = code;
+
+    if (rtc_fault && !last_rtc) { sat_inc(&system_config.cnt_rtc_fault); changed = 1; }
+    last_rtc = rtc_fault;
+
+    if (vdd_alarm && !last_vdd) { sat_inc(&system_config.cnt_low_volts); changed = 1; }
+    last_vdd = vdd_alarm;
+
+    // Deferred like every other config write, so this never sits in the
+    // safety path - main() writes EEPROM after bypass processing.
+    if (changed)
+        system_config_dirty = 1;
+}
+
+static void fault_log_report(void)
+{
+    char b[52];
+
+    sprintf(b, "LOG boots=%u BOR=%u IntErr=%u RTC=%u LowV=%u",
+            system_config.boot_count, system_config.cnt_brownout,
+            system_config.cnt_int_error, system_config.cnt_rtc_fault,
+            system_config.cnt_low_volts);
+    uart_println(b);
+
+    sprintf(b, "LOG loop faults in1=%u in2=%u in3=%u",
+            system_config.cnt_loop_fault[0], system_config.cnt_loop_fault[1],
+            system_config.cnt_loop_fault[2]);
+    uart_println(b);
+
+    // Oldest first, so the sequence reads left to right.
+    {
+        char *q = b;
+        uint8_t i;
+        sprintf(q, "LOG last stops:");
+        q += 15;
+        for (i = 0; i < 8; i++)
+        {
+            uint8_t code = system_config.stop_ring[(system_config.stop_ring_pos + i) & 7];
+            if (code == 0) continue;
+            sprintf(q, " %u", code);
+            q += (code > 9) ? 3 : 2;
+        }
+        uart_println(b);
+    }
+}
+
 void main(void)
 {
     // Capture the reset cause BEFORE the first CLRWDT (which sets /TO).
@@ -1591,10 +1634,14 @@ void main(void)
     CLRWDT();  // [R5] Fresh watchdog window for the whole boot sequence
     system_init();
     uart_init();
-#if DEBUG_STREAM
-    dbg_ready = 1;      // stream from the earliest possible moment
-    debug_heartbeat();
-#endif
+
+    // First thing out of the port, before any other init can fail or block.
+    // Doubles as a link test: with the 4Hz debug heartbeat removed, ALL output
+    // now happens in the first few seconds of boot and then stops, so a
+    // terminal opened after power-up sees complete silence. Seeing this line
+    // proves the cable, the baud rate and the port are right.
+    uart_println("");
+    uart_println("System Started");
 
     // Clear the display as early as possible. EUSART1 is already configured by
     // system_init(), so the clear goes out ahead of EEPROM/I2C/RTC init rather
@@ -1640,15 +1687,11 @@ void main(void)
     // Initialize I2C bus
     i2c_init();
 
-    // Initialize RTC
-    if (rtc_init() == 0)
-    {
-        uart_println("RTC OK");
-    }
-    else
-    {
-        uart_println("RTC FAIL");
-    }
+    // RTC - 1Hz timebase into RB0/INT0, which drives the runtime clock and
+    // every bypass countdown. The scan lists what is really on the bus; the
+    // init enables the square wave and reads the register back to prove it.
+    rtc_scan();
+    rtc_init();
 
     // Initialize encoder and menu
     encoder_init();
@@ -1664,13 +1707,35 @@ void main(void)
         uart_println(rb);
     }
 
-    uart_println("Peripherals initialized");
-
-#if DEBUG_EEPROM_DUMP
-    dump_eeprom_config();  // full persisted-config dump for power-cycle verification
-#endif
 
     // Confirm relay initial state (energized = closed)
+    // Record the power-up and the reset cause, then show what the unit has
+    // been through. This is the whole point of the log: it prints at boot,
+    // which is exactly when a returned unit is sitting on the bench.
+    // The log lives in bytes that were padding until Rev 85, so on any unit
+    // configured before that they are erased EEPROM - 0xFF - and every counter
+    // reads 255. Zero them once, using boot_count as the marker: a real unit
+    // cannot reach 65535 power-ups, so that value can only mean "never written".
+    if (system_config.boot_count == 0xFFFF)
+    {
+        system_config.boot_count = 0;
+        system_config.cnt_brownout = 0;
+        system_config.cnt_int_error = 0;
+        system_config.cnt_rtc_fault = 0;
+        system_config.cnt_low_volts = 0;
+        system_config.cnt_loop_fault[0] = 0;
+        system_config.cnt_loop_fault[1] = 0;
+        system_config.cnt_loop_fault[2] = 0;
+        memset(system_config.stop_ring, 0, 8);
+        system_config.stop_ring_pos = 0;
+    }
+
+    if (system_config.boot_count < 65535) system_config.boot_count++;
+    if (bor_reset_flag) sat_inc(&system_config.cnt_brownout);
+    if (wdt_reset_flag) sat_inc(&system_config.cnt_int_error);
+    system_config_dirty = 1;
+    fault_log_report();
+
     uart_println("RELAY: Closed (energized)");
 
     // Wait for the display board. It takes ~1s to boot, so the old 500ms
@@ -1697,7 +1762,7 @@ void main(void)
     for (uint8_t i = 0; i < 3; i++)
     {
         beep(50);
-        __delay_ms(100);
+        delay_ms_wdt(100);
     }
 
     // Hold the splash for 5s, re-asserting the whole screen once a second.
@@ -1708,10 +1773,19 @@ void main(void)
     // the screen would sit half-drawn for the whole hold. Same failure the
     // main loop guards against with its periodic refresh; the splash had
     // no equivalent.
-    uart_println("Splash hold 5s...");
-    for (uint8_t i = 0; i < 5; i++)
+    // Hold until BOOT_SPLASH_MS have elapsed since power-up, not for a fixed
+    // 5s on top of the ~1.6s of init that precedes it. The spec is "version
+    // visible for 5 seconds from power-up", and a fixed hold made the real
+    // figure whatever the init happened to cost that week.
     {
-        delay_ms_wdt(1000);  // [R5] WDT-fed
+        char sb[40];
+        sprintf(sb, "Splash hold to %ums (at %ums)", BOOT_SPLASH_MS, boot_ms);
+        uart_println(sb);
+    }
+    while (boot_ms < BOOT_SPLASH_MS)
+    {
+        uint16_t left = (uint16_t)(BOOT_SPLASH_MS - boot_ms);
+        delay_ms_wdt(left > 1000 ? 1000 : left);  // [R5] WDT-fed
         lcd_invalidate();    // drop the change-detection cache
         lcd_flush();         // re-send all four lines
     }
@@ -1768,9 +1842,7 @@ void main(void)
     // RTC used for 1Hz tick only (no date/time display)
 
     // Clear display board, wait 1 second, then render first main screen with debug
-    uart_println("Sending CLS to display...");
     disp_clear();
-    uart_println("CLS sent. Waiting 300ms...");
     delay_ms_wdt(300);   // [R5] WDT-fed. Was 1s — the display processes a CLEAR
                          // in ~2ms, so this was pure padding before first render.
 
@@ -1796,7 +1868,6 @@ void main(void)
     delay_ms_wdt(50);  // let the display board finish its backlight EEPROM write
 
     // Build first main screen manually with debug output
-    uart_println("Building first main screen:");
     {
         uint16_t raw0 = adc_read(0);
         uint16_t raw1 = adc_read(1);
@@ -1818,7 +1889,6 @@ void main(void)
 
         render_main_screen(raw0, raw1, raw2);
     }
-    uart_println("render_main_screen done, now force_flush:");
     lcd_force_flush();
 
     // Safety net: drop the change-detection cache so the main loop's first
@@ -1828,7 +1898,6 @@ void main(void)
     // content happened to change — which is exactly why the main screen only
     // appeared after entering and exiting a menu.
     lcd_invalidate();
-    uart_println("force_flush done.");
     render_counter = 0;  // Reset so main loop doesn't re-render immediately
 
     // Digital input edge detection (initialize to current state)
@@ -1836,6 +1905,20 @@ void main(void)
     uint8_t last_dig2 = DIG_IN2_PORT;
     uint8_t last_dig3 = DIG_IN3_PORT;
     uint8_t last_dig4 = DIG_IN4_PORT;
+
+
+    // Discard the ticks that piled up during the blocking boot sequence - the
+    // display wait, the splash hold and the EEPROM dump are all seconds long.
+    // They are real elapsed seconds, but nothing before this point consumed
+    // them, and feeding a boot-sized backlog into the plausibility check on the
+    // first pass is what made it cry RTC Fail on every startup.
+    INTCONbits.GIE = 0;
+    rtc_tick_count = 0;
+    INTCONbits.GIE = 1;
+    rtc_gap_subticks = 0;
+    rtc_rate_subticks = 0;
+    rtc_rate_ticks = 0;
+    rtc_fault = 0;
 
     while (1)
     {
@@ -2024,15 +2107,8 @@ void main(void)
                 sum2 += adc_buf[2][i];
             }
             adc_ch1 = sum0 >> ADC_AVG_SHIFT;
-#if DEBUG_STREAM
-            dbg_adc[0] = adc_ch1;
-#endif
             adc_ch2 = sum1 >> ADC_AVG_SHIFT;
             adc_ch3 = sum2 >> ADC_AVG_SHIFT;
-#if DEBUG_STREAM
-            dbg_adc[1] = adc_ch2;
-            dbg_adc[2] = adc_ch3;
-#endif
         }
         else
         {
@@ -2046,18 +2122,6 @@ void main(void)
         // 50ms sub-tick (driven by Timer0 ISR)
         // =============================================================
         if (!subtick_flag) continue;
-#if DEBUG_STREAM
-        // Heartbeat from the main loop. Driven off the 50ms subtick, so if
-        // the stream stops the main loop stopped - which is the whole point.
-        {
-            static uint8_t dbg_sub = 0;
-            if (++dbg_sub >= (DEBUG_STREAM_MS / 50))
-            {
-                dbg_sub = 0;
-                debug_heartbeat();
-            }
-        }
-#endif
         subtick_flag = 0;
 
         // [R3] Buzzer timing now lives in the 1ms Timer0 ISR (beep/beep_double),
@@ -2125,6 +2189,63 @@ void main(void)
         rtc_ticks_pending = rtc_tick_count;
         rtc_tick_count = 0;
         INTCONbits.GIE = 1;
+
+        fault_log_update();
+
+        // ---- RTC plausibility, measured against Timer0 ----------------
+        // This runs on the 50ms subtick, which is Timer0-derived and so is
+        // independent of the RTC being judged.
+        if (rtc_ticks_pending > 0)
+            rtc_gap_subticks = 0;
+        else if (rtc_gap_subticks < 255)
+            rtc_gap_subticks++;
+
+        if (rtc_gap_subticks >= RTC_GAP_FAULT_SUBTICKS)
+            rtc_fault = 1;              // no tick for 2s - countdowns frozen
+
+        // Rate window: one Timer0 second. Saturate rather than wrap, or a
+        // 32.768kHz flood would roll the counter back through the threshold.
+        if (rtc_rate_ticks < 255)
+        {
+            uint8_t add = rtc_ticks_pending;
+            if ((uint16_t)rtc_rate_ticks + add > 255) rtc_rate_ticks = 255;
+            else rtc_rate_ticks = (uint8_t)(rtc_rate_ticks + add);
+        }
+        // Tested continuously rather than only at the end of the window: a
+        // 32.768kHz flood blows the threshold within one pass, and waiting out
+        // the remaining 10s would let every countdown race in the meantime.
+        if (rtc_rate_ticks > RTC_MAX_TICKS_PER_WINDOW)
+            rtc_fault = 1;
+
+        if (++rtc_rate_subticks >= RTC_RATE_WINDOW_SUBTICKS)
+        {
+            rtc_rate_subticks = 0;
+            rtc_rate_ticks = 0;
+        }
+
+        // ---- Fall back to Timer0 while the RTC is not trusted ----------
+        // This REPLACES the RTC's contribution outright, which is what makes
+        // it work in both directions: a dead RTC supplies nothing, a flooding
+        // one supplies far too much, and neither is used while this is on.
+        if (rtc_fault)
+        {
+            if (!rtc_backup_announced)
+            {
+                rtc_backup_announced = 1;
+                uart_println("RTC FAIL - 1Hz tick now derived from Timer0");
+                uart_println("  bypass timers still run; runtime clock is approximate");
+            }
+
+            if (++rtc_backup_subticks >= 20)   // 20 x 50ms = 1s of Timer0 time
+            {
+                rtc_backup_subticks = 0;
+                rtc_ticks_pending = 1;
+            }
+            else
+            {
+                rtc_ticks_pending = 0;
+            }
+        }
         while (rtc_ticks_pending-- > 0)
         {
             flash_toggle = !flash_toggle;
@@ -2533,6 +2654,7 @@ void main(void)
             else if (current_menu == 2) menu_draw_setup();
             else if (current_menu == 3) menu_draw_clock();
             else if (current_menu == 4) menu_draw_utility();
+            else if (current_menu == 8) menu_draw_fault_log();
             else if (current_menu == 5) menu_draw_main_menu();
 
             lcd_flush();
@@ -2565,6 +2687,18 @@ void main(void)
                         system_config.active_stop_code = 0;
                         wdt_reset_flag = 0;  // [4e-2] acknowledge watchdog-reset latch
                         bor_reset_flag = 0;  // acknowledge brown-out latch
+
+                        // Acknowledging clears the RTC latch too, but the
+                        // check keeps running - if the timebase is still
+                        // wrong it re-latches within 2s and says so again.
+                        // There is no way to dismiss a fault that is still
+                        // happening, which is the point.
+                        rtc_fault = 0;
+                        rtc_gap_subticks = 0;
+                        rtc_rate_subticks = 0;
+                        rtc_rate_ticks = 0;
+                        rtc_backup_subticks = 0;
+                        rtc_backup_announced = 0;
                         vdd_alarm = 0;       // acknowledge low-supply latch
                         if (relay_state == 1)
                             relay_close();
@@ -2612,6 +2746,8 @@ void main(void)
                 else if (current_menu == 2) menu_draw_setup();
                 else if (current_menu == 3) menu_draw_clock();
                 else if (current_menu == 4) menu_draw_utility();
+                else if (current_menu == 8) menu_draw_fault_log();
+            else if (current_menu == 8) menu_draw_fault_log();
                 else if (current_menu == 5) menu_draw_main_menu();
 
                 lcd_flush();

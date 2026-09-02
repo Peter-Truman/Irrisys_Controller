@@ -79,6 +79,22 @@ uint8_t i2c_start(void)
  * Generate I2C Repeated START condition
  * Returns: 0 = success, 1 = error
  */
+uint8_t i2c_restart(void)
+{
+    if (i2c_wait_idle())
+        return 1;
+
+    SSPCON2bits.RSEN = 1; // Initiate Repeated START
+
+    uint16_t timeout = I2C_TIMEOUT;
+    while (SSPCON2bits.RSEN)
+    {
+        if (--timeout == 0)
+            return 1;
+    }
+
+    return 0;
+}
 
 /**
  * Generate I2C STOP condition
@@ -138,3 +154,39 @@ uint8_t i2c_write(uint8_t data)
  * ack: 1 = send ACK (continue reading), 0 = send NACK (stop reading)
  * Returns: received byte
  */
+uint8_t i2c_read(uint8_t ack)
+{
+    uint8_t data;
+
+    if (i2c_wait_idle())
+        return 0xFF; // Return dummy data on error
+
+    SSPCON2bits.RCEN = 1; // Enable receive mode
+
+    // Wait for byte to be received
+    uint16_t timeout = I2C_TIMEOUT;
+    while (!SSPSTATbits.BF)
+    {
+        if (--timeout == 0)
+            return 0xFF;
+    }
+
+    data = SSPBUF; // Read received data
+
+    if (i2c_wait_idle())
+        return data;
+
+    // Send ACK or NACK
+    SSPCON2bits.ACKDT = ack ? 0 : 1; // 0 = ACK, 1 = NACK
+    SSPCON2bits.ACKEN = 1;           // Send ACK/NACK
+
+    // Wait for ACK/NACK to complete
+    timeout = I2C_TIMEOUT;
+    while (SSPCON2bits.ACKEN)
+    {
+        if (--timeout == 0)
+            break;
+    }
+
+    return data;
+}

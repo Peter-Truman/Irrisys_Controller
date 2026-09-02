@@ -265,13 +265,17 @@ const menu_item_t utility_menu_template[] = {
     {"Menu T/O", NULL, 1},     // 0 - Whole seconds
     {"Pwr Detect", NULL, 1},   // 1 - Whole seconds
     {"Brightness", NULL, 1},   // 2 - Numeric
-    {"Rly Dwell", NULL, 1},    // 3 - Time MM:SS
-    {"About", NULL, 0},        // 4 - Action: re-show the splash
-    {"Back", NULL, 0},         // 5
-    {"EXIT", NULL, 0}          // 6
+    {"Rly Dwell", NULL, 1},    // 3 - Whole seconds, shown MM:SS
+    {"Fault Log", NULL, 0},    // 4 - Action: opens menu 8
+    {"About", NULL, 0},        // 5 - Action: re-show the splash
+    {"Back", NULL, 0},         // 6
+    {"EXIT", NULL, 0}          // 7
 };
 
-#define UTILITY_ITEMS 7
+// [C8] These indices are matched POSITIONALLY by save_utility_field(),
+// menu_update_edit_value() and the button handler. Inserting Fault Log at 4
+// shifted About/Back/EXIT to 5/6/7 - every one of those had to move with it.
+#define UTILITY_ITEMS 8
 menu_item_t utility_menu[UTILITY_ITEMS];
 
 // Function declarations
@@ -1097,6 +1101,120 @@ void menu_draw_main_menu(void)
     }
 }
 
+// Scroll position in the fault log list (index of the top visible row).
+uint8_t fault_log_top = 0;
+
+// ---------------------------------------------------------------------------
+// Fault log viewer (menu 8)
+//
+// Units are sealed, so the debug connector is a bench-only channel. This puts
+// the same record on the screen, which covers the far more common case: the
+// display still works and someone on the phone needs to read out what the box
+// has been through.
+//
+// ONE ENTRY PER LINE, label left and count right, scrolled with the encoder -
+// the same shape as every other list in this menu system. An earlier version
+// packed several counters onto each line to fit them on one screen and was
+// simply unreadable.
+//
+// Deliberately a VIEWER ONLY - no editing, no clearing. A log the operator can
+// clear is a log that gets cleared before anyone reads it.
+// ---------------------------------------------------------------------------
+
+#define FAULT_LOG_FIXED 8   // the named counters, before the stop-code list
+
+// How many stop codes are actually recorded (0 means an empty slot).
+static uint8_t fault_log_stop_count(void)
+{
+    uint8_t n = 0;
+    for (uint8_t i = 0; i < 8; i++)
+        if (system_config.stop_ring[i] != 0) n++;
+    return n;
+}
+
+static uint8_t fault_log_rows(void)
+{
+    return (uint8_t)(FAULT_LOG_FIXED + fault_log_stop_count());
+}
+
+// Render row `idx` as "Label            NNN" - label left, value right-aligned
+// to column 19, blanks between. Same layout as the rest of the menu system.
+static void fault_log_row(uint8_t idx, char *out)
+{
+    const char *label = "";
+    uint16_t value = 0;
+
+    memset(out, ' ', 20);
+    out[20] = ' ';
+
+    switch (idx)
+    {
+    case 0: label = "Boots";      value = system_config.boot_count; break;
+    case 1: label = "Brown Out";  value = system_config.cnt_brownout; break;
+    case 2: label = "Int Error";  value = system_config.cnt_int_error; break;
+    case 3: label = "RTC Fail";   value = system_config.cnt_rtc_fault; break;
+    case 4: label = "Low Volts";  value = system_config.cnt_low_volts; break;
+    case 5: label = "Loop In1";   value = system_config.cnt_loop_fault[0]; break;
+    case 6: label = "Loop In2";   value = system_config.cnt_loop_fault[1]; break;
+    case 7: label = "Loop In3";   value = system_config.cnt_loop_fault[2]; break;
+    default:
+        {
+            // Stop codes, OLDEST first - stop_ring_pos is where the next one
+            // goes, so it is also the oldest entry. Numbered so a caller can
+            // read them out in order over the phone.
+            uint8_t n = (uint8_t)(idx - FAULT_LOG_FIXED);
+            uint8_t seen = 0;
+            char lbl[12];
+            for (uint8_t i = 0; i < 8; i++)
+            {
+                uint8_t code = system_config.stop_ring[(system_config.stop_ring_pos + i) & 7];
+                if (code == 0) continue;
+                if (seen == n)
+                {
+                    sprintf(lbl, "Stop %u", (unsigned)(seen + 1));
+                    memcpy(out, lbl, strlen(lbl));
+                    {
+                        char vb[8];
+                        uint8_t vl = (uint8_t)sprintf(vb, "%u", code);
+                        memcpy(&out[20 - vl], vb, vl);
+                    }
+                    return;
+                }
+                seen++;
+            }
+            return;
+        }
+    }
+
+    memcpy(out, label, strlen(label));
+    {
+        char vb[8];
+        uint8_t vl = (uint8_t)sprintf(vb, "%u", value);
+        memcpy(&out[20 - vl], vb, vl);
+    }
+}
+
+void menu_draw_fault_log(void)
+{
+    char line[21];
+    uint8_t rows = fault_log_rows();
+
+    lcd_print_at(0, 0, "===== FAULT LOG ====");
+
+    for (uint8_t r = 0; r < 3; r++)
+    {
+        uint8_t idx = (uint8_t)(fault_log_top + r);
+        if (idx < rows)
+            fault_log_row(idx, line);
+        else
+        {
+            memset(line, ' ', 20);
+            line[20] = ' ';
+        }
+        lcd_print_at((uint8_t)(r + 1), 0, line);
+    }
+}
+
 void menu_draw_utility(void)
 {
     lcd_print_at(0, 0, "===== UTILITY ======");
@@ -1111,8 +1229,23 @@ void menu_draw_utility(void)
 // ENCODER HANDLING
 //=============================================================================
 
+static uint8_t fault_log_rows(void);
+
 void menu_handle_encoder(int16_t delta)
 {
+    // Fault log: rotation scrolls the list. Nothing here is editable, so it
+    // clamps at both ends rather than wrapping - a reader wants to know when
+    // they have reached the bottom.
+    if (current_menu == 8)
+    {
+        uint8_t rows = fault_log_rows();
+        uint8_t last_top = (rows > 3) ? (uint8_t)(rows - 3) : 0;
+
+        if (delta > 0 && fault_log_top < last_top) fault_log_top++;
+        else if (delta < 0 && fault_log_top > 0)   fault_log_top--;
+        return;
+    }
+
     // Name editor mode
     if (menu.name_edit_mode > 0)
     {
@@ -2427,16 +2560,29 @@ void menu_handle_button(uint8_t press_type)
         break;
     }
 
+    case 8: // Fault log viewer - any press returns to UTILITY
+        current_menu = 4;
+        menu.current_line = 4;   // back onto the Fault Log item
+        menu.top_line = 2;
+        menu.total_items = UTILITY_ITEMS;
+        break;
+
     case 4: // UTILITY menu
     {
         uint8_t line = menu.current_line;
-        if (line == 4) // About - re-show the splash for a few seconds
+        if (line == 4) // Fault Log
+        {
+            current_menu = 8;
+            fault_log_top = 0;
+            break;
+        }
+        if (line == 5) // About - re-show the splash for a few seconds
         {
             extern void show_about_splash(void);
             show_about_splash();
             break;
         }
-        if (line == 5) // Back
+        if (line == 6) // Back
         {
             current_menu = 0;
             menu.current_line = 2; // Return to Utility position
@@ -2445,7 +2591,7 @@ void menu_handle_button(uint8_t press_type)
             menu.total_items = options_menu_count;
             break;
         }
-        if (line == 6) // EXIT
+        if (line == 7) // EXIT
         {
             current_menu = 255;
             lcd_clear();

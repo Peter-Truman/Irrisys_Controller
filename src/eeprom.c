@@ -340,7 +340,38 @@ void load_factory_defaults(void)
         apply_sensor_type_defaults(i, factory_sensor_type[i]);
     }
 
+    // The failure log survives a factory reset ON PURPOSE.
+    //
+    // A user whose unit is misbehaving is quite likely to be TOLD to try a
+    // factory reset before sending it back - which is exactly the moment the
+    // fault history becomes valuable, and exactly when it would otherwise be
+    // destroyed. These counters describe what the HARDWARE has been through,
+    // not how it is configured, so a configuration reset has no business
+    // clearing them. New faults carry on accumulating afterwards.
+    uint16_t keep_boots    = system_config.boot_count;
+    uint8_t  keep_bor      = system_config.cnt_brownout;
+    uint8_t  keep_int      = system_config.cnt_int_error;
+    uint8_t  keep_rtc      = system_config.cnt_rtc_fault;
+    uint8_t  keep_lowv     = system_config.cnt_low_volts;
+    uint8_t  keep_loop0    = system_config.cnt_loop_fault[0];
+    uint8_t  keep_loop1    = system_config.cnt_loop_fault[1];
+    uint8_t  keep_loop2    = system_config.cnt_loop_fault[2];
+    uint8_t  keep_ring_pos = system_config.stop_ring_pos;
+    uint8_t  keep_ring[8];
+    memcpy(keep_ring, system_config.stop_ring, 8);
+
     memcpy(&system_config, &system_defaults, sizeof(system_config));
+
+    system_config.boot_count        = keep_boots;
+    system_config.cnt_brownout      = keep_bor;
+    system_config.cnt_int_error     = keep_int;
+    system_config.cnt_rtc_fault     = keep_rtc;
+    system_config.cnt_low_volts     = keep_lowv;
+    system_config.cnt_loop_fault[0] = keep_loop0;
+    system_config.cnt_loop_fault[1] = keep_loop1;
+    system_config.cnt_loop_fault[2] = keep_loop2;
+    system_config.stop_ring_pos     = keep_ring_pos;
+    memcpy(system_config.stop_ring, keep_ring, 8);
 }
 
 void sync_menu_variables(void)
