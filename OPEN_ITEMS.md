@@ -4,7 +4,7 @@ Running list of things to fix or validate before release. Worked through one at
 a time; move an item to **Done** with the revision it landed in, or to
 **Decided** if the answer was "leave it".
 
-Last updated: 2026-09-01 · firmware PG-Ver_B-1.1.3
+Last updated: 2026-09-01 · firmware PG-Ver_B-1.1.3 (post tick_1hz extraction)
 
 ---
 
@@ -33,6 +33,32 @@ These are written and building, but unproven on a board. Highest risk first.
 ---
 
 ## Decided
+
+- [x] **MAX232 is DNP in production** (2026-09-03). Debug serial is a
+      development and servicing channel, not a field one. Servicing uses a TTL
+      adaptor on the ICSP header. **Consequence to keep in view:** that is the
+      only way to read the failure log off a unit whose display has failed, so
+      the service procedure has to say so.
+      Open question: whether the **PICkit 5 can act as the adaptor** via
+      Microchip's Data Gateway Interface (MPLAB Data Visualizer). Untested. If
+      DGI routes over PGC/PGD it will conflict exactly as the programmer does
+      and solves nothing.
+- [x] **Next MCU is a pin decision, not a memory one** (2026-09-03). The
+      PIC18F46K22 has IDENTICAL memory to the 26K22 - 64K flash, 3896 SRAM. It
+      buys 11 more I/O and 11 more A/D channels. More code space means leaving
+      the K22 family entirely. Recorded in CLAUDE.md so it is not misremembered
+      as "move to the 46K22 for headroom".
+
+- [x] **No acknowledgement on the display link, and none needed.** Reviewed
+      2026-09-03. The controller could not act on the information - the display
+      is its only channel to the operator - protection is unaffected by a blank
+      screen, the enclosure is sealed so no one swaps boards in the field, and a
+      user reporting "display not working" returns the unit anyway, at which
+      point the failure log is readable over serial. Corruption already
+      self-heals via the periodic full-screen refresh. Full reasoning in
+      CLAUDE.md under the serial protocol.
+      This also closes the **display firmware pairing** concern raised earlier:
+      it assumed boards serviced separately, which a sealed unit rules out.
 
 - [x] **Run clock does not resume the remaining time after a power cycle.**
       Confirmed by inspection 2026-09-01: `run_timer_secs` is RAM-only and is

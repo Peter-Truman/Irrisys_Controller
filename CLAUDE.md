@@ -435,6 +435,35 @@ See `display/CLAUDE.md` for full protocol specification.
  0x02  1 byte 1 byte 0-24 bytes  Fletcher-16       0x03
 ```
 
+### No acknowledgement — deliberate
+
+The link is **one-way**. Frames carry a Fletcher-16 CRC so the display can
+detect corruption and discard a bad frame, but there is **no ACK/NAK**: the main
+board never learns whether anything arrived, and cannot detect a dead or absent
+display board at all.
+
+Both ends actually name a return path (`UART_TX_TRIS` on the display,
+`RC7 = Serial RX from Display Board` on the main board), so this looks like an
+omission. It is not — the decision was reviewed and closed 2026-09-03:
+
+- **The controller could not act on the information.** The display is its only
+  channel to the operator, so a detected display fault could not be reported.
+- **Protection is unaffected.** The relay, bypass timers and stop logic do not
+  depend on the display; a blank screen loses visibility, not safety.
+- **The unit is sealed**, main board and display in one enclosure. Nobody in the
+  field swaps a board, so mismatched display firmware is not a scenario.
+- **The user reports "the display isn't working" and the unit returns anyway** -
+  at which point the failure log is readable over the debug serial, whether or
+  not the display ever worked.
+
+Corruption self-heals: `lcd_flush()` sends only CHANGED lines, so a dropped line
+would otherwise stay stale forever - which is why the periodic full-screen
+refresh and the splash re-assert exist. Those are the mitigation.
+
+> If a return path is ever fitted, the useful signal is **presence** (a heartbeat
+> from the display, flagged if it stops), not per-frame ACK - which would halve
+> throughput and add latency to solve a problem the refresh already handles.
+
 ### Commands Summary
 
 | CMD     | Description                                      |
@@ -1300,6 +1329,53 @@ standalone `PK3CMD.exe` on this machine has no device file.
 
 > Includes the temporary 4Hz debug heartbeat (`DEBUG_STREAM`), which comes out
 > before release along with the dead code listed in [OPEN_ITEMS.md](OPEN_ITEMS.md).
+
+---
+
+## Future Hardware Notes
+
+### Moving MCU — the 46K22 does NOT buy code space
+
+A natural assumption is that the next edition can move to the **PIC18F46K22**
+for headroom. It cannot. From the family table, the two parts are identical in
+memory:
+
+| | 26K22 (current) | 46K22 |
+| --- | --- | --- |
+| Flash | 64K | 64K |
+| Single-word instructions | 32768 | 32768 |
+| SRAM | 3896 | 3896 |
+| EEPROM | 1024 | 1024 |
+| **I/O** | **25** | **36** |
+| **10-bit A/D channels** | **19** | **30** |
+
+The 46K22 buys **pins**, not program space — eleven more I/O and eleven more
+analog channels.
+
+So the decision splits by what the next edition actually needs:
+
+- **More inputs** (a fourth sensor channel, more digital inputs) -> 46K22 is the
+  right move. Same family, same core, same peripherals; the port is mostly pin
+  definitions.
+- **More code space** -> the K22 family is at its ceiling and this build already
+  sits near it. That means a different family (the later PIC18 K42 / Q43 lines
+  reach 128KB) - verify against the datasheet rather than assuming.
+
+A second reason to look at those later families when the time comes: they have
+**Peripheral Pin Select**, which would move the debug UART off PGC/PGD and
+dissolve the ICSP conflict described below instead of working around it.
+
+### Debug UART shares the ICSP pins
+
+EUSART2 is fixed on **RB6/RB7** on the 26K22 - no remapping - and those are
+**PGC/PGD**. A connected programmer and working debug serial are therefore
+mutually exclusive: unplug the PICkit before expecting serial output.
+
+**The MAX232 is DNP in production.** It stays in the design but is not placed,
+since the debug serial is a development and servicing channel, not a field one.
+Servicing a returned unit means a **TTL adaptor on the ICSP header** - which
+matters because that is the **only** way to read the failure log off a unit
+whose display has failed.
 
 ---
 

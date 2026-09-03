@@ -1628,6 +1628,386 @@ static void fault_log_report(void)
     }
 }
 
+// ---------------------------------------------------------------------------
+// One 1-second tick. Called once per pending RTC tick, so a loop pass delayed
+// past a second runs it repeatedly and no second is lost.
+//
+// This is the safety-critical block: bypass timers, loop integrity, the supply
+// guard, the runtime clock and the relay pulse all live here. It was 436 lines
+// inline in main() - a third of that function - which made the one part of the
+// firmware that most needs review the hardest part to find.
+//
+// The averaged ADC readings are passed in rather than shared: they are
+// main()'s locals, written by the sampling section each pass, and read-only
+// here. Making them file-scope to avoid three parameters would have hidden
+// that direction of flow for no gain.
+// ---------------------------------------------------------------------------
+static void tick_1hz(uint16_t adc_ch1, uint16_t adc_ch2, uint16_t adc_ch3)
+{
+    flash_toggle = !flash_toggle;
+
+    // Periodic full-screen refresh — display self-heal.
+    //
+    // The display link is ONE-WAY (no ACK). lcd_flush() only sends a
+    // line when it differs from lcd_prev_buffer, so if the display ever
+    // misses a frame — its UART RX is deaf during its blocking backlight
+    // EEPROM write, and the relay energising can glitch its supply — the
+    // main board still marks that line "sent" and NEVER re-sends it. The
+    // screen then stays stale/blank indefinitely, which is exactly the
+    // boot failure seen here (splash frozen, main screen never appears
+    // until a menu changed the content).
+    //
+    // Re-asserting the whole screen every few seconds makes the display
+    // recover from any lost frame within a bounded time. Cost is trivial
+    // (~104 bytes every 5s on a 19200 link).
+    if (++refresh_counter >= 5)
+    {
+        refresh_counter = 0;
+        lcd_invalidate();  // next flush re-sends every line
+    }
+
+    // About screen (UTILITY > About): hold, re-asserting each
+    // second so a dropped frame cannot leave it half-drawn, then
+    // put the menu back.
+    if (about_hold_secs > 0)
+    {
+        if (--about_hold_secs == 0)
+        {
+            about_splash_dismiss();
+        }
+        else
+        {
+            lcd_invalidate();
+            lcd_flush();
+        }
+    }
+
+    // -------------------------------------------------------
+    // Loop integrity (analog inputs only)
+    //
+    // Evaluated in RUN *and* STOP so a broken loop is visible on
+    // the main screen before anyone tries to start the pump. The
+    // trip is RUN-only - with the pump already stopped there is
+    // nothing left to stop.
+    // -------------------------------------------------------
+    if (sensor_settle_countdown > 0)
+        sensor_settle_countdown--;
+
+    // ---------------------------------------------------------
+    // Supply check. Runs before the loop-integrity test because a
+    // sagging VDD makes those readings meaningless too - there is
+    // no point reporting a loop fault derived from a bad reference.
+    // Shares the sensor settling window so a slow rail at power-up
+    // cannot trip it.
+    // ---------------------------------------------------------
+    vdd_mv = read_vdd_mv();
+
+    // Report VDD on the debug UART: once at first reading, then only
+    // when it moves more than 50mV. Quiet enough to leave in, and it
+    // makes the supply visible during commissioning - otherwise the
+    // guard is invisible right up until it trips the pump.
+    {
+        static uint16_t vdd_reported = 0;
+        uint16_t delta = (vdd_mv > vdd_reported)
+                       ? (uint16_t)(vdd_mv - vdd_reported)
+                       : (uint16_t)(vdd_reported - vdd_mv);
+        if (vdd_mv > 0 && (vdd_reported == 0 || delta > 50))
+        {
+            char vb[24];
+            sprintf(vb, "VDD %umV", vdd_mv);
+            uart_println(vb);
+            vdd_reported = vdd_mv;
+        }
+    }
+    if (sensor_settle_countdown == 0 && vdd_mv > 0)
+    {
+        if (!vdd_low && vdd_mv < VDD_MIN_MV)
+            vdd_low = 1;
+        else if (vdd_low && vdd_mv > (VDD_MIN_MV + VDD_HYST_MV))
+            vdd_low = 0;   // recovered, with hysteresis so it cannot chatter
+    }
+
+    // A bad reference blinds every analog channel at once, so this
+    // is an immediate stop - no bypass timer, and latched, because a
+    // pulsed stop would restart the pump on the same bad supply.
+    if (vdd_low && sys_state == SYS_RUN && !vdd_alarm)
+    {
+        vdd_alarm = 1;
+        trigger_relay_pulse(1);
+        system_config.active_stop_code = 23;
+        save_power_flags();
+
+        for (uint8_t j = 0; j < 3; j++)
+        {
+            bp_state[j].high.phase = BP_INACTIVE;
+            bp_state[j].high.countdown = 0;
+            bp_state[j].low.phase = BP_INACTIVE;
+            bp_state[j].low.countdown = 0;
+        }
+        start_alarm_buzzer();
+        {
+            char vbuf[40];
+            sprintf(vbuf, "ALARM: VDD %umV, ref invalid", vdd_mv);
+            uart_println(vbuf);
+        }
+    }
+
+    {
+        uint16_t adc_now[3] = {adc_ch1, adc_ch2, adc_ch3};
+
+        for (uint8_t i = 0; i < 3; i++)
+        {
+            uint8_t st = input_config[i].sensor_type;
+
+            // Digital types (Flow Switch, Other Switch, WDT) carry no
+            // loop current, so open/short detection is meaningless for
+            // them - it would report "err open" on a perfectly good
+            // switch. A disabled input is not ours to complain about
+            // either. Evaluated fresh every tick from sensor_type, so
+            // changing an input back to a 4-20mA type re-enables the
+            // test with no further action.
+            if (!input_config[i].enable || st == 3 || st == 5 || st == 6 ||
+                sensor_settle_countdown > 0)
+            {
+                sensor_fault[i] = SENSOR_OK;
+                continue;
+            }
+
+            if (adc_now[i] <= ADC_UNDER_RANGE)
+                sensor_fault[i] = SENSOR_OPEN;
+            else if (adc_now[i] >= ADC_OVER_RANGE)
+                sensor_fault[i] = SENSOR_SHORT;
+            else
+                sensor_fault[i] = SENSOR_OK;
+
+            // An out-of-range loop means this channel is blind, so
+            // it can no longer protect the pump. Immediate stop -
+            // no bypass timer, no grace period.
+            if (sensor_fault[i] != SENSOR_OK &&
+                sys_state == SYS_RUN && !sensor_alarm[i])
+            {
+                sensor_alarm[i] = 1;
+                alarm_active[i] = 1;
+                alarm_input_idx = i;
+
+                // Latch, never pulse: a pulsed stop would let the
+                // pump restart with the sensor still broken.
+                trigger_relay_pulse(1);
+                system_config.active_stop_code = (uint8_t)(20 + i);
+                save_power_flags();
+
+                // Can only stop once - cancel every bypass countdown
+                for (uint8_t j = 0; j < 3; j++)
+                {
+                    bp_state[j].high.phase = BP_INACTIVE;
+                    bp_state[j].high.countdown = 0;
+                    bp_state[j].low.phase = BP_INACTIVE;
+                    bp_state[j].low.countdown = 0;
+                }
+                start_alarm_buzzer();
+                {
+                    char abuf[40];
+                    sprintf(abuf, "ALARM: In%u loop %s", i + 1,
+                            (sensor_fault[i] == SENSOR_OPEN)
+                                ? "OPEN" : "SHORT");
+                    uart_println(abuf);
+                }
+            }
+        }
+    }
+
+    if (sys_state == SYS_RUN)
+    {
+        if (system_config.clock_enabled && run_timer_secs > 0)
+        {
+            run_timer_secs--;  // Countdown
+            if (run_timer_secs == 0)
+            {
+                // Runtime expired — alarm first, then relay
+                system_config.active_stop_code = 1;  // Triggers "End RunTime" flash
+                save_power_flags();
+                start_alarm_buzzer();
+
+                // Relay action after alarm starts
+                uint8_t mode = system_config.end_runtime_mode;
+                if (mode == 0)
+                    trigger_relay_pulse(1);  // Latch
+                else
+                    trigger_relay_pulse(0);  // Pulse
+
+                uart_println("Runtime expired - End RunTime");
+            }
+        }
+        // No count-up. With the clock disabled the runtime is never
+        // displayed - the line-1 gate requires clock_enabled - and
+        // nothing else reads run_timer_secs: bypass timers keep their
+        // own countdowns in bp_state[]. Incrementing here fed nothing
+        // and grew without bound, which only looked like a defect
+        // (uint8_t hours wrapping at 256h) because the value appeared
+        // live. Leaving it at 0 removes both the work and the doubt.
+    }
+
+    // Relay pulse countdown (starts when DIG_IN1 goes low)
+    if (relay_state == 1)
+    {
+        char rbuf[50];
+        sprintf(rbuf, "RLY: state=%u latch=%u ctr=%u pin=%u",
+                relay_state, relay_latch_mode, relay_counter, (uint8_t)RELAY1_PIN);
+        uart_println(rbuf);
+    }
+    if (relay_counter > 0)
+    {
+        relay_counter--;
+        if (relay_counter == 0)
+        {
+            relay_close();
+            uart_println("Relay closed (pulse expired)");
+        }
+    }
+
+    // Non-blocking power detect delay countdown
+    if (pwr_detect_countdown > 0)
+    {
+        pwr_detect_countdown--;
+        if (pwr_detect_countdown == 0)
+        {
+            // Delay expired — normal stop, clear power fail flag
+            system_config.power_failure_flag = 0;
+            boot_pwr_fail = 0;
+            save_power_flags();
+            uart_println("Power fail flag cleared (normal stop)");
+        }
+    }
+
+    // =============================================================
+    // Bypass timer processing (1-second tick, RUN only)
+    // =============================================================
+    if (sys_state == SYS_RUN)
+    {
+        uint16_t adc_arr[3] = {adc_ch1, adc_ch2, adc_ch3};
+
+        for (uint8_t i = 0; i < 3; i++)
+        {
+            if (!input_config[i].enable) continue;
+
+            uint8_t st = input_config[i].sensor_type;
+            uint8_t is_digital = (st == 3 || st == 5 || st == 6);
+            uint8_t high_fault = 0, low_fault = 0;
+
+            if (is_digital)
+            {
+                uint8_t pin = read_digital_input(i);
+                // The setting names the level at which the condition
+                // is present (flow running), so the FAULT is the
+                // opposite level - no flow / aux not asserted.
+                //
+                // A switch has one fault and it is a LOW condition,
+                // so it runs in the low direction - the same one the
+                // menu's PNFBP/SNFBP timers and relay modes belong to.
+                low_fault = (pin != input_config[i].fault_polarity);
+                // Digital: high direction unused
+            }
+            else
+            {
+                int16_t val = adc_to_eng(adc_arr[i],
+                                          input_config[i].scale_4ma,
+                                          input_config[i].scale_20ma);
+                // Both directions are ALWAYS evaluated. A bypass timer
+                // is a DELAY, never an on/off switch.
+                //
+                // These tests used to be gated on "setpoint non-zero OR
+                // either timer non-zero", which gave 0 a second, hidden
+                // meaning. An operator who set both timers of a direction
+                // to 0 - entirely reasonable if he wants it to trip at
+                // once - silently disabled that direction instead,
+                // wherever the setpoint was also 0 (Flow Meter low, Other
+                // 4-20). Two innocuous edits combined into no protection,
+                // with nothing on screen to say so.
+                //
+                // Everywhere else 0 already meant "no delay":
+                // init_bp_timers() starts a 0 primary in BP_NORMAL, and
+                // process_bypass() takes a 0 secondary straight to
+                // BP_ALARM. This makes that consistent - the operator can
+                // choose an instant shutdown, and cannot choose "off" by
+                // accident. Turning a direction off is what the setpoint
+                // and the input Enable flag are for.
+                high_fault = (val >= input_config[i].high_setpoint);
+                low_fault  = (val <= input_config[i].low_setpoint);
+            }
+
+            // Process high direction (analog only - a switch has no
+            // high fault, so its high direction stays inactive)
+            uint8_t hi_result = is_digital ? 0
+                : process_bp(&bp_state[i].high, high_fault,
+                             input_config[i].secondary_high_bypass);
+            // 3 = secondary countdown started, which is not an alarm
+            if (hi_result == 1 || hi_result == 2)
+            {
+                uint8_t rly = (hi_result == 1) ? input_config[i].relay_pri_high_mode
+                                               : input_config[i].relay_sec_high_mode;
+                trigger_relay_pulse(rly == 0 ? 1 : 0);
+                system_config.active_stop_code = (uint8_t)(2 + i * 2);  // 2,4,6
+                save_power_flags();
+                // Store bypass abbreviation for display
+                const char *lbl = (hi_result == 1) ? bp_lbl_phi[st] : bp_lbl_shi[st];
+                strncpy(alarm_code_text, lbl, 6);
+                alarm_code_text[6] = '\0';
+                alarm_input_idx = i;
+                // Cancel ALL other bypass timers — can only stop once
+                for (uint8_t j = 0; j < 3; j++)
+                {
+                    if (j == i) { bp_state[j].low.phase = BP_INACTIVE; bp_state[j].low.countdown = 0; continue; }
+                    bp_state[j].high.phase = BP_INACTIVE; bp_state[j].high.countdown = 0;
+                    bp_state[j].low.phase = BP_INACTIVE; bp_state[j].low.countdown = 0;
+                }
+                start_alarm_buzzer();
+                { char abuf[40]; sprintf(abuf, "ALARM: In%u HIGH %s", i + 1, alarm_code_text); uart_println(abuf); }
+            }
+
+            // Process low direction - for a switch this is the only
+            // direction, and carries its single fault condition.
+            {
+                // A Watch Dog counts while the signal is ABSENT and
+                // reloads on every pulse, so it needs its own tick.
+                // It returns the same codes, and its labels sit in the
+                // same tables, so everything below is shared.
+                uint8_t lo_result = (st == 6)
+                    ? process_watchdog(i, &bp_state[i].low)
+                    : process_bp(&bp_state[i].low, low_fault,
+                                 input_config[i].secondary_low_bypass);
+                // 3 = secondary countdown started, which is not an alarm
+                if (lo_result == 1 || lo_result == 2)
+                {
+                    uint8_t rly = (lo_result == 1) ? input_config[i].relay_pri_low_mode
+                                                   : input_config[i].relay_sec_low_mode;
+                    trigger_relay_pulse(rly == 0 ? 1 : 0);
+                    system_config.active_stop_code = (uint8_t)(3 + i * 2);  // 3,5,7
+                    save_power_flags();
+                    // Store bypass abbreviation for display
+                    const char *lbl = (lo_result == 1) ? bp_lbl_plo[st] : bp_lbl_slo[st];
+                    strncpy(alarm_code_text, lbl, 6);
+                    alarm_code_text[6] = '\0';
+                    alarm_input_idx = i;
+                    // Cancel ALL other bypass timers — can only stop once
+                    for (uint8_t j = 0; j < 3; j++)
+                    {
+                        if (j == i) { bp_state[j].high.phase = BP_INACTIVE; bp_state[j].high.countdown = 0; continue; }
+                        bp_state[j].high.phase = BP_INACTIVE; bp_state[j].high.countdown = 0;
+                        bp_state[j].low.phase = BP_INACTIVE; bp_state[j].low.countdown = 0;
+                    }
+                    start_alarm_buzzer();
+                    { char abuf[40]; sprintf(abuf, "ALARM: In%u LOW %s", i + 1, alarm_code_text); uart_println(abuf); }
+                }
+            }
+
+            // Update alarm flag for this input
+            alarm_active[i] = (bp_state[i].high.phase == BP_ALARM ||
+                               bp_state[i].low.phase == BP_ALARM ||
+                               sensor_alarm[i]);
+        }
+    }
+}
+
 void main(void)
 {
     // Capture the reset cause BEFORE the first CLRWDT (which sets /TO).
@@ -2276,370 +2656,7 @@ draw_splash();
             }
         }
         while (rtc_ticks_pending-- > 0)
-        {
-            flash_toggle = !flash_toggle;
-
-            // Periodic full-screen refresh — display self-heal.
-            //
-            // The display link is ONE-WAY (no ACK). lcd_flush() only sends a
-            // line when it differs from lcd_prev_buffer, so if the display ever
-            // misses a frame — its UART RX is deaf during its blocking backlight
-            // EEPROM write, and the relay energising can glitch its supply — the
-            // main board still marks that line "sent" and NEVER re-sends it. The
-            // screen then stays stale/blank indefinitely, which is exactly the
-            // boot failure seen here (splash frozen, main screen never appears
-            // until a menu changed the content).
-            //
-            // Re-asserting the whole screen every few seconds makes the display
-            // recover from any lost frame within a bounded time. Cost is trivial
-            // (~104 bytes every 5s on a 19200 link).
-            if (++refresh_counter >= 5)
-            {
-                refresh_counter = 0;
-                lcd_invalidate();  // next flush re-sends every line
-            }
-
-            // About screen (UTILITY > About): hold, re-asserting each
-            // second so a dropped frame cannot leave it half-drawn, then
-            // put the menu back.
-            if (about_hold_secs > 0)
-            {
-                if (--about_hold_secs == 0)
-                {
-                    about_splash_dismiss();
-                }
-                else
-                {
-                    lcd_invalidate();
-                    lcd_flush();
-                }
-            }
-
-            // -------------------------------------------------------
-            // Loop integrity (analog inputs only)
-            //
-            // Evaluated in RUN *and* STOP so a broken loop is visible on
-            // the main screen before anyone tries to start the pump. The
-            // trip is RUN-only - with the pump already stopped there is
-            // nothing left to stop.
-            // -------------------------------------------------------
-            if (sensor_settle_countdown > 0)
-                sensor_settle_countdown--;
-
-            // ---------------------------------------------------------
-            // Supply check. Runs before the loop-integrity test because a
-            // sagging VDD makes those readings meaningless too - there is
-            // no point reporting a loop fault derived from a bad reference.
-            // Shares the sensor settling window so a slow rail at power-up
-            // cannot trip it.
-            // ---------------------------------------------------------
-            vdd_mv = read_vdd_mv();
-
-            // Report VDD on the debug UART: once at first reading, then only
-            // when it moves more than 50mV. Quiet enough to leave in, and it
-            // makes the supply visible during commissioning - otherwise the
-            // guard is invisible right up until it trips the pump.
-            {
-                static uint16_t vdd_reported = 0;
-                uint16_t delta = (vdd_mv > vdd_reported)
-                               ? (uint16_t)(vdd_mv - vdd_reported)
-                               : (uint16_t)(vdd_reported - vdd_mv);
-                if (vdd_mv > 0 && (vdd_reported == 0 || delta > 50))
-                {
-                    char vb[24];
-                    sprintf(vb, "VDD %umV", vdd_mv);
-                    uart_println(vb);
-                    vdd_reported = vdd_mv;
-                }
-            }
-            if (sensor_settle_countdown == 0 && vdd_mv > 0)
-            {
-                if (!vdd_low && vdd_mv < VDD_MIN_MV)
-                    vdd_low = 1;
-                else if (vdd_low && vdd_mv > (VDD_MIN_MV + VDD_HYST_MV))
-                    vdd_low = 0;   // recovered, with hysteresis so it cannot chatter
-            }
-
-            // A bad reference blinds every analog channel at once, so this
-            // is an immediate stop - no bypass timer, and latched, because a
-            // pulsed stop would restart the pump on the same bad supply.
-            if (vdd_low && sys_state == SYS_RUN && !vdd_alarm)
-            {
-                vdd_alarm = 1;
-                trigger_relay_pulse(1);
-                system_config.active_stop_code = 23;
-                save_power_flags();
-
-                for (uint8_t j = 0; j < 3; j++)
-                {
-                    bp_state[j].high.phase = BP_INACTIVE;
-                    bp_state[j].high.countdown = 0;
-                    bp_state[j].low.phase = BP_INACTIVE;
-                    bp_state[j].low.countdown = 0;
-                }
-                start_alarm_buzzer();
-                {
-                    char vbuf[40];
-                    sprintf(vbuf, "ALARM: VDD %umV, ref invalid", vdd_mv);
-                    uart_println(vbuf);
-                }
-            }
-
-            {
-                uint16_t adc_now[3] = {adc_ch1, adc_ch2, adc_ch3};
-
-                for (uint8_t i = 0; i < 3; i++)
-                {
-                    uint8_t st = input_config[i].sensor_type;
-
-                    // Digital types (Flow Switch, Other Switch, WDT) carry no
-                    // loop current, so open/short detection is meaningless for
-                    // them - it would report "err open" on a perfectly good
-                    // switch. A disabled input is not ours to complain about
-                    // either. Evaluated fresh every tick from sensor_type, so
-                    // changing an input back to a 4-20mA type re-enables the
-                    // test with no further action.
-                    if (!input_config[i].enable || st == 3 || st == 5 || st == 6 ||
-                        sensor_settle_countdown > 0)
-                    {
-                        sensor_fault[i] = SENSOR_OK;
-                        continue;
-                    }
-
-                    if (adc_now[i] <= ADC_UNDER_RANGE)
-                        sensor_fault[i] = SENSOR_OPEN;
-                    else if (adc_now[i] >= ADC_OVER_RANGE)
-                        sensor_fault[i] = SENSOR_SHORT;
-                    else
-                        sensor_fault[i] = SENSOR_OK;
-
-                    // An out-of-range loop means this channel is blind, so
-                    // it can no longer protect the pump. Immediate stop -
-                    // no bypass timer, no grace period.
-                    if (sensor_fault[i] != SENSOR_OK &&
-                        sys_state == SYS_RUN && !sensor_alarm[i])
-                    {
-                        sensor_alarm[i] = 1;
-                        alarm_active[i] = 1;
-                        alarm_input_idx = i;
-
-                        // Latch, never pulse: a pulsed stop would let the
-                        // pump restart with the sensor still broken.
-                        trigger_relay_pulse(1);
-                        system_config.active_stop_code = (uint8_t)(20 + i);
-                        save_power_flags();
-
-                        // Can only stop once - cancel every bypass countdown
-                        for (uint8_t j = 0; j < 3; j++)
-                        {
-                            bp_state[j].high.phase = BP_INACTIVE;
-                            bp_state[j].high.countdown = 0;
-                            bp_state[j].low.phase = BP_INACTIVE;
-                            bp_state[j].low.countdown = 0;
-                        }
-                        start_alarm_buzzer();
-                        {
-                            char abuf[40];
-                            sprintf(abuf, "ALARM: In%u loop %s", i + 1,
-                                    (sensor_fault[i] == SENSOR_OPEN)
-                                        ? "OPEN" : "SHORT");
-                            uart_println(abuf);
-                        }
-                    }
-                }
-            }
-
-            if (sys_state == SYS_RUN)
-            {
-                if (system_config.clock_enabled && run_timer_secs > 0)
-                {
-                    run_timer_secs--;  // Countdown
-                    if (run_timer_secs == 0)
-                    {
-                        // Runtime expired — alarm first, then relay
-                        system_config.active_stop_code = 1;  // Triggers "End RunTime" flash
-                        save_power_flags();
-                        start_alarm_buzzer();
-
-                        // Relay action after alarm starts
-                        uint8_t mode = system_config.end_runtime_mode;
-                        if (mode == 0)
-                            trigger_relay_pulse(1);  // Latch
-                        else
-                            trigger_relay_pulse(0);  // Pulse
-
-                        uart_println("Runtime expired - End RunTime");
-                    }
-                }
-                // No count-up. With the clock disabled the runtime is never
-                // displayed - the line-1 gate requires clock_enabled - and
-                // nothing else reads run_timer_secs: bypass timers keep their
-                // own countdowns in bp_state[]. Incrementing here fed nothing
-                // and grew without bound, which only looked like a defect
-                // (uint8_t hours wrapping at 256h) because the value appeared
-                // live. Leaving it at 0 removes both the work and the doubt.
-            }
-
-            // Relay pulse countdown (starts when DIG_IN1 goes low)
-            if (relay_state == 1)
-            {
-                char rbuf[50];
-                sprintf(rbuf, "RLY: state=%u latch=%u ctr=%u pin=%u",
-                        relay_state, relay_latch_mode, relay_counter, (uint8_t)RELAY1_PIN);
-                uart_println(rbuf);
-            }
-            if (relay_counter > 0)
-            {
-                relay_counter--;
-                if (relay_counter == 0)
-                {
-                    relay_close();
-                    uart_println("Relay closed (pulse expired)");
-                }
-            }
-
-            // Non-blocking power detect delay countdown
-            if (pwr_detect_countdown > 0)
-            {
-                pwr_detect_countdown--;
-                if (pwr_detect_countdown == 0)
-                {
-                    // Delay expired — normal stop, clear power fail flag
-                    system_config.power_failure_flag = 0;
-                    boot_pwr_fail = 0;
-                    save_power_flags();
-                    uart_println("Power fail flag cleared (normal stop)");
-                }
-            }
-
-            // =============================================================
-            // Bypass timer processing (1-second tick, RUN only)
-            // =============================================================
-            if (sys_state == SYS_RUN)
-            {
-                uint16_t adc_arr[3] = {adc_ch1, adc_ch2, adc_ch3};
-
-                for (uint8_t i = 0; i < 3; i++)
-                {
-                    if (!input_config[i].enable) continue;
-
-                    uint8_t st = input_config[i].sensor_type;
-                    uint8_t is_digital = (st == 3 || st == 5 || st == 6);
-                    uint8_t high_fault = 0, low_fault = 0;
-
-                    if (is_digital)
-                    {
-                        uint8_t pin = read_digital_input(i);
-                        // The setting names the level at which the condition
-                        // is present (flow running), so the FAULT is the
-                        // opposite level - no flow / aux not asserted.
-                        //
-                        // A switch has one fault and it is a LOW condition,
-                        // so it runs in the low direction - the same one the
-                        // menu's PNFBP/SNFBP timers and relay modes belong to.
-                        low_fault = (pin != input_config[i].fault_polarity);
-                        // Digital: high direction unused
-                    }
-                    else
-                    {
-                        int16_t val = adc_to_eng(adc_arr[i],
-                                                  input_config[i].scale_4ma,
-                                                  input_config[i].scale_20ma);
-                        // Both directions are ALWAYS evaluated. A bypass timer
-                        // is a DELAY, never an on/off switch.
-                        //
-                        // These tests used to be gated on "setpoint non-zero OR
-                        // either timer non-zero", which gave 0 a second, hidden
-                        // meaning. An operator who set both timers of a direction
-                        // to 0 - entirely reasonable if he wants it to trip at
-                        // once - silently disabled that direction instead,
-                        // wherever the setpoint was also 0 (Flow Meter low, Other
-                        // 4-20). Two innocuous edits combined into no protection,
-                        // with nothing on screen to say so.
-                        //
-                        // Everywhere else 0 already meant "no delay":
-                        // init_bp_timers() starts a 0 primary in BP_NORMAL, and
-                        // process_bypass() takes a 0 secondary straight to
-                        // BP_ALARM. This makes that consistent - the operator can
-                        // choose an instant shutdown, and cannot choose "off" by
-                        // accident. Turning a direction off is what the setpoint
-                        // and the input Enable flag are for.
-                        high_fault = (val >= input_config[i].high_setpoint);
-                        low_fault  = (val <= input_config[i].low_setpoint);
-                    }
-
-                    // Process high direction (analog only - a switch has no
-                    // high fault, so its high direction stays inactive)
-                    uint8_t hi_result = is_digital ? 0
-                        : process_bp(&bp_state[i].high, high_fault,
-                                     input_config[i].secondary_high_bypass);
-                    // 3 = secondary countdown started, which is not an alarm
-                    if (hi_result == 1 || hi_result == 2)
-                    {
-                        uint8_t rly = (hi_result == 1) ? input_config[i].relay_pri_high_mode
-                                                       : input_config[i].relay_sec_high_mode;
-                        trigger_relay_pulse(rly == 0 ? 1 : 0);
-                        system_config.active_stop_code = (uint8_t)(2 + i * 2);  // 2,4,6
-                        save_power_flags();
-                        // Store bypass abbreviation for display
-                        const char *lbl = (hi_result == 1) ? bp_lbl_phi[st] : bp_lbl_shi[st];
-                        strncpy(alarm_code_text, lbl, 6);
-                        alarm_code_text[6] = '\0';
-                        alarm_input_idx = i;
-                        // Cancel ALL other bypass timers — can only stop once
-                        for (uint8_t j = 0; j < 3; j++)
-                        {
-                            if (j == i) { bp_state[j].low.phase = BP_INACTIVE; bp_state[j].low.countdown = 0; continue; }
-                            bp_state[j].high.phase = BP_INACTIVE; bp_state[j].high.countdown = 0;
-                            bp_state[j].low.phase = BP_INACTIVE; bp_state[j].low.countdown = 0;
-                        }
-                        start_alarm_buzzer();
-                        { char abuf[40]; sprintf(abuf, "ALARM: In%u HIGH %s", i + 1, alarm_code_text); uart_println(abuf); }
-                    }
-
-                    // Process low direction - for a switch this is the only
-                    // direction, and carries its single fault condition.
-                    {
-                        // A Watch Dog counts while the signal is ABSENT and
-                        // reloads on every pulse, so it needs its own tick.
-                        // It returns the same codes, and its labels sit in the
-                        // same tables, so everything below is shared.
-                        uint8_t lo_result = (st == 6)
-                            ? process_watchdog(i, &bp_state[i].low)
-                            : process_bp(&bp_state[i].low, low_fault,
-                                         input_config[i].secondary_low_bypass);
-                        // 3 = secondary countdown started, which is not an alarm
-                        if (lo_result == 1 || lo_result == 2)
-                        {
-                            uint8_t rly = (lo_result == 1) ? input_config[i].relay_pri_low_mode
-                                                           : input_config[i].relay_sec_low_mode;
-                            trigger_relay_pulse(rly == 0 ? 1 : 0);
-                            system_config.active_stop_code = (uint8_t)(3 + i * 2);  // 3,5,7
-                            save_power_flags();
-                            // Store bypass abbreviation for display
-                            const char *lbl = (lo_result == 1) ? bp_lbl_plo[st] : bp_lbl_slo[st];
-                            strncpy(alarm_code_text, lbl, 6);
-                            alarm_code_text[6] = '\0';
-                            alarm_input_idx = i;
-                            // Cancel ALL other bypass timers — can only stop once
-                            for (uint8_t j = 0; j < 3; j++)
-                            {
-                                if (j == i) { bp_state[j].high.phase = BP_INACTIVE; bp_state[j].high.countdown = 0; continue; }
-                                bp_state[j].high.phase = BP_INACTIVE; bp_state[j].high.countdown = 0;
-                                bp_state[j].low.phase = BP_INACTIVE; bp_state[j].low.countdown = 0;
-                            }
-                            start_alarm_buzzer();
-                            { char abuf[40]; sprintf(abuf, "ALARM: In%u LOW %s", i + 1, alarm_code_text); uart_println(abuf); }
-                        }
-                    }
-
-                    // Update alarm flag for this input
-                    alarm_active[i] = (bp_state[i].high.phase == BP_ALARM ||
-                                       bp_state[i].low.phase == BP_ALARM ||
-                                       sensor_alarm[i]);
-                }
-            }
-        }
+            tick_1hz(adc_ch1, adc_ch2, adc_ch3);
 
         // =============================================================
         // Deferred EEPROM saves (after RTC tick processing completes)
