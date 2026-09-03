@@ -147,12 +147,17 @@ static uint8_t options_action[5]; // Maps menu line → action ID
 static void rebuild_options_menu(void)
 {
     uint8_t n = 0;
-    if (system_config.clock_enabled)
-    {
-        options_menu[n] = "Clock";
-        options_action[n] = OPT_ACT_CLOCK;
-        n++;
-    }
+
+    // Clock is ALWAYS the first item, enabled or not.
+    //
+    // It used to be hidden when the clock was disabled, which meant the setting
+    // concealed its own off-switch: once a farmer turned the clock off from
+    // this menu, the item he had just used vanished and the only way back was
+    // SETUP > Clock. A control that can be reached to turn something off must
+    // stay reachable to turn it back on.
+    options_menu[n] = "Clock";
+    options_action[n] = OPT_ACT_CLOCK;
+    n++;
     options_menu[n] = "Setup Menu";
     options_action[n] = OPT_ACT_SETUP;
     n++;
@@ -253,12 +258,21 @@ menu_item_t clock_menu[4];
 
 // Main menu template (3 items - no Save)
 const menu_item_t main_menu_template[] = {
-    {"Run Time", NULL, 1},     // 0  - Time edit HH:MM
-    {"Back", NULL, 0},         // 1
-    {"EXIT", NULL, 0}          // 2
+    {"Enable", NULL, 1},       // 0  - Option: Disabled/Enabled
+    {"Run Time", NULL, 1},     // 1  - Time edit HH:MM
+    {"Back", NULL, 0},         // 2
+    {"EXIT", NULL, 0}          // 3
 };
 
-menu_item_t main_menu_items[3];
+// [C8] Positional indices - the button handler, save_main_field(),
+// is_time_field() and menu_update_time_value() all key off these. Enable was
+// added at 0 in Ver B 1.1.0, shifting Run Time / Back / EXIT to 1 / 2 / 3.
+//
+// The setting already existed, but only in SETUP > Clock - two menus away from
+// where the run time is entered. A farmer who set 1 hour had no way to turn it
+// off from the menu he was standing in, and would have had to set the time to
+// 0 instead, which means something different.
+menu_item_t main_menu_items[4];
 
 // Utility menu template (10 items - no Save)
 const menu_item_t utility_menu_template[] = {
@@ -357,7 +371,7 @@ uint8_t is_time_field(uint8_t line, uint8_t sensor_type, uint8_t flow_type)
     }
     else if (current_menu == 5) // MAIN menu
     {
-        return (line == 0); // Run Time
+        return (line == 1); // Run Time - line 0 is Enable, an option field
     }
     return 0;
 }
@@ -375,9 +389,13 @@ uint8_t is_option_field(uint8_t line, uint8_t sensor_type, uint8_t flow_type)
                 tag == FT_RLY_PRI_LO || tag == FT_RLY_SEC_LO ||
                 tag == FT_FAULT_POL);
     }
-    else if (current_menu == 3) // CLOCK menu
+    else if (current_menu == 3) // CLOCK CONFIG menu
     {
         return (line == 0 || line == 1); // Enable, Rly Endrun
+    }
+    else if (current_menu == 5) // CLOCK menu (operator-facing)
+    {
+        return (line == 0); // Enable
     }
     return 0;
 }
@@ -407,7 +425,7 @@ uint8_t *get_option_edit_flag(uint8_t line, uint8_t sensor_type, uint8_t flow_ty
         default: return NULL;
         }
     }
-    else if (current_menu == 3) // CLOCK menu
+    else if (current_menu == 3) // CLOCK CONFIG menu
     {
         switch (line)
         {
@@ -415,6 +433,10 @@ uint8_t *get_option_edit_flag(uint8_t line, uint8_t sensor_type, uint8_t flow_ty
         case 1: return &end_runtime_edit_flag;
         default: return NULL;
         }
+    }
+    else if (current_menu == 5) // CLOCK menu - same underlying byte
+    {
+        return (line == 0) ? &clock_enable_edit_flag : NULL;
     }
     return NULL;
 }
@@ -458,7 +480,11 @@ static const item_options_t *get_item_options_for_field(uint8_t line)
         default: return NULL;
         }
     }
-    else if (current_menu == 3) // CLOCK menu
+    else if (current_menu == 5) // CLOCK menu
+    {
+        return (line == 0) ? &menu_item_options[OPT_CLOCK_ENABLE] : NULL;
+    }
+    else if (current_menu == 3) // CLOCK CONFIG menu
     {
         switch (line)
         {
@@ -822,20 +848,24 @@ void rebuild_clock_menu(void)
 
 void rebuild_main_menu(void)
 {
-    for (uint8_t i = 0; i < 3; i++)
+    for (uint8_t i = 0; i < 4; i++)
     {
         main_menu_items[i].label = main_menu_template[i].label;
         main_menu_items[i].editable = main_menu_template[i].editable;
         main_menu_items[i].value = NULL;
     }
 
+    clock_enable_edit_flag = system_config.clock_enabled ? 1 : 0;
+    strcpy(value_clock_enable, clock_enable_edit_flag ? "Enabled" : "Disabled");
+    main_menu_items[0].value = value_clock_enable;
+
     uint16_t total_minutes = system_config.runtime_hours * 60 + system_config.runtime_minutes;
     sprintf(value_runtime, "%02u:%02u",
             (uint16_t)(total_minutes / 60),
             (uint16_t)(total_minutes % 60));
-    main_menu_items[0].value = value_runtime;
+    main_menu_items[1].value = value_runtime;
 
-    menu.total_items = 3;
+    menu.total_items = 4;   // Enable, Run Time, Back, EXIT
     menu.current_line = 0;
     menu.top_line = 0;
 }
@@ -1056,47 +1086,56 @@ void menu_draw_main_menu(void)
 {
     lcd_print_at(0, 0, "====== CLOCK =======");
 
-    if (menu.in_edit_mode && menu.edit_time_mode == 4 && menu.current_line == 0)
+    for (uint8_t row = 0; row < 3; row++)
     {
-        // Custom draw for whole-number HH:MM editing
-        char line_buf[21];
-        memset(line_buf, ' ', 20);
-        line_buf[20] = '\0';
+        uint8_t line = menu.top_line + row;
 
-        // No cursor '>' during edit - label starts at col 1
-        memcpy(&line_buf[1], "Run Time", 8);
+        // The whole-pair HH:MM editor needs its own row: only ONE of the two
+        // pairs may flash, which draw_menu_line() cannot express.
+        //
+        // This used to write to LCD row 1 unconditionally, which happened to be
+        // correct only while Run Time was the first item. Adding Enable above it
+        // put the edit buffer on Enable's row and left draw_menu_line() to
+        // render Run Time again underneath - two identical lines, both
+        // flashing. The row now comes from the cursor, so it follows the item
+        // wherever it sits.
+        if (menu.in_edit_mode && menu.edit_time_mode == 4 &&
+            line == menu.current_line)
+        {
+            char line_buf[21];
+            memset(line_buf, ' ', 20);
+            line_buf[20] = ' ';
 
-        // Show HH:MM at value position (col 12), flash the active part
-        if (menu.time_edit_digit == 0) // Editing HH
-        {
-            if (menu.blink_state)
-                sprintf(&line_buf[12], "%02u:%02u", menu.time_xx, menu.time_yy);
-            else
-                sprintf(&line_buf[12], "  :%02u", menu.time_yy);
-        }
-        else // Editing MM
-        {
-            if (menu.blink_state)
-                sprintf(&line_buf[12], "%02u:%02u", menu.time_xx, menu.time_yy);
-            else
-                sprintf(&line_buf[12], "%02u:  ", menu.time_xx);
-        }
-        line_buf[17] = ' '; // Ensure no null from sprintf cuts the line
-        lcd_print_at(1, 0, line_buf);
+            // No cursor '>' during edit - label starts at col 1. Taken from the
+            // template rather than hardcoded, so it cannot drift out of step.
+            {
+                const char *lbl = main_menu_items[line].label;
+                uint8_t len = (uint8_t)strlen(lbl);
+                if (len > 11) len = 11;
+                memcpy(&line_buf[1], lbl, len);
+            }
 
-        // Draw remaining rows normally
-        for (uint8_t row = 1; row < 3; row++)
-        {
-            uint8_t line = menu.top_line + row;
-            draw_menu_line(row + 1, line, (line == menu.current_line), main_menu_items, 3);
+            if (menu.time_edit_digit == 0)   // editing HH
+            {
+                if (menu.blink_state)
+                    sprintf(&line_buf[12], "%02u:%02u", menu.time_xx, menu.time_yy);
+                else
+                    sprintf(&line_buf[12], "  :%02u", menu.time_yy);
+            }
+            else                             // editing MM
+            {
+                if (menu.blink_state)
+                    sprintf(&line_buf[12], "%02u:%02u", menu.time_xx, menu.time_yy);
+                else
+                    sprintf(&line_buf[12], "%02u:  ", menu.time_xx);
+            }
+            line_buf[17] = ' ';  // sprintf's NUL would otherwise cut the line
+            lcd_print_at((uint8_t)(row + 1), 0, line_buf);
         }
-    }
-    else
-    {
-        for (uint8_t row = 0; row < 3; row++)
+        else
         {
-            uint8_t line = menu.top_line + row;
-            draw_menu_line(row + 1, line, (line == menu.current_line), main_menu_items, 3);
+            draw_menu_line(row + 1, line, (line == menu.current_line),
+                           main_menu_items, 4);
         }
     }
 }
@@ -1418,16 +1457,18 @@ void init_time_editor(uint16_t value_seconds, uint8_t mode)
     menu.edit_time_mode = mode + 1; // 1=MM:SS, 2=HH:MM
     menu.time_edit_digit = 0;
 
-    if (mode == 0) // MM:SS
-    {
-        menu.time_xx = value_seconds / 60;
-        menu.time_yy = value_seconds % 60;
-    }
-    else // HH:MM
-    {
-        menu.time_xx = value_seconds / 60;
-        menu.time_yy = value_seconds % 60;
-    }
+    // Clamp BEFORE narrowing. value_seconds is 16-bit and time_xx/yy are 8-bit,
+    // so a stored value above 99:59 (5999s) would TRUNCATE rather than clamp -
+    // 65535s would land as 68 minutes, not the maximum. The editor itself can
+    // only produce 0..5999, so this only bites on a value written by other
+    // firmware or corrupted in EEPROM, which is exactly when a sane fallback
+    // matters most.
+    //
+    // Both branches were identical: MM:SS and HH:MM differ only in what the
+    // caller means by the pair, not in how it is split.
+    if (value_seconds > 5999) value_seconds = 5999;
+    menu.time_xx = (uint8_t)(value_seconds / 60);
+    menu.time_yy = (uint8_t)(value_seconds % 60);
     menu.time_original = value_seconds;
 }
 
@@ -1764,7 +1805,7 @@ void menu_update_time_value(void)
     }
     else if (current_menu == 5) // MAIN
     {
-        if (menu.current_line == 0)
+        if (menu.current_line == 1)
             strcpy(value_runtime, buf);
     }
 }
@@ -1799,13 +1840,17 @@ void menu_update_edit_value(void)
                 case FT_FAULT_POL:     strcpy(value_fault_pol, opts->options[*flag]); break;
                 }
             }
-            else if (current_menu == 3) // CLOCK
+            else if (current_menu == 3) // CLOCK CONFIG
             {
                 switch (menu.current_line)
                 {
                 case 0: strcpy(value_clock_enable, opts->options[*flag]); break;
                 case 1: strcpy(value_end_runtime, opts->options[*flag]); break;
                 }
+            }
+            else if (current_menu == 5 && menu.current_line == 0) // CLOCK Enable
+            {
+                strcpy(value_clock_enable, opts->options[*flag]);
             }
         }
         return;
@@ -2077,7 +2122,11 @@ static void save_utility_field(uint8_t line)
 
 static void save_main_field(uint8_t line)
 {
-    if (line == 0) // Run Time (HH:MM)
+    if (line == 0) // Enable
+    {
+        system_config.clock_enabled = clock_enable_edit_flag;
+    }
+    else if (line == 1) // Run Time (HH:MM)
     {
         system_config.runtime_hours = menu.time_xx;
         system_config.runtime_minutes = menu.time_yy;
@@ -2282,9 +2331,15 @@ void menu_handle_button(uint8_t press_type)
         {
             menu.in_edit_mode = 0;
 
-            // Save to config and EEPROM
+            // Save to config and EEPROM.
+            //
+            // Menu 5 must be here too. It had no option fields until Enable was
+            // added to the Clock menu, so this list was never updated: the
+            // confirm cleared edit mode and advanced the cursor while the byte
+            // was never written, and the setting appeared to do nothing.
             if (current_menu == 1) save_input_field(menu.current_line, current_input);
             else if (current_menu == 3) save_clock_field(menu.current_line);
+            else if (current_menu == 5) save_main_field(menu.current_line);
 
             // Advance cursor to next item
             if (menu.current_line + 1 < menu.total_items)
@@ -2684,7 +2739,7 @@ void menu_handle_button(uint8_t press_type)
     case 5: // MAIN menu
     {
         uint8_t line = menu.current_line;
-        if (line == 1) // Back
+        if (line == 2) // Back
         {
             current_menu = 0;
             menu.current_line = 0;
@@ -2693,20 +2748,36 @@ void menu_handle_button(uint8_t press_type)
             menu.total_items = options_menu_count;
             break;
         }
-        if (line == 2) // EXIT
+        if (line == 3) // EXIT
         {
             current_menu = 255;
             lcd_clear();
             break;
         }
-        if (line == 0) // Run Time (HH:MM) - whole number edit
+        if (line == 0) // Enable - option field
+        {
+            clock_enable_edit_flag = system_config.clock_enabled ? 1 : 0;
+            menu.in_edit_mode = 1;
+            menu.edit_time_mode = 0;
+            menu.edit_whole_mode = 0;
+            break;
+        }
+        if (line == 1) // Run Time (HH:MM) - whole number edit
         {
             menu.edit_time_mode = 4; // Whole-number HH:MM mode
             menu.time_edit_digit = 0; // 0=editing HH, 1=editing MM
-            menu.time_xx = system_config.runtime_hours;
-            menu.time_yy = system_config.runtime_minutes;
-            if (menu.time_xx > 99) menu.time_xx = 99;
-            if (menu.time_yy > 59) menu.time_yy = 59;
+            // Clamp in 16-bit, THEN narrow. runtime_hours is uint16 and
+            // time_xx is uint8, so assigning first truncated the value and the
+            // clamp then inspected the truncated result - 256 hours became 0
+            // and passed the test unchanged.
+            {
+                uint16_t h = system_config.runtime_hours;
+                uint16_t m = system_config.runtime_minutes;
+                if (h > 99) h = 99;
+                if (m > 59) m = 59;
+                menu.time_xx = (uint8_t)h;
+                menu.time_yy = (uint8_t)m;
+            }
             menu.in_edit_mode = 1;
 
         }

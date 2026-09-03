@@ -46,6 +46,7 @@ Communication: Main -> Display via serial (19200 baud, 8N1)
 | 2026-08-21 | Main    | Ver 3 Rev 2 | Versioning scheme -> `Ver N Rev N`; LCD cleared at top of `main()`; splash is "Irrisys PumpGuard" / version on lines 2-3; Pressure defaults corrected (20mA=362, SHPBP=1s, Rly SLPBP=Pulse); factory defaults now derived from `sensor_type_defaults[]` |
 | 2026-08-21 | Main    | Ver 3 Rev 4 | Main screen: input line flashes while a bypass timer counts, stopping when the value is OK |
 | 2026-08-21 | Main    | Ver 3 Rev 5 | Main screen: disabled inputs show "Not Used" |
+| 2026-09-03 | Main    | **PG-Ver_B-1.1.3** | **Clock Enable moved to where it is used, plus the versioning scheme.** `clock_enabled` already existed but only in SETUP > Clock, two menus from where Run Time is entered - a farmer who set 1 hour had no way to turn the timer off from the menu he was in, and setting the time to 0 means something else. `Enable` is now the first item of OPTIONS > Clock. Three follow-on faults, all from menu 5 never having had an option field before: the HH:MM editor drew at a hardcoded LCD row (two flashing `Run Time` lines once Enable sat above it - the row now follows the cursor and the label comes from the template); the option-confirm branch listed menus 1 and 3 only, so Enable never wrote its byte; and OPTIONS hid the Clock item when disabled, making it a **one-way door**. Also: dead count-up branch removed (`run_timer_secs++` fed nothing - the display is gated on `clock_enabled`), and two **clamp-after-narrow** bugs fixed where a uint16 was assigned to a uint8 before its range check, so the clamp inspected the already-truncated value |
 | 2026-09-02 | Main    | Ver 3 Rev 90-93 | **A bypass timer is a delay, never an off switch.** The fault test was gated on "setpoint non-zero OR either timer non-zero", giving `0` a second, hidden meaning: an operator setting both timers of a direction to 0 - reasonable if he wants an instant trip - silently DISABLED that direction wherever the setpoint was also 0. Both directions are now always evaluated (Rev 91). Also fixed the **attribution**: a zero primary skipped straight to BP_NORMAL, so a fault already present at pump start was reported as SECONDARY, i.e. as a running excursion. Every direction now starts in BP_PRIMARY - a zero primary is a zero-length window, not the absence of one - so a startup fault reports `PHPBP` (Rev 92). Verified on hardware both ways. Defaults revised: Pressure high pair **0/0** (over-pressure has no reason to be tolerated; a user who wants to ride out a spike changes it deliberately), Temperature SHTBP 30, Flow Meter high SP **85** with PHFBP 10 / SHFBP 2, Flow Switch 10/5, Other 4-20 high SP 85 with every timer 1. The 85s are **forcing functions**, not trip points: with no idea what meter is fitted, a default that provokes a stop makes the installer confront the setting rather than leave an input silently unmonitored |
 | 2026-09-02 | Main    | Ver 3 Rev 88-89 | **Fault Log in UTILITY.** Same record as the boot dump, on the screen - which covers the common case that the display still works and someone on the phone needs to read out what the box has been through. One entry per line, scrolled with the encoder, clamped at both ends: `Boots`, `Brown Out`, `Int Error`, `RTC Fail`, `Low Volts`, `Loop In1/2/3`, then each recorded stop code oldest-first and numbered. **Viewer only - no clear function**, since a log the operator can clear is one that gets cleared before it is read. UTILITY 7 -> 8 items, so About/Back/EXIT shifted to 5/6/7 ([C8] renumbering). Fixed: the log bytes were padding until Rev 85, so on existing units they read erased EEPROM - every counter showed **255**; now zeroed once, detected via `boot_count == 0xFFFF` |
 | 2026-09-02 | Main    | Ver 3 Rev 85-87 | **Failure log.** Units ship sealed, so the debug UART is a bench-only channel and a live stream is worthless - an event printed in January is long gone before the unit reaches the bench. 18 bytes inside the existing `system_config` padding hold counters plus a ring of the last 8 stop codes, dumped at boot. Written from **one** hook that watches state transitions, not from each of the five sites that set a stop code, so a sixth site cannot be missed. **Survives a factory reset on purpose**: a user is quite likely to be told to try a reset before returning a unit, which is exactly when the history matters. `System Started` added as the first line out of the port |
@@ -183,10 +184,15 @@ midscale is quantisation, not error — no constant can improve on it.
 > averaging never mitigated that — a rail shift biases every sample in the same
 > direction and passes through the rolling average intact.
 
-**⚠️ Hardware/firmware compatibility.** The burden cannot be detected in
-firmware and the version string carries no hardware letter. Ver 3 Rev 9 on a
-100R or 220R board mis-scales every analog reading, with no warning. **Match
-firmware to board by hand.**
+**Hardware/firmware compatibility — closed, not a live hazard.** The burden
+cannot be detected in firmware, so a 100R or 220R board would mis-scale every
+analog reading with no warning. That only ever applied to **three early
+prototypes, none of which will reach a customer** — every production board is
+180R, which is what `ADC_VREF_MV 4119` is calibrated against. This is why the
+firmware identity is `PG_vB-Ver.x.y.z` with **no PCB revision**: naming one
+would document a distinction that exists only on this bench, and would force a
+pointless rename on every later PCB spin. See `FW_HW_TARGET` in
+[main.c](src/main.c).
 
 Migration checklist: [docs/DEVELOPMENT_PATH.md](docs/DEVELOPMENT_PATH.md) §2.
 
@@ -249,37 +255,65 @@ performed unknowingly.
 
 ## Versioning Scheme
 
-### Firmware Version Format
+### Format
 
 ```c
-#define FW_VERSION  3     // Product/firmware version
-#define FW_REVISION 2     // Incremented every change; reset to 0 before release
+#define FW_PRODUCT "PG"
+#define FW_HW      "Ver_B"
+#define FW_MAJOR   1
+#define FW_MINOR   0
+#define FW_PATCH   0
 ```
 
-Displayed as: `Ver 3  Rev 2` (splash screen line 3, and the debug UART banner).
+Displayed as **`PG-Ver_B-1.0.0`** on splash screen line 3 and on the debug UART
+banner. Nothing else appears there: no build counter, no suffix, no conditional
+form. The string is 14 characters, comfortable on the 20-wide centred line.
 
-- **FW_VERSION** (numeric): The product/firmware version. Currently 3.
-- **FW_REVISION** (numeric): Incremented on **every** change during development,
-  so a flashed board can always be matched to a specific build. **Reset to 0
-  immediately prior to a release.**
+| Field | Meaning |
+| ----- | ------- |
+| `PG` | Product - PumpGuard |
+| `Ver_B` | **Hardware generation.** Changes only if the BOARD changes |
+| `MAJOR` | Stored config or display protocol **incompatible** - settings will not survive the upgrade, or the display board must be reflashed too |
+| `MINOR` | New feature or changed behaviour, config compatible |
+| `PATCH` | Bug fix only |
 
-> Note: this replaces the earlier `Ver_B_Rev_0` scheme, where the leading field
-> was an alphabetic *hardware* version. Hardware revision is no longer encoded
-> in the firmware version string - see Hardware Revision Policy below.
+### Why no PCB revision in the name
 
-### Increment Policy
+`Ver_B` names the hardware *generation*, not the board spin, and that is
+deliberate. The 100R and 220R burden resistors existed only on **three early
+prototypes that will never reach a customer** - every production board is 180R,
+which is what `ADC_VREF_MV 4119` is calibrated against. Naming a revision would
+document a distinction that exists only on this bench, and would force a
+pointless firmware rename on every later PCB spin that changed nothing
+electrical.
 
-**Increment FW_REVISION for every change**, including:
-- New features or functionality
-- Bug fixes that change behavior
-- Peripheral driver changes
-- Protocol changes (affects both boards)
-- Menu structure changes
-- Default value changes
+If a future board changes something firmware depends on - the burden, the
+pinout, the display protocol - that is a new hardware generation and `FW_HW`
+changes with it.
 
-**Reset FW_REVISION to 0** immediately prior to a release build.
+### Increment policy
 
-**FW_VERSION** changes only on a deliberate product version step.
+Bump the digit that matches what actually changed:
+
+- **PATCH** for a bug fix that changes nothing else.
+- **MINOR** for a new feature or a deliberate behaviour change that existing
+  configurations survive.
+- **MAJOR** when a commissioned unit's stored settings will **not** survive the
+  upgrade, or when the display board must be reflashed to match. This is the one
+  that matters operationally - a technician needs to know before flashing, not
+  after. `system_config_t` has been held at 128 bytes precisely to avoid it.
+
+There is **no per-change build counter**. Issues, changes and history are
+tracked in a document in the GitHub repo and in the commit log, which is where
+that detail belongs - not in a number on a 20-character LCD line.
+
+> **Consequence worth knowing:** nothing on screen distinguishes one bench build
+> from the next. During development the programmer's `Programming/Verify
+> complete` is the confirmation that a flash took, not the splash.
+
+> The revision numbers in the Changelog above (`Ver 3 Rev NN`) are the previous
+> scheme and remain valid as history. They stop at Rev 94, where this scheme
+> takes over at `PG-Ver_B-1.0.0`.
 
 ---
 
@@ -289,7 +323,7 @@ Displayed as: `Ver 3  Rev 2` (splash screen line 3, and the debug UART banner).
 
 | Asset Type                               | Storage  | Versioning                     |
 | ---------------------------------------- | -------- | ------------------------------ |
-| Firmware (C source, headers)             | GitHub   | Git commits + FW_VERSION/FW_REVISION |
+| Firmware (C source, headers)             | GitHub   | Git commits + `PG-Ver_B-M.m.p`       |
 | Hardware (schematics, PCB, gerbers, BOM) | OneDrive | Folder structure (Ver_X/Rev_Y) |
 | Datasheets, reference docs               | Either   | N/A                            |
 
@@ -320,7 +354,7 @@ Displayed as: `Ver 3  Rev 2` (splash screen line 3, and the debug UART banner).
 ```
 Irrisys_Controller/
 ├── src/                        # Main board source (PIC18F26K22)
-│   ├── main.c                 # Entry point, FW_VERSION/FW_REVISION, main loop
+│   ├── main.c                 # Entry point, firmware identity, main loop
 │   ├── menu.c                 # Menu system logic, field editing, deferred saves
 │   ├── eeprom.c               # Internal EEPROM configuration storage
 │   ├── eventlog.c             # Event log (DISABLED — log concept abandoned, dropped from build)
@@ -526,10 +560,13 @@ drives the bypass timers. Any button press dismisses it early.
 > paths now re-assert the whole screen once a second, and the wait for the
 > display board is 1000ms (it boots in ~1s; the old 500ms was not enough).
 
-**`FW_REVISION` MUST be incremented for every change** — it is now the only
-build identifier on the display. The build date/time stamp that used to occupy
-line 4 appears on the debug UART banner only. Reset `FW_REVISION` to 0
-immediately prior to a release build.
+Line 3 carries the firmware identity `PG-Ver_B-M.m.p` — see **Versioning
+Scheme**. The build date/time stamp that used to occupy line 4 appears on the
+debug UART banner only.
+
+> There is no build counter, so **the splash looks identical between bench
+> builds**. Confirmation that a flash took is the programmer reporting
+> `Programming/Verify complete`, not the screen.
 
 ### Timing System
 
@@ -1026,12 +1063,13 @@ MAIN SCREEN (current_menu = 255)
   Short press no fault -> OPTIONS menu
 
 OPTIONS (current_menu = 0, root menu)
-  |- Clock       -> CLOCK menu (only shown if clock enabled)
+  |- Clock       -> CLOCK menu (ALWAYS shown - see note below)
   |- Setup Menu  -> SETUP menu
   |- Utility Menu -> UTILITY menu
   +- EXIT        -> Main screen
 
 CLOCK (current_menu = 5, from OPTIONS > Clock)
+  |- Enable   -> Disabled/Enabled (same byte as SETUP > Clock)
   |- Run Time -> HH:MM edit
   |- Back     -> OPTIONS
   +- EXIT     -> Main screen
@@ -1082,6 +1120,17 @@ LOG VIEW (current_menu = 7, from UTILITY > View Log)
   Scrollable list of event log entries (newest first)
   |- Back -> UTILITY
 ```
+
+> **Clock is always listed in OPTIONS, enabled or not.** It used to be hidden
+> when `clock_enabled` was 0. That was harmless while the enable lived only in
+> SETUP > Clock, but once `Enable` was added to the operator-facing Clock menu
+> it became a one-way door: turning the clock off made the menu you had just
+> used disappear, and the only way back was the setup tree. **A control that
+> can turn something off must stay reachable to turn it back on.**
+>
+> `Enable` appears in both CLOCK (operator) and CLOCK CONFIG (setup). They edit
+> the same `clock_enabled` byte and both read it live, so they cannot disagree.
+> `Rly Endrun` stays in setup only.
 
 ### Menu Behavior
 
@@ -1180,13 +1229,14 @@ bypass codes (2-7) and the event-log range.
 ### Starting a Session
 
 1. Pull latest from remote: `git pull`
-2. Note current FW_VERSION and FW_REVISION
+2. Note the current version (`PG-Ver_B-M.m.p` in main.c)
 3. Review recent commits for context
 
 ### Ending a Session
 
 1. Verify main board compiles
-2. Increment FW_REVISION (every change)
+2. Bump MAJOR / MINOR / PATCH only if this session changed what they mean —
+   see **Versioning Scheme**. Most sessions change nothing.
 3. Update changelog in this file
 4. Commit with descriptive message (indicate which board)
 5. Push to remote: `git push`

@@ -12,8 +12,33 @@
  *   - Hold >= 1000ms -> long beep (300ms), long press event, non-blocking
  */
 
-#define FW_VERSION  3     // Product/firmware version
-#define FW_REVISION 93     // Incremented every change; reset to 0 before release
+// ---------------------------------------------------------------------------
+// Firmware identity - shown on the splash and the debug banner
+//
+//   PG-Ver_B-1.0.0     product - hardware generation - MAJOR.MINOR.PATCH
+//
+// "Ver_B" is the hardware generation and changes only if the BOARD changes. No
+// PCB revision is named, and that is deliberate: the 100R and 220R burdens
+// existed only on three early prototypes that will never leave the bench, so
+// every board a customer can hold is 180R - which is what ADC_VREF_MV 4119 is
+// calibrated against. Naming a revision would document a distinction that
+// exists only in this workshop and force a rename on every later PCB spin.
+//
+// Version digits, defined FOR THIS PRODUCT:
+//   MAJOR  stored config or display protocol incompatible - settings will not
+//          survive the upgrade, or the display board must be reflashed too
+//   MINOR  new feature or changed behaviour, config compatible
+//   PATCH  bug fix only
+//
+// There is deliberately NO build counter. Issues and changes are tracked in a
+// document in the GitHub repo, not in the version string.
+// ---------------------------------------------------------------------------
+#define FW_PRODUCT "PG"
+#define FW_HW      "Ver_B"
+#define FW_MAJOR   1
+#define FW_MINOR   1
+#define FW_PATCH   3
+
 
 #include "../include/config.h"
 #include "../include/encoder.h"
@@ -334,7 +359,8 @@ static void draw_splash(void)
     lcd_set_cursor(0, 0);
     lcd_print("====================");
     lcd_print_centered(1, "Irrisys PumpGuard");
-    sprintf(sbuf, "F/W Ver %d, Rev %d", FW_VERSION, FW_REVISION);
+    sprintf(sbuf, "%s-%s-%d.%d.%d", FW_PRODUCT, FW_HW,
+            FW_MAJOR, FW_MINOR, FW_PATCH);
     lcd_print_centered(2, sbuf);
     lcd_set_cursor(3, 0);
     lcd_print("====================");
@@ -1679,7 +1705,8 @@ void main(void)
     uart_println("================================");
     uart_println("IRRISYS Pump Protection");
     char buf[60];
-    sprintf(buf, "Ver %d  Rev %d", FW_VERSION, FW_REVISION);
+    sprintf(buf, "%s-%s-%d.%d.%d", FW_PRODUCT, FW_HW,
+            FW_MAJOR, FW_MINOR, FW_PATCH);
     uart_println(buf);
     sprintf(buf, "Built %s %s", __DATE__, __TIME__);
     uart_println(buf);
@@ -1755,9 +1782,10 @@ void main(void)
     //   Line 4: ==================== (full width)
     //
     // The build date/time that used to sit on line 4 has moved to the
-    // debug UART banner only. FW_REVISION now identifies the build, which
-    // depends on it being incremented for EVERY change.
-    draw_splash();
+    // debug UART banner only. The version string PG-Ver_B-M.m.p identifies
+    // the build; issues and changes are tracked in the repo, not here.
+
+draw_splash();
 
     // Startup beeps
     for (uint8_t i = 0; i < 3; i++)
@@ -2443,8 +2471,13 @@ void main(void)
                         uart_println("Runtime expired - End RunTime");
                     }
                 }
-                else if (!system_config.clock_enabled)
-                    run_timer_secs++;  // Count up
+                // No count-up. With the clock disabled the runtime is never
+                // displayed - the line-1 gate requires clock_enabled - and
+                // nothing else reads run_timer_secs: bypass timers keep their
+                // own countdowns in bp_state[]. Incrementing here fed nothing
+                // and grew without bound, which only looked like a defect
+                // (uint8_t hours wrapping at 256h) because the value appeared
+                // live. Leaving it at 0 removes both the work and the doubt.
             }
 
             // Relay pulse countdown (starts when DIG_IN1 goes low)

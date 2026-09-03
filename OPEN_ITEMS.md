@@ -4,7 +4,7 @@ Running list of things to fix or validate before release. Worked through one at
 a time; move an item to **Done** with the revision it landed in, or to
 **Decided** if the answer was "leave it".
 
-Last updated: 2026-09-01 · firmware Ver 3 Rev 93
+Last updated: 2026-09-01 · firmware PG-Ver_B-1.1.3
 
 ---
 
@@ -53,12 +53,26 @@ These are written and building, but unproven on a board. Highest risk first.
 
 ## Housekeeping
 
+- [ ] **`main()` is 1288 lines** and `menu_handle_button()` 615. The single
+      biggest barrier to another developer supporting this. Not a release
+      blocker; a deliberate refactor, not something to attempt on the way out.
+- [ ] **Per-menu capability lists must be updated by hand.** Adding an option
+      field to a menu that never had one caused THREE separate faults in
+      1.1.x - the option-confirm branch, the editor draw row, and the OPTIONS
+      visibility rule. None mention a line number, so careful renumbering does
+      not catch them. A tag-driven dispatch (as the INPUT menu already uses)
+      would make the whole class impossible.
+- [ ] **Delete stale build artifacts** for removed modules - `ad7994`,
+      `eventlog`, `pca9535` `.pre`/`.p1`/`.d` still in `src/`. They mislead:
+      reading one produced a wrong conclusion about the RTC tick earlier.
+- [ ] **Check peak stack** in the map file before release. Data is at 74%.
+
+
 - [ ] **Strip the event-time UART lines at the release build.** Units ship
       sealed, so anything printed when an event happens goes into a
       disconnected connector and is never read. Only the BOOT-time output
       (banner, RTC report, fault log) is ever seen, because that is when a
       returned unit is powered up on the bench. Worth ~1% of program space.
-- [ ] **Reset `FW_REVISION` to 0** immediately before the release build.
 - [ ] **`build.bat` (MELabs) should probably be deleted.** The U2's Vpp driver
       is dead (7 V against the 8–9 V required); leaving the script invites
       someone to use it and lose another half day.
@@ -92,6 +106,20 @@ These are written and building, but unproven on a board. Highest risk first.
       by supply voltage, which also confirms `ADC_VREF_MV` 4119 still holds
       for this part and that the FVR reference is doing its job (readings do
       not track the 5V rail).
+- [x] **Clock Enable reachable by the operator** — 1.1.0-1.1.3. Was in SETUP
+      only, two menus from Run Time. Now the first item of OPTIONS > Clock,
+      and OPTIONS always lists Clock so the control cannot hide its own
+      off-switch.
+- [x] **Variable overrun scan** — two clamp-after-narrow bugs fixed (Run Time
+      load, `init_time_editor`). Save-side casts, array indices from EEPROM
+      and string buffers all verified bounded. No dynamic allocation anywhere,
+      so memory leaks are impossible by construction.
+- [x] **Versioning scheme replaced** — `PG-Ver_B-1.0.0`. `FW_VERSION` and
+      `FW_REVISION` retired entirely; no build counter, so nothing to reset
+      before a release. `Ver_B` is the hardware GENERATION and changes only
+      if the board does - no PCB revision is named, because the 100R/220R
+      burdens existed only on three bench prototypes that will never reach a
+      customer. Issues and changes are tracked in the repo instead.
 - [x] **Bypass timer semantics** — Rev 91-92. `0` is now a DELAY of zero and
       nothing else. It used to also mean "not monitored" when the setpoint was
       0 as well, so an operator setting both timers to 0 for a faster trip got
